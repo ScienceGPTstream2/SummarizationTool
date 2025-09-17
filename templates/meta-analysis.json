@@ -1,0 +1,30 @@
+{
+  "studyType": "meta-analysis",
+  "displayName": "Meta-Analysis",
+  "entities": [
+    {
+      "name": "Authors",
+      "prompt": "Extract all authors and their affiliations.\n\nFew-shot examples:\nInput: \"Meta-analysis conducted by Thompson et al. from Oxford University\"\nOutput: \"Thompson et al. (Oxford University)\"\n\nExtract the authors."
+    },
+    {
+      "name": "Sources of Funding",
+      "prompt": "Identify funding sources for the meta-analysis.\n\nFew-shot examples:\nInput: \"This work was funded by Cochrane Collaboration and AHRQ grant K08-456789\"\nOutput: \"Cochrane Collaboration, AHRQ grant K08-456789\"\n\nExtract funding sources."
+    },
+    {
+      "name": "Research Question",
+      "prompt": "Extract the main research question or hypothesis.\n\nFew-shot examples:\nInput: \"This meta-analysis aimed to determine the efficacy of statins in preventing cardiovascular events in primary prevention\"\nOutput: \"Efficacy of statins in preventing cardiovascular events in primary prevention\"\n\nInput: \"We sought to evaluate whether intensive blood pressure control reduces mortality compared to standard care\"\nOutput: \"Whether intensive blood pressure control reduces mortality compared to standard care\"\n\nExtract the research question."
+    },
+    {
+      "name": "Search Strategy",
+      "prompt": "Describe the systematic search strategy used.\n\nFew-shot examples:\nInput: \"We searched PubMed, Embase, and Cochrane Library from 1990 to 2023 using terms: 'hypertension' AND 'ACE inhibitor'\"\nOutput: \"PubMed, Embase, Cochrane Library (1990-2023); Search terms: 'hypertension' AND 'ACE inhibitor'\"\n\nExtract the search strategy."
+    },
+    {
+      "name": "Included Studies",
+      "prompt": "Extract information about included studies.\n\nFew-shot examples:\nInput: \"After screening, 47 randomized controlled trials (total n=125,890) met inclusion criteria\"\nOutput: \"47 randomized controlled trials (total n=125,890)\"\n\nExtract information about included studies."
+    },
+    {
+      "name": "Statistical Methods",
+      "prompt": "Identify the statistical methods used for meta-analysis.\n\nFew-shot examples:\nInput: \"Random-effects meta-analysis was performed using DerSimonian and Laird method with I² statistics for heterogeneity\"\nOutput: \"Random-effects meta-analysis (DerSimonian and Laird method), I² statistics for heterogeneity\"\n\nExtract the statistical methods."
+    }
+  ]
+}

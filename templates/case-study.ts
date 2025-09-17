@@ -1,0 +1,30 @@
+export const caseStudyTemplate = {
+  "studyType": "case-study",
+  "displayName": "Case Study",
+  "entities": [
+    {
+      "name": "Authors",
+      "prompt": "Extract authors and affiliations.\n\nFew-shot examples:\nInput: \"Case report by Dr. Patricia Martinez, Department of Cardiology, Mayo Clinic\"\nOutput: \"Patricia Martinez (Department of Cardiology, Mayo Clinic)\"\n\nExtract the authors."
+    },
+    {
+      "name": "Patient Demographics",
+      "prompt": "Extract patient demographics and medical history.\n\nFew-shot examples:\nInput: \"A 54-year-old male with history of hypertension and diabetes presented...\"\nOutput: \"54-year-old male with history of hypertension and diabetes\"\n\nInput: \"Case involves a 67-year-old African American female with past medical history significant for COPD and atrial fibrillation\"\nOutput: \"67-year-old African American female with COPD and atrial fibrillation\"\n\nExtract patient demographics."
+    },
+    {
+      "name": "Clinical Presentation",
+      "prompt": "Describe the presenting symptoms and findings.\n\nFew-shot examples:\nInput: \"Patient presented with acute chest pain, dyspnea, and elevated troponins (12.5 ng/mL)\"\nOutput: \"Acute chest pain, dyspnea, elevated troponins (12.5 ng/mL)\"\n\nInput: \"Chief complaint was sudden onset severe headache with associated nausea, vomiting, and photophobia\"\nOutput: \"Sudden onset severe headache with nausea, vomiting, and photophobia\"\n\nExtract the clinical presentation."
+    },
+    {
+      "name": "Diagnosis",
+      "prompt": "Extract the final diagnosis and diagnostic workup.\n\nFew-shot examples:\nInput: \"Final diagnosis was ST-elevation myocardial infarction confirmed by ECG and cardiac catheterization\"\nOutput: \"ST-elevation myocardial infarction (confirmed by ECG and cardiac catheterization)\"\n\nInput: \"CT angiography revealed subarachnoid hemorrhage with aneurysm of the anterior communicating artery\"\nOutput: \"Subarachnoid hemorrhage with anterior communicating artery aneurysm (CT angiography)\"\n\nExtract the diagnosis and diagnostic methods."
+    },
+    {
+      "name": "Treatment",
+      "prompt": "Describe the treatment approach and interventions.\n\nFew-shot examples:\nInput: \"Patient was treated with percutaneous coronary intervention and dual antiplatelet therapy\"\nOutput: \"Percutaneous coronary intervention, dual antiplatelet therapy\"\n\nInput: \"Management included surgical clipping of aneurysm followed by nimodipine and close neurological monitoring\"\nOutput: \"Surgical clipping of aneurysm, nimodipine, neurological monitoring\"\n\nExtract the treatment approach."
+    },
+    {
+      "name": "Outcome",
+      "prompt": "Summarize the patient outcome and follow-up.\n\nFew-shot examples:\nInput: \"Patient recovered well with no complications and was discharged home on post-operative day 3\"\nOutput: \"Good recovery, no complications, discharged post-op day 3\"\n\nInput: \"At 6-month follow-up, patient had returned to baseline functional status with no neurological deficits\"\nOutput: \"6-month follow-up: baseline functional status, no neurological deficits\"\n\nExtract the outcome and follow-up information."
+    }
+  ]
+};
