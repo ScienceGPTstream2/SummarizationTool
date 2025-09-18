@@ -110,5 +110,3 @@ Special thanks to:
 
 - Health Canada Solutions Fund 💖
 - Shared Services Canada Science Cloud ☁️
-
-Thank you for using the AI Document Summarization Tool! 🎊
