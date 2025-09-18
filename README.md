@@ -100,4 +100,3 @@ Special thanks to:
 - Health Canada Solutions Fund 💖  
 - Shared Services Canada Science Cloud ☁️  
 
-Thank you for choosing the AI Document Summarization Tool! 🎉
