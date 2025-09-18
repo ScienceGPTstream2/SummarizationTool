@@ -12,6 +12,7 @@ import { DocumentData } from '../App';
 import { generateWordDocument, generateMarkdownDocument, downloadFile } from './ExportUtils';
 import { loadStudyTypeTemplate, getAvailableStudyTypes } from './TemplateLoader';
 import { settingsManager } from './SettingsManager';
+import type { ModelConfig } from './SettingsManager';
 
 interface Entity {
   name: string;
@@ -86,8 +87,30 @@ export function EntityExtractionPage({ onBack, documentData, setDocumentData }: 
   // Get available study types from templates
   const studyTypes = getAvailableStudyTypes();
   
-  // Get available models from settings manager
-  const availableModels = settingsManager.getAvailableModels();
+  
+// Get available models (merge non-Azure from settings and Azure from server)
+const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
+useEffect(() => {
+  const loadModels = async () => {
+    // Non-Azure models from client settings
+    const nonAzureModels = settingsManager.getAvailableModels().filter(m => !m.provider.toLowerCase().includes('azure'));
+    let azureModels: ModelConfig[] = [];
+    try {
+      const token = localStorage.getItem('token');
+      const resp = await fetch('/api/models', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        azureModels = data;
+      }
+    } catch (error) {
+      console.error('Failed to fetch server models', error);
+    }
+    setAvailableModels([...nonAzureModels, ...azureModels]);
+  };
+  loadModels();
+}, []);
 
   useEffect(() => {
     if (selectedStudyType && !documentData.entities.length) {

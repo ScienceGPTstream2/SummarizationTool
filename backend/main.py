@@ -485,7 +485,30 @@ async def get_server_config():
         os.getenv("AZURE_OPENAI_KEY"),
         os.getenv("AZURE_OPENAI_DEPLOYMENT")
     ])
+
     return ServerConfig(is_azure_openai_configured=is_configured)
+
+
+
+@app.get("/api/models", dependencies=[Depends(get_current_user)])
+async def get_available_models():
+    """
+    Return list of Azure models configured via environment (secrets.toml)
+    """
+    models = []
+    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+    if deployment and model_name:
+        models.append({
+            "id": f"azure-{deployment}",
+            "name": model_name,
+            "provider": "Azure",
+            "description": f"Azure deployment of {model_name}",
+            "deployment": deployment,
+            "api_version": api_version
+        })
+    return JSONResponse(status_code=200, content=models)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

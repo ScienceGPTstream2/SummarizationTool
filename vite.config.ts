@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
+    allowedHosts: ['summarize.sciencegpt.ca'],
     port: 3000,
     open: true,
     proxy: {

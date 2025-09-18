@@ -34,6 +34,26 @@ export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingP
   const [markdownPath, setMarkdownPath] = useState<string | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
   const [extractedTextLocal, setExtractedTextLocal] = useState<string>(documentData.extractedText || '');
+const [elapsedTime, setElapsedTime] = useState<number>(0);
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const secs = (seconds % 60).toString().padStart(2, '0');
+  return `${mins}:${secs}`;
+}
+
+useEffect(() => {
+  let timer: NodeJS.Timeout;
+  if (isProcessing) {
+    setElapsedTime(0);
+    timer = setInterval(() => {
+      setElapsedTime((prev) => prev + 1);
+    }, 1000);
+  }
+  return () => {
+    if (timer) clearInterval(timer);
+  };
+}, [isProcessing]);
 
   // Filter parsers based on API key availability
   const getAvailableParsers = () => {
@@ -61,7 +81,7 @@ export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingP
 
         // Trigger backend conversion for an uploaded file
         const token = localStorage.getItem('token');
-        const resp = await fetch(`http://localhost:8000/api/convert/file/${documentData.fileId}`, {
+        const resp = await fetch(`/api/convert/file/${documentData.fileId}`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
         });
@@ -203,12 +223,15 @@ export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingP
                   {/* Loading indicator (visible while processing). Click to toggle logs popout */}
                   <div>
                     {isProcessing && (
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center bg-muted"
-                        title="Processing"
-                        aria-hidden="true"
-                      >
-                        <span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                      <div className="flex items-center space-x-2">
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center bg-muted"
+                          title="Processing"
+                          aria-hidden="true"
+                        >
+                          <span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                        <span className="text-sm font-mono">{formatTime(elapsedTime)}</span>
                       </div>
                     )}
                   </div>

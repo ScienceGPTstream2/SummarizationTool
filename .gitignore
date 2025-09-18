@@ -34,3 +34,10 @@ dist-ssr
 secrets.toml
 secrets_toml.tsx
 users.toml
+# Virtual environment
+venv/
+backend/venv/
+backend/services/__pycache__/
+backend/__pycache__/
+backend/markdown_output/
+backend/uploads/
