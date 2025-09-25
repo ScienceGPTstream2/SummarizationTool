@@ -107,7 +107,16 @@ useEffect(() => {
     } catch (error) {
       console.error('Failed to fetch server models', error);
     }
-    setAvailableModels([...nonAzureModels, ...azureModels]);
+    
+    const geminiModels: ModelConfig[] = [
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Gemini', description: 'Most capable model', deployment: 'gemini-2.5-pro', requiredApiKey: 'GEMINI_API_KEY', category: 'google' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Gemini', description: 'Fast and efficient', deployment: 'gemini-2.5-flash', requiredApiKey: 'GEMINI_API_KEY', category: 'google' },
+      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', provider: 'Gemini', description: 'Lightweight and fast', deployment: 'gemini-2.5-flash-lite', requiredApiKey: 'GEMINI_API_KEY', category: 'google' },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'Gemini', description: 'Fast and efficient', deployment: 'gemini-2.0-flash', requiredApiKey: 'GEMINI_API_KEY', category: 'google' },
+      { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'Gemini', description: 'Lightweight and fast', deployment: 'gemini-2.0-flash-lite', requiredApiKey: 'GEMINI_API_KEY', category: 'google' },
+    ];
+
+    setAvailableModels([...nonAzureModels, ...azureModels, ...geminiModels]);
   };
   loadModels();
 }, []);
@@ -159,6 +168,7 @@ useEffect(() => {
       const modelObj = availableModels.find(m => m.id === selectedModel);
       const deploymentToUse = modelObj?.deployment || selectedModel;
       const apiVersionToUse = modelObj?.api_version || undefined;
+      const providerToUse = modelObj?.provider.toLowerCase();
 
       const token = localStorage.getItem('token');
       const resp = await fetch('/api/extract', {
@@ -173,7 +183,9 @@ useEffect(() => {
           api_version: apiVersionToUse,
           entities: updatedEntities,
           max_tokens: 1024,
-          temperature: 0.0
+          temperature: 0.0,
+          provider: providerToUse,
+          gemini_model: providerToUse === 'gemini' ? deploymentToUse : undefined
         })
       });
 
