@@ -58,6 +58,14 @@ if toml:
                 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT", deployment)
             if model_name:
                 os.environ.setdefault("AZURE_OPENAI_MODEL_NAME", model_name)
+            
+            vertex_cfg = cfg.get("vertex_ai", {}) or {}
+            project = vertex_cfg.get("project")
+            location = vertex_cfg.get("location")
+            if project:
+                os.environ.setdefault("GEMINI_PROJECT", project)
+            if location:
+                os.environ.setdefault("GEMINI_LOCATION", location)
     except Exception:
         # Fail silently — service will produce helpful errors if not configured
         pass
@@ -390,6 +398,8 @@ class ExtractRequest(BaseModel):
     azure_api_key: Optional[str] = None
     max_tokens: int = 1024
     temperature: float = 0.0
+    provider: Optional[str] = None
+    gemini_model: Optional[str] = None
 
 @app.post("/api/extract", dependencies=[Depends(get_current_user)])
 async def extract_entities(request: ExtractRequest):
@@ -410,7 +420,9 @@ async def extract_entities(request: ExtractRequest):
                 endpoint_override=request.azure_endpoint,
                 api_key_override=request.azure_api_key,
                 max_tokens=request.max_tokens,
-                temperature=request.temperature
+                temperature=request.temperature,
+                provider=request.provider,
+                gemini_model=request.gemini_model
             )
             if result.get("success"):
                 return {"name": entity.name, "extracted": result.get("content"), "meta": result.get("meta")}
