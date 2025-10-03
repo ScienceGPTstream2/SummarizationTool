@@ -21,7 +21,6 @@ class FileService:
         self.upload_dir = Path(upload_dir)
         self.metadata_dir = self.upload_dir / "metadata"
         
-        # Create directories if they don't exist
         self.upload_dir.mkdir(exist_ok=True)
         self.metadata_dir.mkdir(exist_ok=True)
     
@@ -36,18 +35,14 @@ class FileService:
         Returns:
             str: Path to the saved file
         """
-        # Generate unique file ID
         file_id = str(uuid.uuid4())
         
-        # Create safe filename
         safe_filename = self._create_safe_filename(filename)
         file_path = self.upload_dir / f"{file_id}_{safe_filename}"
         
-        # Save file content
         async with aiofiles.open(file_path, 'wb') as f:
             await f.write(content)
         
-        # Save metadata
         metadata = {
             "file_id": file_id,
             "original_filename": filename,
@@ -72,7 +67,6 @@ class FileService:
         Returns:
             Dict containing file information
         """
-        # Extract file_id from filename
         filename = Path(file_path).name
         file_id = filename.split('_')[0]
         
@@ -105,12 +99,10 @@ class FileService:
         if not metadata:
             return False
         
-        # Delete the actual file
         file_path = Path(metadata["file_path"])
         if file_path.exists():
             file_path.unlink()
         
-        # Delete metadata
         metadata_path = self.metadata_dir / f"{file_id}.json"
         if metadata_path.exists():
             metadata_path.unlink()
@@ -164,11 +156,9 @@ class FileService:
         Returns:
             Safe filename
         """
-        # Remove directory separators and other unsafe characters
         safe_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"
         safe_filename = "".join(c if c in safe_chars else "_" for c in filename)
         
-        # Ensure it's not too long
         if len(safe_filename) > 100:
             name, ext = os.path.splitext(safe_filename)
             safe_filename = name[:90] + ext

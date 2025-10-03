@@ -7,6 +7,7 @@ import { SettingsPage } from './components/SettingsPage';
 import { Button } from './components/ui/button';
 import { Settings, ArrowLeft } from 'lucide-react';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { settingsManager } from './components/SettingsManager';
 
 export type Step = 'login' | 'upload' | 'processing' | 'extraction' | 'settings';
 
@@ -30,6 +31,7 @@ export interface DocumentData {
   finalSummary: string;
   conversionId?: string;
   markdownPath?: string;
+  processorUsed?: string;
 }
 
 export default function App() {
@@ -47,9 +49,11 @@ export default function App() {
     finalSummary: ''
   });
 
-  const handleLogin = (jwt: string) => {
+  const handleLogin = async (jwt: string) => {
     setToken(jwt);
     localStorage.setItem('token', jwt);
+    // Refresh server config after successful login
+    await settingsManager.refreshServerConfig();
   };
 
   const handleStepComplete = (step: Step, data: Partial<DocumentData>) => {

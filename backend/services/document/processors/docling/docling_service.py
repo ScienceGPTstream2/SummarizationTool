@@ -89,10 +89,10 @@ class DoclingService:
                 except Exception:
                     pass
 
-            # Extract markdown content
+            # Extract Markdown content
             markdown_content = result.document.export_to_markdown()
             
-            # Create safe filename for markdown
+            # Create safe filename for Markdown
             if source_type == "url":
                 base_filename = f"url_document_{conversion_id}"
             else:
@@ -189,7 +189,7 @@ class DoclingService:
                 # Run the actual conversion synchronously (in executor)
                 result = self._convert_document_sync(src)
 
-                # Extract markdown and save
+                # Extract Markdown and save
                 markdown_content = result.document.export_to_markdown()
 
                 # Determine filenames

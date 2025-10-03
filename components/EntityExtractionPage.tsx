@@ -170,6 +170,10 @@ useEffect(() => {
       const apiVersionToUse = modelObj?.api_version || undefined;
       const providerToUse = modelObj?.provider.toLowerCase();
 
+      // Get user-provided API keys from settings if available
+      const azureApiKey = settingsManager.getApiKey('azure_openai_api_key');
+      const azureEndpoint = settingsManager.getApiKey('azure_openai_endpoint');
+
       const token = localStorage.getItem('token');
       const resp = await fetch('/api/extract', {
         method: 'POST',
@@ -185,7 +189,10 @@ useEffect(() => {
           max_tokens: 1024,
           temperature: 0.0,
           provider: providerToUse,
-          gemini_model: providerToUse === 'gemini' ? deploymentToUse : undefined
+          gemini_model: providerToUse === 'gemini' ? deploymentToUse : undefined,
+          // Include user-provided API keys if available
+          ...(azureApiKey && azureApiKey !== 'YOUR_AZURE_OPENAI_API_KEY_HERE' ? { azure_api_key: azureApiKey } : {}),
+          ...(azureEndpoint && azureEndpoint !== 'YOUR_AZURE_OPENAI_ENDPOINT_HERE' ? { azure_endpoint: azureEndpoint } : {})
         })
       });
 

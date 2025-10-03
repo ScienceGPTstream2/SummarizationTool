@@ -255,13 +255,24 @@ export class SettingsManager {
 
   constructor() {
     this.loadSettings();
-    this.loadServerConfig();
+    // Don't load server config in constructor - will be called after login
+  }
+
+  // Public method to load server config after login
+  async refreshServerConfig() {
+    await this.loadServerConfig();
   }
 
   private async loadServerConfig() {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        // No token available, skip loading server config
+        return;
+      }
+      
       const response = await fetch('/api/server-config', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
         this.serverConfig = await response.json();

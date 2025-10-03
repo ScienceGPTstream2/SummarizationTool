@@ -17,13 +17,9 @@ interface ProcessingPageProps {
 }
 
 const allParsers = [
+  { id: 'auto', name: 'Auto-Select', description: 'Automatically choose the best processor for your document', requiresApiKey: false },
   { id: 'docling', name: 'Docling', description: 'AI-powered document parsing with advanced layout understanding', requiresApiKey: false },
-  { id: 'azure-document-intelligence', name: 'Azure Document Intelligence', description: 'Microsoft Azure cognitive service for form and document analysis', requiresApiKey: true },
-  { id: 'mineru', name: 'MinerU', description: 'High-quality PDF extraction optimized for academic papers', requiresApiKey: false },
-  { id: 'marker', name: 'Marker', description: 'Fast and accurate PDF to markdown conversion', requiresApiKey: false },
-  { id: 'pymupdf4llm', name: 'PyMuPDF4LLM', description: 'PyMuPDF-based extraction optimized for LLM processing', requiresApiKey: false },
-  { id: 'gpt4-vision', name: 'GPT 4.1 Vision Model', description: 'OpenAI GPT-4 with vision capabilities for document understanding', requiresApiKey: false },
-  { id: 'gemini-vision', name: 'Gemini Vision Model', description: 'Google Gemini multimodal AI for visual document analysis', requiresApiKey: false },
+  { id: 'azure_doc_intelligence', name: 'Azure Document Intelligence', description: 'Microsoft Azure cognitive service for form and document analysis', requiresApiKey: true },
 ];
 
 export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingPageProps) {
@@ -32,6 +28,7 @@ export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingP
   const [showResults, setShowResults] = useState(!!documentData.extractedText);
   const [conversionId, setConversionId] = useState<string | null>(null);
   const [markdownPath, setMarkdownPath] = useState<string | null>(null);
+  const [processorUsed, setProcessorUsed] = useState<string | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
   const [extractedTextLocal, setExtractedTextLocal] = useState<string>(documentData.extractedText || '');
 const [elapsedTime, setElapsedTime] = useState<number>(0);
@@ -58,7 +55,7 @@ useEffect(() => {
   // Filter parsers based on API key availability
   const getAvailableParsers = () => {
     return allParsers.filter(parser => {
-      if (parser.id === 'azure-document-intelligence') {
+      if (parser.id === 'azure_doc_intelligence') {
         return settingsManager.isAzureDocumentIntelligenceAvailable();
       }
       return true; // All other parsers are always available
@@ -73,51 +70,55 @@ useEffect(() => {
     setProcessError(null);
 
     try {
-      if (selectedParser === 'docling') {
-        // Ensure we have an uploaded file id
-        if (!documentData.fileId) {
-          throw new Error('No uploaded file ID found. Please upload a PDF first.');
-        }
+      // Ensure we have an uploaded file id
+      if (!documentData.fileId) {
+        throw new Error('No uploaded file ID found. Please upload a PDF first.');
+      }
 
-        // Trigger backend conversion for an uploaded file
-        const token = localStorage.getItem('token');
-        const resp = await fetch(`/api/convert/file/${documentData.fileId}`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+      // Ensure a processor is selected
+      if (!selectedParser) {
+        throw new Error('Please select a document processor.');
+      }
 
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error(err.detail || 'Conversion request failed');
-        }
+      // Trigger backend conversion for an uploaded file
+      const token = localStorage.getItem('token');
+      const resp = await fetch(`/api/documents/process/file/${documentData.fileId}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ processor: selectedParser })
+      });
 
-        const data = await resp.json();
-        setConversionId(data.conversion_id || null);
-        setMarkdownPath(data.markdown_path || null);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Conversion request failed');
+      }
 
-        // Fetch the markdown content
-        const mdResp = await fetch(`/api/conversions/${data.conversion_id}/markdown`, {
-  headers: { 'Authorization': `Bearer ${token}` },
-});
+      const data = await resp.json();
+      setConversionId(data.conversion_id || null);
+      setMarkdownPath(data.markdown_path || null);
+      setProcessorUsed(data.processor_used || null);
+
+      // Fetch the markdown content with processor info for efficiency
+      const processorParam = data.processor_used ? `?processor_used=${encodeURIComponent(data.processor_used)}` : '';
+      const mdResp = await fetch(`/api/documents/${data.conversion_id}/content${processorParam}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
         if (!mdResp.ok) {
           const err = await mdResp.json().catch(() => ({}));
           throw new Error(err.detail || 'Failed to fetch markdown content');
         }
 
-        const mdData = await mdResp.json();
-        const content = mdData.markdown_content || '';
-        setExtractedTextLocal(content);
+      const markdownData = await mdResp.json();
+      const markdownContent = markdownData.markdown_content || '';
+      setExtractedTextLocal(markdownContent);
 
-        // Persist extracted text in parent state (do not proceed to next step automatically)
-        // Parent will be updated when the user clicks "Proceed to Entity Extraction"
-        
-        setShowResults(true);
-      } else {
-        // Fallback behaviour for other parsers (retain existing mock)
-        // Simulate processing delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        setShowResults(true);
-      }
+      // Persist extracted text in parent state (do not proceed to next step automatically)
+      // Parent will be updated when the user clicks "Proceed to Entity Extraction"
+      
+      setShowResults(true);
     } catch (err: any) {
       setProcessError(err?.message || String(err));
     } finally {
@@ -131,7 +132,8 @@ useEffect(() => {
       extractedText: extractedTextLocal,
       annotatedOutput: '', // annotatedOutput can be populated by future parser logic
       conversionId: conversionId ?? undefined,
-      markdownPath: markdownPath ?? undefined
+      markdownPath: markdownPath ?? undefined,
+      processorUsed: processorUsed ?? undefined
     });
   };
 
@@ -143,7 +145,7 @@ useEffect(() => {
   const handleDownloadMarkdown = async () => {
     if (!conversionId) return;
     try {
-      const resp = await fetch(`/api/conversions/${conversionId}/markdown`, {
+      const resp = await fetch(`/api/documents/${conversionId}/content`, {
   headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
 });
       if (!resp.ok) {
