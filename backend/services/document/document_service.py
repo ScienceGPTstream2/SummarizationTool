@@ -54,16 +54,18 @@ class DocumentService:
         if processor == ProcessorType.AZURE_DOC_INTELLIGENCE:
             if not self.available_processors[ProcessorType.AZURE_DOC_INTELLIGENCE.value]:
                 processor = ProcessorType.DOCLING
-                result = await self.docling_service.convert_document_to_markdown(source, source_type)
+                result = await self.docling_service.convert_document_to_markdown(source, source_type, **kwargs)
                 result["processor_used"] = ProcessorType.DOCLING.value
                 result["processor_fallback"] = True
                 result["fallback_reason"] = "Azure Document Intelligence not available"
             else:
-                result = await self.azure_doc_intelligence_service.convert_document_to_markdown(source, source_type)
+                result = await self.azure_doc_intelligence_service.convert_document_to_markdown(
+                    source, source_type, **kwargs
+                )
                 result["processor_used"] = ProcessorType.AZURE_DOC_INTELLIGENCE.value
         
         else:  
-            result = await self.docling_service.convert_document_to_markdown(source, source_type)
+            result = await self.docling_service.convert_document_to_markdown(source, source_type, **kwargs)
             result["processor_used"] = ProcessorType.DOCLING.value
         
         return result
@@ -94,7 +96,8 @@ class DocumentService:
                 ProcessorType.AZURE_DOC_INTELLIGENCE.value: {
                     "name": "Azure Document Intelligence", 
                     "description": "Primary processor with superior accuracy for all document types, especially forms, tables, and structured documents",
-                    "strengths": ["Table extraction", "Form fields", "Key-value pairs", "Handwriting", "General documents", "Complex layouts"],
+                    "strengths": ["Table extraction", "Form fields", "Key-value pairs", "Handwriting", "Figure/chart detection", "General documents", "Complex layouts"],
+                    "features": ["Markdown output", "Table extraction", "Figure extraction with captions", "Downloadable figure images", "Bounding regions", "Key-value pairs"],
                     "available": self.available_processors[ProcessorType.AZURE_DOC_INTELLIGENCE.value]
                 },
                 ProcessorType.DOCLING.value: {
@@ -154,4 +157,28 @@ class DocumentService:
         if content:
             return content
             
+        return None
+    
+    async def get_figures_for_conversion(self, conversion_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get all figures metadata for a specific conversion
+        
+        This method works for conversions processed with either Docling or Azure Document Intelligence
+        
+        Args:
+            conversion_id: The conversion ID
+            
+        Returns:
+            List of figure metadata dictionaries or None if not found
+        """
+        # Try Docling first
+        figures = await self.docling_service.get_figures_for_conversion(conversion_id)
+        if figures is not None:
+            return figures
+        
+        # Try Azure Document Intelligence
+        figures = await self.azure_doc_intelligence_service.get_figures_for_conversion(conversion_id)
+        if figures is not None:
+            return figures
+        
         return None
