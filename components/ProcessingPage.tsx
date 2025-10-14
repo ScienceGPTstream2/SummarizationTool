@@ -9,6 +9,7 @@ import { ArrowLeft, FileText, Code, AlertTriangle } from 'lucide-react';
 import { DocumentData } from '../App';
 import { MarkdownViewer } from './MarkdownViewer';
 import { settingsManager } from './SettingsManager';
+import { FigureGallery } from './FigureGallery';
 
 interface ProcessingPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
@@ -22,6 +23,17 @@ const allParsers = [
   { id: 'azure_doc_intelligence', name: 'Azure Document Intelligence', description: 'Microsoft Azure cognitive service for form and document analysis', requiresApiKey: true },
 ];
 
+interface FigureMetadata {
+  id: string;
+  page: number | null;
+  caption: string | null;
+  image_path?: string;
+  bounding_regions?: Array<{
+    page_number: number;
+    polygon: number[];
+  }>;
+}
+
 export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingPageProps) {
   const [selectedParser, setSelectedParser] = useState(documentData.parser || '');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -31,6 +43,8 @@ export function ProcessingPage({ onComplete, onBack, documentData }: ProcessingP
   const [processorUsed, setProcessorUsed] = useState<string | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
   const [extractedTextLocal, setExtractedTextLocal] = useState<string>(documentData.extractedText || '');
+  const [figures, setFigures] = useState<FigureMetadata[]>([]);
+  const [figuresCount, setFiguresCount] = useState<number>(0);
 const [elapsedTime, setElapsedTime] = useState<number>(0);
 
 function formatTime(seconds: number): string {
@@ -101,6 +115,12 @@ useEffect(() => {
       setMarkdownPath(data.markdown_path || null);
       setProcessorUsed(data.processor_used || null);
 
+      // Check if figures were extracted
+      if (data.figures_found !== undefined) {
+        setFiguresCount(data.figures_found);
+        setFigures(data.figures || []);
+      }
+
       // Fetch the markdown content with processor info for efficiency
       const processorParam = data.processor_used ? `?processor_used=${encodeURIComponent(data.processor_used)}` : '';
       const mdResp = await fetch(`/api/documents/${data.conversion_id}/content${processorParam}`, {
@@ -114,6 +134,22 @@ useEffect(() => {
       const markdownData = await mdResp.json();
       const markdownContent = markdownData.markdown_content || '';
       setExtractedTextLocal(markdownContent);
+
+      // If figures weren't in the initial response, try fetching them separately
+      if (data.figures_found === undefined && data.processor_used === 'azure_doc_intelligence') {
+        try {
+          const figuresResp = await fetch(`/api/documents/${data.conversion_id}/figures`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (figuresResp.ok) {
+            const figuresData = await figuresResp.json();
+            setFiguresCount(figuresData.figures_count || 0);
+            setFigures(figuresData.figures || []);
+          }
+        } catch (err) {
+          console.warn('Could not fetch figures:', err);
+        }
+      }
 
       // Persist extracted text in parent state (do not proceed to next step automatically)
       // Parent will be updated when the user clicks "Proceed to Entity Extraction"
@@ -264,6 +300,11 @@ useEffect(() => {
 
         {showResults && (
           <>
+            {/* Display Figures if available */}
+            {figures.length > 0 && conversionId && (
+              <FigureGallery conversionId={conversionId} figures={figures} />
+            )}
+
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="border-gray-200">
                 <CardHeader>
@@ -300,13 +341,21 @@ useEffect(() => {
               {conversionId && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1">
                       <div className="text-sm text-muted-foreground">Conversion ID</div>
                       <div className="font-mono text-sm break-all">{conversionId}</div>
                       {markdownPath && (
                         <>
                           <div className="text-sm text-muted-foreground mt-2">Saved Markdown Path</div>
                           <div className="font-mono text-sm break-all">{markdownPath}</div>
+                        </>
+                      )}
+                      {figuresCount > 0 && (
+                        <>
+                          <div className="text-sm text-muted-foreground mt-2">Figures Extracted</div>
+                          <div className="text-sm">
+                            <span className="font-medium text-green-600">{figuresCount}</span> figure{figuresCount !== 1 ? 's' : ''} detected and extracted
+                          </div>
                         </>
                       )}
                     </div>
