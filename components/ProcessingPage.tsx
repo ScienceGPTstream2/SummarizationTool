@@ -20,6 +20,7 @@ import { DocumentData } from "../App";
 import { settingsManager } from "./SettingsManager";
 import { FigureGallery } from "./FigureGallery";
 import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
+import { RawOutputViewer } from "./RawOutputViewer";
 
 interface ProcessingPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
@@ -367,9 +368,10 @@ export function ProcessingPage({
               <FigureGallery conversionId={conversionId} figures={figures} />
             )}
 
-            {/* PDF Viewer with Bounding Boxes - Centered */}
-            <div className="flex justify-center">
-              <div className="w-full max-w-6xl">
+            {/* Two Column Layout: PDF Viewer and Raw Output */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* Left Column: PDF Viewer with Bounding Boxes */}
+              <div>
                 {documentData.fileId && (
                   <PDFBoundingBoxViewer
                     fileId={documentData.fileId}
@@ -377,6 +379,14 @@ export function ProcessingPage({
                     fileName={documentData.file?.name}
                   />
                 )}
+              </div>
+
+              {/* Right Column: Raw Output */}
+              <div>
+                <RawOutputViewer
+                  conversionId={conversionId}
+                  processorUsed={processorUsed}
+                />
               </div>
             </div>
 
