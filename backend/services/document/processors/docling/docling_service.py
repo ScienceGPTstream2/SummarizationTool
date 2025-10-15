@@ -13,37 +13,36 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
+
 class DoclingService:
     """
     Service for handling document ingestion and conversion using Docling
     """
-    
-    def __init__(self, markdown_dir: Optional[Union[str, Path]] = None, image_resolution_scale: float = 2.0):
+
+    def __init__(
+        self,
+        markdown_dir: Optional[Union[str, Path]] = None,
+        image_resolution_scale: float = 2.0,
+    ):
         """
         Initialize the docling service
 
         Args:
             markdown_dir: Directory where converted markdown files will be stored.
-                          If None, defaults to backend/markdown_output relative to this file.
+                          If None, defaults to output/docling relative to this file.
             image_resolution_scale: Resolution scale for image extraction (1.0 = 72 DPI, 2.0 = 144 DPI)
         """
         # Base path is 4 levels up from this file (backend/)
         self.base_path = Path(__file__).resolve().parents[4]
-        
-        # Unified directory structure: markdown_output/docling/{conversion_id}/
-        if markdown_dir is None:
-            self.markdown_output_dir = self.base_path / "markdown_output" / "docling"
-        else:
-            self.markdown_output_dir = Path(markdown_dir)
-        
-        # Processor-specific metadata and logs directories
-        self.metadata_dir = self.base_path / "metadata" / "docling"
-        self.logs_dir = self.base_path / "logs" / "docling"
 
-        # Create base directories if they don't exist
-        self.markdown_output_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        # Unified directory structure: output/docling/{conversion_id}/
+        if markdown_dir is None:
+            self.output_base_dir = self.base_path / "output" / "docling"
+        else:
+            self.output_base_dir = Path(markdown_dir)
+
+        # Create base directory if it doesn't exist
+        self.output_base_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure PDF pipeline options for image extraction
         pipeline_options = PdfPipelineOptions()
@@ -60,16 +59,18 @@ class DoclingService:
 
         # Thread pool for CPU-intensive tasks
         self.executor = ThreadPoolExecutor(max_workers=2)
-    
-    async def convert_document_to_markdown(self, source: Union[str, Path], source_type: str = "file", **kwargs) -> Dict[str, Any]:
+
+    async def convert_document_to_markdown(
+        self, source: Union[str, Path], source_type: str = "file", **kwargs
+    ) -> Dict[str, Any]:
         """
         Convert a document to markdown using Docling
-        
+
         Args:
             source: File path or URL to the document
             source_type: Type of source ("file", "url")
             **kwargs: Additional arguments (e.g., extract_figures) - accepted for API compatibility
-            
+
         Returns:
             Dict containing conversion results and metadata
         """
@@ -77,16 +78,18 @@ class DoclingService:
             # Generate unique conversion ID
             conversion_id = str(uuid.uuid4())
 
-            # Create conversion-specific directory structure
-            conversion_dir = self.markdown_output_dir / conversion_id
+            # Create conversion-specific directory: output/docling/{conversion_id}/
+            conversion_dir = self.output_base_dir / conversion_id
             conversion_dir.mkdir(parents=True, exist_ok=True)
-            
+
+            # Define all file paths within the conversion directory
+            log_path = conversion_dir / "conversion.log"
+            metadata_path = conversion_dir / "metadata.json"
+
             # Prepare log file for this conversion
             import logging as _logging
-            log_path = self.logs_dir / f"{conversion_id}.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
 
-            handler = _logging.FileHandler(str(log_path), mode='w', encoding='utf-8')
+            handler = _logging.FileHandler(str(log_path), mode="w", encoding="utf-8")
             handler.setLevel(_logging.INFO)
             formatter = _logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
             handler.setFormatter(formatter)
@@ -99,9 +102,7 @@ class DoclingService:
             loop = asyncio.get_event_loop()
             try:
                 result = await loop.run_in_executor(
-                    self.executor,
-                    self._convert_document_sync,
-                    source
+                    self.executor, self._convert_document_sync, source
                 )
             finally:
                 # Remove the temporary handler so subsequent conversions won't write to this file
@@ -118,124 +119,151 @@ class DoclingService:
             else:
                 source_path = Path(source)
                 base_filename = source_path.stem
-            
+
             # Extract images in thread pool
             image_info = await loop.run_in_executor(
                 self.executor,
                 self._extract_images_sync,
                 result,
                 conversion_dir,
-                base_filename
+                base_filename,
             )
-            
+
             # Save markdown to conversion_dir/document.md
             markdown_filename = "document.md"
             markdown_path = conversion_dir / markdown_filename
-            
+
             # Save markdown with image references
             # Use a lambda to properly pass keyword argument
             await loop.run_in_executor(
                 self.executor,
-                lambda: result.document.save_as_markdown(str(markdown_path), image_mode=ImageRefMode.REFERENCED)
+                lambda: result.document.save_as_markdown(
+                    str(markdown_path), image_mode=ImageRefMode.REFERENCED
+                ),
             )
-            
+
             # Read the markdown content for response
-            async with aiofiles.open(markdown_path, 'r', encoding='utf-8') as f:
+            async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
                 markdown_content = await f.read()
-            
+
             # Create metadata (include path to log file and image info)
             metadata = {
                 "conversion_id": conversion_id,
                 "source": str(source),
                 "source_type": source_type,
                 "processor": "docling",
+                "conversion_dir": str(conversion_dir),
                 "markdown_filename": markdown_filename,
                 "markdown_path": str(markdown_path),
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
                 "content_length": len(markdown_content),
                 "status": "success",
-                **image_info  # Add image extraction info
+                **image_info,  # Add image extraction info
             }
-            
-            # Save metadata
-            await self._save_conversion_metadata(conversion_id, metadata)
-            
+
+            # Save metadata to conversion directory
+            async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(metadata, indent=2))
+
             return {
                 "success": True,
                 "conversion_id": conversion_id,
                 "markdown_path": str(markdown_path),
                 "markdown_content": markdown_content,
-                "metadata": metadata
+                "metadata": metadata,
             }
-            
+
         except Exception as e:
             # Create error metadata
+            conv_id = (
+                conversion_id if "conversion_id" in locals() else str(uuid.uuid4())
+            )
             error_metadata = {
-                "conversion_id": conversion_id if 'conversion_id' in locals() else str(uuid.uuid4()),
+                "conversion_id": conv_id,
                 "source": str(source),
                 "source_type": source_type,
                 "conversion_time": datetime.now().isoformat(),
                 "status": "error",
                 "error_message": str(e),
-                "log_path": str(log_path) if 'log_path' in locals() else None
+                "conversion_dir": (
+                    str(conversion_dir) if "conversion_dir" in locals() else None
+                ),
+                "log_path": str(log_path) if "log_path" in locals() else None,
             }
-            
-            await self._save_conversion_metadata(error_metadata["conversion_id"], error_metadata)
-            
+
+            # Save error metadata to conversion directory if it exists
+            try:
+                if "metadata_path" in locals():
+                    async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+                        await f.write(json.dumps(error_metadata, indent=2))
+            except:
+                pass
+
             return {
                 "success": False,
                 "error": str(e),
                 "conversion_id": error_metadata["conversion_id"],
-                "metadata": error_metadata
+                "metadata": error_metadata,
             }
-    
-    async def start_conversion(self, source: Union[str, Path], source_type: str = "file") -> Dict[str, Any]:
+
+    async def start_conversion(
+        self, source: Union[str, Path], source_type: str = "file"
+    ) -> Dict[str, Any]:
         """
         Start a conversion in the background and return immediately with a conversion_id.
         The conversion runs in the configured thread pool and writes logs and metadata
-        to the metadata directory so the frontend can stream logs.
+        to the conversion directory so the frontend can stream logs.
         """
         conversion_id = str(uuid.uuid4())
-        
-        # Create conversion-specific directory
-        conversion_dir = self.markdown_output_dir / conversion_id
+
+        # Create conversion-specific directory: output/docling/{conversion_id}/
+        conversion_dir = self.output_base_dir / conversion_id
         conversion_dir.mkdir(parents=True, exist_ok=True)
-        
-        log_path = self.logs_dir / f"{conversion_id}.log"
-        
+
+        log_path = conversion_dir / "conversion.log"
+        metadata_path = conversion_dir / "metadata.json"
+
         # initial metadata marking as running
         metadata = {
             "conversion_id": conversion_id,
             "source": str(source),
             "source_type": source_type,
             "processor": "docling",
+            "conversion_dir": str(conversion_dir),
             "markdown_filename": None,
             "markdown_path": None,
             "log_path": str(log_path),
             "conversion_time": datetime.now().isoformat(),
             "content_length": 0,
-            "status": "running"
+            "status": "running",
         }
-        # Save initial metadata (async)
-        await self._save_conversion_metadata(conversion_id, metadata)
-        
+        # Save initial metadata to conversion directory
+        async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(metadata, indent=2))
+
         # Capture self references for use in executor
-        markdown_output_dir = self.markdown_output_dir
-        metadata_dir = self.metadata_dir
+        output_base_dir = self.output_base_dir
         convert_sync = self._convert_document_sync
         extract_images_sync = self._extract_images_sync
 
         def _run_and_finalize(conv_id: str, src: Union[str, Path], s_type: str):
             import logging as _logging
+
             try:
                 # Get conversion directory
-                conv_dir = markdown_output_dir / conv_id
-                
+                conv_dir = output_base_dir / conv_id
+                log_path = conv_dir / "conversion.log"
+                metadata_path = conv_dir / "metadata.json"
+
                 # Attach file handler to capture logs for this conversion
-                handler = _logging.FileHandler(str(log_path), mode='a', encoding='utf-8')
+                handler = _logging.FileHandler(
+                    str(log_path), mode="a", encoding="utf-8"
+                )
                 handler.setLevel(_logging.INFO)
-                formatter = _logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+                formatter = _logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s"
+                )
                 handler.setFormatter(formatter)
                 root_logger = _logging.getLogger()
                 root_logger.addHandler(handler)
@@ -257,11 +285,13 @@ class DoclingService:
                 markdown_filename = "document.md"
                 markdown_path = conv_dir / markdown_filename
 
-                # Save markdown with image references  
-                result.document.save_as_markdown(str(markdown_path), image_mode=ImageRefMode.REFERENCED)
+                # Save markdown with image references
+                result.document.save_as_markdown(
+                    str(markdown_path), image_mode=ImageRefMode.REFERENCED
+                )
 
                 # Read markdown content for metadata
-                with open(markdown_path, 'r', encoding='utf-8') as mf:
+                with open(markdown_path, "r", encoding="utf-8") as mf:
                     markdown_content = mf.read()
 
                 # Build final metadata
@@ -270,22 +300,22 @@ class DoclingService:
                     "source": str(src),
                     "source_type": s_type,
                     "processor": "docling",
+                    "conversion_dir": str(conv_dir),
                     "markdown_filename": markdown_filename,
                     "markdown_path": str(markdown_path),
                     "log_path": str(log_path),
                     "conversion_time": datetime.now().isoformat(),
                     "content_length": len(markdown_content),
                     "status": "success",
-                    **image_info  # Add image extraction info
+                    **image_info,  # Add image extraction info
                 }
 
-                # Save metadata synchronously
-                metadata_path = metadata_dir / f"{conv_id}.json"
+                # Save metadata to conversion directory
                 try:
-                    with open(metadata_path, 'w', encoding='utf-8') as mf:
+                    with open(metadata_path, "w", encoding="utf-8") as mf:
                         json.dump(final_meta, mf, indent=2)
                 except Exception:
-                    # best-effort; if this fails, ignore — the async saver may not be available here
+                    # best-effort; if this fails, ignore
                     pass
 
             except Exception as e:
@@ -294,15 +324,17 @@ class DoclingService:
                     "conversion_id": conv_id,
                     "source": str(src),
                     "source_type": s_type,
+                    "conversion_dir": str(conv_dir) if "conv_dir" in locals() else None,
                     "conversion_time": datetime.now().isoformat(),
                     "status": "error",
                     "error_message": str(e),
-                    "log_path": str(log_path)
+                    "log_path": str(log_path) if "log_path" in locals() else None,
                 }
-                metadata_path = metadata_dir / f"{conv_id}.json"
+                # Save error metadata to conversion directory if available
                 try:
-                    with open(metadata_path, 'w', encoding='utf-8') as mf:
-                        json.dump(error_meta, mf, indent=2)
+                    if "metadata_path" in locals():
+                        with open(metadata_path, "w", encoding="utf-8") as mf:
+                            json.dump(error_meta, mf, indent=2)
                 except Exception:
                     pass
             finally:
@@ -316,48 +348,52 @@ class DoclingService:
 
         # Schedule the conversion to run in the executor (background)
         loop = asyncio.get_event_loop()
-        loop.run_in_executor(self.executor, _run_and_finalize, conversion_id, source, source_type)
+        loop.run_in_executor(
+            self.executor, _run_and_finalize, conversion_id, source, source_type
+        )
 
         return {
             "success": True,
             "conversion_id": conversion_id,
             "markdown_path": None,
-            "metadata": metadata
+            "metadata": metadata,
         }
 
     def _convert_document_sync(self, source: Union[str, Path]):
         """
         Synchronous document conversion (runs in thread pool)
-        
+
         Args:
             source: File path or URL to the document
-            
+
         Returns:
             Docling conversion result
         """
         return self.converter.convert(source)
-    
-    def _extract_images_sync(self, result, conversion_dir: Path, doc_filename: str) -> Dict[str, Any]:
+
+    def _extract_images_sync(
+        self, result, conversion_dir: Path, doc_filename: str
+    ) -> Dict[str, Any]:
         """
         Synchronously extract images from conversion result and generate figure metadata
-        
+
         Args:
             result: Docling conversion result
             conversion_dir: Conversion-specific directory
             doc_filename: Base filename for the document
-            
+
         Returns:
             Dict containing figure metadata in Azure DI compatible format
         """
         # Create figures directory inside conversion_dir
         figures_dir = conversion_dir / "figures"
         figures_dir.mkdir(parents=True, exist_ok=True)
-        
+
         figures_metadata = []
         page_image_count = 0
         table_image_count = 0
         picture_image_count = 0
-        
+
         try:
             # Extract page images (optional - can be disabled if too large)
             # Commenting out for now to match Azure DI behavior (which doesn't save full page images)
@@ -368,7 +404,7 @@ class DoclingService:
             #         page_image_filename = figures_dir / f"{figure_id}.png"
             #         with page_image_filename.open("wb") as fp:
             #             page.image.pil_image.save(fp, format="PNG")
-            #         
+            #
             #         figures_metadata.append({
             #             "id": figure_id,
             #             "page": page_no,
@@ -377,164 +413,165 @@ class DoclingService:
             #             "type": "page"
             #         })
             #         page_image_count += 1
-            
+
             # Extract tables and pictures with metadata
             for element, _level in result.document.iterate_items():
                 if isinstance(element, TableItem):
                     table_image_count += 1
                     figure_id = f"table-{table_image_count}"
                     element_image_filename = figures_dir / f"{figure_id}.png"
-                    
+
                     with element_image_filename.open("wb") as fp:
                         element.get_image(result.document).save(fp, "PNG")
-                    
+
                     # Extract page number if available
                     page_num = None
-                    if hasattr(element, 'prov') and element.prov:
+                    if hasattr(element, "prov") and element.prov:
                         for prov in element.prov:
-                            if hasattr(prov, 'page_no'):
+                            if hasattr(prov, "page_no"):
                                 page_num = prov.page_no
                                 break
-                    
-                    figures_metadata.append({
-                        "id": figure_id,
-                        "page": page_num,
-                        "caption": f"Table {table_image_count}",
-                        "image_path": f"figures/{figure_id}.png",
-                        "type": "table"
-                    })
-                
+
+                    figures_metadata.append(
+                        {
+                            "id": figure_id,
+                            "page": page_num,
+                            "caption": f"Table {table_image_count}",
+                            "image_path": f"figures/{figure_id}.png",
+                            "type": "table",
+                        }
+                    )
+
                 if isinstance(element, PictureItem):
                     picture_image_count += 1
                     figure_id = f"picture-{picture_image_count}"
                     element_image_filename = figures_dir / f"{figure_id}.png"
-                    
+
                     with element_image_filename.open("wb") as fp:
                         element.get_image(result.document).save(fp, "PNG")
-                    
+
                     # Extract page number and caption if available
                     page_num = None
                     caption = None
-                    
-                    if hasattr(element, 'prov') and element.prov:
+
+                    if hasattr(element, "prov") and element.prov:
                         for prov in element.prov:
-                            if hasattr(prov, 'page_no'):
+                            if hasattr(prov, "page_no"):
                                 page_num = prov.page_no
                                 break
-                    
-                    if hasattr(element, 'caption'):
+
+                    if hasattr(element, "caption"):
                         caption = str(element.caption)
-                    
-                    figures_metadata.append({
-                        "id": figure_id,
-                        "page": page_num,
-                        "caption": caption or f"Figure {picture_image_count}",
-                        "image_path": f"figures/{figure_id}.png",
-                        "type": "picture"
-                    })
-        
+
+                    figures_metadata.append(
+                        {
+                            "id": figure_id,
+                            "page": page_num,
+                            "caption": caption or f"Figure {picture_image_count}",
+                            "image_path": f"figures/{figure_id}.png",
+                            "type": "picture",
+                        }
+                    )
+
         except Exception as e:
             # Log error but don't fail conversion
             import logging
+
             logging.warning(f"Error extracting images: {str(e)}")
-        
+
         return {
             "figures_found": len(figures_metadata),
             "figures": figures_metadata,
             "tables_found": table_image_count,
-            "pictures_found": picture_image_count
+            "pictures_found": picture_image_count,
         }
-    
-    async def get_conversion_by_id(self, conversion_id: str) -> Optional[Dict[str, Any]]:
+
+    async def get_conversion_by_id(
+        self, conversion_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Get conversion information by conversion ID
-        
+
         Args:
             conversion_id: Unique conversion identifier
-            
+
         Returns:
             Dict containing conversion information or None if not found
         """
         return await self._load_conversion_metadata(conversion_id)
-    
+
     async def get_markdown_content(self, conversion_id: str) -> Optional[str]:
         """
         Get markdown content by conversion ID
-        
+
         Args:
             conversion_id: Unique conversion identifier
-            
+
         Returns:
             Markdown content as string or None if not found
         """
-        # Use new unified structure
-        markdown_path = self.markdown_output_dir / conversion_id / "document.md"
-        
+        markdown_path = self.output_base_dir / conversion_id / "document.md"
+
         if not markdown_path.exists():
             return None
-        
+
         try:
-            async with aiofiles.open(markdown_path, 'r', encoding='utf-8') as f:
+            async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
                 return await f.read()
         except (IOError, UnicodeDecodeError):
             return None
-    
+
     async def list_conversions(self) -> list[Dict[str, Any]]:
         """
         List all document conversions
-        
+
         Returns:
             List of conversion metadata dictionaries
         """
         conversions = []
-        for metadata_file in self.metadata_dir.glob("*.json"):
-            conversion_id = metadata_file.stem
-            metadata = await self._load_conversion_metadata(conversion_id)
-            if metadata:
-                conversions.append(metadata)
-        
+        # Iterate through conversion directories
+        for conv_dir in self.output_base_dir.iterdir():
+            if conv_dir.is_dir():
+                conversion_id = conv_dir.name
+                metadata = await self._load_conversion_metadata(conversion_id)
+                if metadata:
+                    conversions.append(metadata)
+
         return sorted(conversions, key=lambda x: x["conversion_time"], reverse=True)
-    
+
     async def delete_conversion(self, conversion_id: str) -> bool:
         """
         Delete a conversion and its associated files
-        
+
         Args:
             conversion_id: Unique conversion identifier
-            
+
         Returns:
             bool: True if conversion was deleted, False if not found
         """
-        metadata = await self._load_conversion_metadata(conversion_id)
-        if not metadata:
+        # Check if conversion directory exists
+        conversion_dir = self.output_base_dir / conversion_id
+        if not conversion_dir.exists():
             return False
-        
+
         import shutil
-        
-        # Delete conversion directory (contains markdown and figures)
-        conversion_dir = self.markdown_output_dir / conversion_id
-        if conversion_dir.exists():
+
+        # Delete entire conversion directory (contains markdown, figures, metadata, and logs)
+        try:
             shutil.rmtree(conversion_dir)
-        
-        # Delete log file if it exists
-        log_path = self.logs_dir / f"{conversion_id}.log"
-        if log_path.exists():
-            log_path.unlink()
-        
-        # Delete metadata
-        metadata_path = self.metadata_dir / f"{conversion_id}.json"
-        if metadata_path.exists():
-            metadata_path.unlink()
-        
-        return True
-    
-    async def get_figures_for_conversion(self, conversion_id: str) -> Optional[list[Dict[str, Any]]]:
+            return True
+        except Exception:
+            return False
+
+    async def get_figures_for_conversion(
+        self, conversion_id: str
+    ) -> Optional[list[Dict[str, Any]]]:
         """
         Get all figures metadata for a specific conversion
-        
+
         Args:
             conversion_id: The conversion ID
-            
+
         Returns:
             List of figure metadata dictionaries or None if not found
         """
@@ -542,35 +579,39 @@ class DoclingService:
         if metadata and "figures" in metadata:
             return metadata["figures"]
         return None
-    
-    async def _save_conversion_metadata(self, conversion_id: str, metadata: Dict[str, Any]):
+
+    async def _save_conversion_metadata(
+        self, conversion_id: str, metadata: Dict[str, Any]
+    ):
         """
-        Save conversion metadata to JSON file
-        
+        Save conversion metadata to JSON file in the conversion directory
+
         Args:
             conversion_id: Unique conversion identifier
             metadata: Metadata dictionary
         """
-        metadata_path = self.metadata_dir / f"{conversion_id}.json"
-        async with aiofiles.open(metadata_path, 'w', encoding='utf-8') as f:
+        metadata_path = self.output_base_dir / conversion_id / "metadata.json"
+        async with aiofiles.open(metadata_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(metadata, indent=2))
-    
-    async def _load_conversion_metadata(self, conversion_id: str) -> Optional[Dict[str, Any]]:
+
+    async def _load_conversion_metadata(
+        self, conversion_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
-        Load conversion metadata from JSON file
-        
+        Load conversion metadata from JSON file in the conversion directory
+
         Args:
             conversion_id: Unique conversion identifier
-            
+
         Returns:
             Metadata dictionary or None if not found
         """
-        metadata_path = self.metadata_dir / f"{conversion_id}.json"
+        metadata_path = self.output_base_dir / conversion_id / "metadata.json"
         if not metadata_path.exists():
             return None
-        
+
         try:
-            async with aiofiles.open(metadata_path, 'r', encoding='utf-8') as f:
+            async with aiofiles.open(metadata_path, "r", encoding="utf-8") as f:
                 content = await f.read()
                 return json.loads(content)
         except (json.JSONDecodeError, IOError):

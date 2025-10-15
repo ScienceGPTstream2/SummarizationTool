@@ -1,6 +1,8 @@
 """Application middleware configuration"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 
 def setup_cors(app: FastAPI):
     """Configure CORS middleware for the application"""
@@ -15,7 +17,9 @@ def setup_cors(app: FastAPI):
     # in production; restrict origins to a specific list there.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Dev-only: allow any origin. For production, restrict this.
+        allow_origins=[
+            "*"
+        ],  # Dev-only: allow any origin. For production, restrict this.
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

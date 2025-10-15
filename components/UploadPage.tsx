@@ -1,8 +1,14 @@
-import React, { useRef, useState } from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Upload, File, X, Loader2 } from 'lucide-react';
-import { DocumentData } from '../App';
+import React, { useRef, useState } from "react";
+import { Button } from "./ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+import { Upload, File, X, Loader2 } from "lucide-react";
+import { DocumentData } from "../App";
 
 interface UploadPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
@@ -11,18 +17,22 @@ interface UploadPageProps {
 
 export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   const [dragActive, setDragActive] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(documentData.file);
+  const [selectedFile, setSelectedFile] = useState<File | null>(
+    documentData.file
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadResult, setUploadResult] = useState<any>(documentData.uploadResult);
+  const [uploadResult, setUploadResult] = useState<any>(
+    documentData.uploadResult
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
+    if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
-    } else if (e.type === 'dragleave') {
+    } else if (e.type === "dragleave") {
       setDragActive(false);
     }
   };
@@ -34,53 +44,62 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      console.log('Dropped file:', file.name, 'type:', file.type);
-      
+      console.log("Dropped file:", file.name, "type:", file.type);
+
       // More flexible PDF detection - check file type OR file extension
-      const isPDF = file.type === 'application/pdf' || 
-                    file.name.toLowerCase().endsWith('.pdf');
-      
+      const isPDF =
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf");
+
       if (isPDF) {
-        console.log('File accepted:', file.name);
+        console.log("File accepted:", file.name);
         setSelectedFile(file);
         try {
           await handleFileUpload(file);
         } catch (error) {
-          console.error('Upload failed for dropped file:', error);
+          console.error("Upload failed for dropped file:", error);
         }
       } else {
-        console.log('File rejected - not a PDF:', file.name, file.type);
-        setUploadError('Please select a PDF file');
+        console.log("File rejected - not a PDF:", file.name, file.type);
+        setUploadError("Please select a PDF file");
       }
     }
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('File select triggered, files:', e.target.files?.length);
-    
+    console.log("File select triggered, files:", e.target.files?.length);
+
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      console.log('Selected file via browse:', file.name, 'type:', file.type, 'size:', file.size);
-      
+      console.log(
+        "Selected file via browse:",
+        file.name,
+        "type:",
+        file.type,
+        "size:",
+        file.size
+      );
+
       // More flexible PDF detection - check file type OR file extension
-      const isPDF = file.type === 'application/pdf' || 
-                    file.name.toLowerCase().endsWith('.pdf');
-      
+      const isPDF =
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf");
+
       if (isPDF) {
-        console.log('File accepted via browse:', file.name);
+        console.log("File accepted via browse:", file.name);
         setSelectedFile(file);
         setUploadError(null); // Clear any previous errors
         try {
           await handleFileUpload(file);
         } catch (error) {
-          console.error('Upload failed for selected file:', error);
+          console.error("Upload failed for selected file:", error);
         }
       } else {
-        console.log('File rejected - not a PDF:', file.name, file.type);
-        setUploadError('Please select a PDF file');
+        console.log("File rejected - not a PDF:", file.name, file.type);
+        setUploadError("Please select a PDF file");
       }
     } else {
-      console.log('No file selected or file selection cancelled');
+      console.log("No file selected or file selection cancelled");
     }
   };
 
@@ -89,7 +108,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     setUploadResult(null);
     setUploadError(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
@@ -97,44 +116,48 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     setIsUploading(true);
     setUploadError(null);
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-      const token = localStorage.getItem('token');
-      
-      console.log('Starting upload for file:', file.name, 'size:', file.size);
-      
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+      const token = localStorage.getItem("token");
+
+      console.log("Starting upload for file:", file.name, "size:", file.size);
+
       const response = await fetch(`${apiBase}/api/upload`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
-      console.log('Upload response status:', response.status);
+      console.log("Upload response status:", response.status);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Upload failed' }));
-        console.error('Upload error:', errorData);
-        throw new Error(errorData.detail || `Upload failed with status ${response.status}`);
+        const errorData = await response
+          .json()
+          .catch(() => ({ detail: "Upload failed" }));
+        console.error("Upload error:", errorData);
+        throw new Error(
+          errorData.detail || `Upload failed with status ${response.status}`
+        );
       }
 
       const result = await response.json();
-      console.log('Upload result:', result);
-      
+      console.log("Upload result:", result);
+
       // Validate the response has the required file_id
       if (!result.file_id) {
-        console.error('Missing file_id in upload response:', result);
-        throw new Error('Upload succeeded but no file ID was returned');
+        console.error("Missing file_id in upload response:", result);
+        throw new Error("Upload succeeded but no file ID was returned");
       }
-      
+
       setUploadResult(result);
-      console.log('File uploaded successfully, file_id:', result.file_id);
-      
+      console.log("File uploaded successfully, file_id:", result.file_id);
+
       return result;
     } catch (error) {
-      console.error('Upload error:', error);
-      setUploadError(error instanceof Error ? error.message : 'Upload failed');
+      console.error("Upload error:", error);
+      setUploadError(error instanceof Error ? error.message : "Upload failed");
       throw error;
     } finally {
       setIsUploading(false);
@@ -143,23 +166,28 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
 
   const handleProceed = () => {
     if (!selectedFile) {
-      console.error('No file selected');
+      console.error("No file selected");
       return;
     }
 
     if (!uploadResult || !uploadResult.file_id) {
-      console.error('File not uploaded yet');
-      setUploadError('File upload is still in progress or failed. Please wait or try selecting the file again.');
+      console.error("File not uploaded yet");
+      setUploadError(
+        "File upload is still in progress or failed. Please wait or try selecting the file again."
+      );
       return;
     }
 
-    console.log('Proceeding to processing with uploaded file:', uploadResult.file_id);
-    
+    console.log(
+      "Proceeding to processing with uploaded file:",
+      uploadResult.file_id
+    );
+
     // Pass the upload result and file to the next step
-    onComplete({ 
+    onComplete({
       file: selectedFile,
       fileId: uploadResult.file_id,
-      uploadResult: uploadResult
+      uploadResult: uploadResult,
     });
   };
 
@@ -184,8 +212,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
             <div
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
                 dragActive
-                  ? 'border-primary bg-primary/5'
-                  : 'border-gray-300 hover:border-gray-400'
+                  ? "border-primary bg-primary/5"
+                  : "border-gray-300 hover:border-gray-400"
               }`}
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
@@ -233,7 +261,9 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                       </p>
                     )}
                     {uploadResult && !isUploading && (
-                      <p className="text-sm text-green-600">✓ Uploaded successfully</p>
+                      <p className="text-sm text-green-600">
+                        ✓ Uploaded successfully
+                      </p>
                     )}
                   </div>
                 </div>
@@ -257,8 +287,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
 
           {selectedFile && (
             <div className="flex justify-end mt-6">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={handleProceed}
                 disabled={isUploading || !uploadResult}
               >
@@ -268,7 +298,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                     Uploading...
                   </>
                 ) : (
-                  'Proceed to Processing'
+                  "Proceed to Processing"
                 )}
               </Button>
             </div>

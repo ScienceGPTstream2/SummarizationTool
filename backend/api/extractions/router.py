@@ -1,4 +1,5 @@
 """Entity extraction API endpoints"""
+
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -14,15 +15,20 @@ router = APIRouter(prefix="/api", tags=["extractions"])
 document_service = DocumentService()
 llm_service = LLMService()
 
+
 @router.post("/extract", dependencies=[Depends(get_current_user)])
 async def extract_entities(request: ExtractRequest):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
     """
     try:
-        markdown = await document_service.get_markdown_content(request.conversion_id, request.processor_used)
+        markdown = await document_service.get_markdown_content(
+            request.conversion_id, request.processor_used
+        )
         if markdown is None:
-            raise HTTPException(status_code=404, detail="Conversion markdown not found or not ready")
+            raise HTTPException(
+                status_code=404, detail="Conversion markdown not found or not ready"
+            )
 
         async def run_extraction(entity: Entity):
             result = await llm_service.extract_entities_from_markdown(
@@ -35,13 +41,21 @@ async def extract_entities(request: ExtractRequest):
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
                 provider=request.provider,
-                gemini_model=request.gemini_model
+                gemini_model=request.gemini_model,
             )
             if result.get("success"):
-                return {"name": entity.name, "extracted": result.get("content"), "meta": result.get("meta")}
+                return {
+                    "name": entity.name,
+                    "extracted": result.get("content"),
+                    "meta": result.get("meta"),
+                }
             else:
                 # Even on failure, the result might have useful metadata
-                return {"name": entity.name, "extracted": f"Error: {result.get('error')}", "meta": result.get("meta")}
+                return {
+                    "name": entity.name,
+                    "extracted": f"Error: {result.get('error')}",
+                    "meta": result.get("meta"),
+                }
 
         tasks = [run_extraction(entity) for entity in request.entities]
         extracted_entities = await asyncio.gather(*tasks)
@@ -50,10 +64,12 @@ async def extract_entities(request: ExtractRequest):
             status_code=200,
             content={
                 "message": "Extraction completed",
-                "extracted_entities": extracted_entities
-            }
+                "extracted_entities": extracted_entities,
+            },
         )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extracting entities: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error extracting entities: {str(e)}"
+        )

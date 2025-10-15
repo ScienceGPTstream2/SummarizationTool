@@ -3,7 +3,7 @@ Services package for the Document Summarization Tool.
 
 This package contains all business logic services organized by domain:
 - auth/: Authentication and authorization services
-- document/: Document processing and file management services  
+- document/: Document processing and file management services
 - llm/: Large Language Model and AI provider services
 """
 
@@ -14,6 +14,9 @@ from .llm import LLMService, AzureLLMClient, GeminiLLMClient
 
 __all__ = [
     "AuthService",
-    "DoclingService", "FileService", 
-    "LLMService", "AzureLLMClient", "GeminiLLMClient"
+    "DoclingService",
+    "FileService",
+    "LLMService",
+    "AzureLLMClient",
+    "GeminiLLMClient",
 ]
