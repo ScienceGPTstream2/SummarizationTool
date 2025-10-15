@@ -11,10 +11,6 @@ jobs:
     name: Frontend CI
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: ./SummarizationTool
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,7 +20,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: SummarizationTool/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -41,7 +37,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: ./SummarizationTool/backend
+        working-directory: ./backend
 
     steps:
       - name: Checkout code
