@@ -65,3 +65,4 @@ backend/uploads/
 files/
 /backend/metadata
 /backend/services/document/processors/markdown_output
+/backend/output

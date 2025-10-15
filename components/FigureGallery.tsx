@@ -1,18 +1,24 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
-import { ScrollArea } from './ui/scroll-area';
-import { Badge } from './ui/badge';
-import { Image as ImageIcon, ZoomIn, FileImage, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { ScrollArea } from "./ui/scroll-area";
+import { Badge } from "./ui/badge";
+import { Image as ImageIcon, ZoomIn, FileImage, Loader2 } from "lucide-react";
 
 // Component to lazy load images with authentication
-function FigureImage({ 
-  imagePath, 
-  figureId, 
-  caption, 
-  getImageUrl, 
-  onError, 
-  className = "w-full h-full object-contain" 
+function FigureImage({
+  imagePath,
+  figureId,
+  caption,
+  getImageUrl,
+  onError,
+  className = "w-full h-full object-contain",
 }: {
   imagePath: string;
   figureId: string;
@@ -26,9 +32,9 @@ function FigureImage({
 
   useEffect(() => {
     let mounted = true;
-    
+
     getImageUrl(imagePath, figureId)
-      .then(url => {
+      .then((url) => {
         if (mounted) {
           setImageUrl(url);
           setLoading(false);
@@ -85,7 +91,9 @@ interface FigureGalleryProps {
 }
 
 export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
-  const [selectedFigure, setSelectedFigure] = useState<FigureMetadata | null>(null);
+  const [selectedFigure, setSelectedFigure] = useState<FigureMetadata | null>(
+    null
+  );
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   // Use a ref to store blob URLs so we don't cause re-renders
   const imageBlobUrlsRef = useRef<Map<string, string>>(new Map());
@@ -99,12 +107,15 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
   // Cleanup blob URLs on unmount ONLY
   useEffect(() => {
     return () => {
-      imageBlobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      imageBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       imageBlobUrlsRef.current.clear();
     };
   }, []); // Empty dependency array - only run on mount/unmount
 
-  const getImageUrl = async (imagePath: string, figureId: string): Promise<string> => {
+  const getImageUrl = async (
+    imagePath: string,
+    figureId: string
+  ): Promise<string> => {
     // Check if we already have a blob URL for this image
     if (imageBlobUrlsRef.current.has(figureId)) {
       console.log(`[FigureGallery] Using cached blob URL for ${figureId}`);
@@ -112,63 +123,67 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     }
 
     // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
-    const filename = imagePath.split('/').pop();
-    const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-    const token = localStorage.getItem('token');
+    const filename = imagePath.split("/").pop();
+    const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+    const token = localStorage.getItem("token");
     const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
-    
+
     console.log(`[FigureGallery] Fetching figure:`, {
       figureId,
       imagePath,
       filename,
       conversionId,
       url,
-      hasToken: !!token
+      hasToken: !!token,
     });
-    
+
     try {
       const response = await fetch(url, {
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       console.log(`[FigureGallery] Response:`, {
         status: response.status,
         ok: response.ok,
-        contentType: response.headers.get('content-type')
+        contentType: response.headers.get("content-type"),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`[FigureGallery] Error response:`, errorText);
-        throw new Error(`Failed to fetch image: ${response.status} ${errorText}`);
+        throw new Error(
+          `Failed to fetch image: ${response.status} ${errorText}`
+        );
       }
 
       const blob = await response.blob();
       console.log(`[FigureGallery] Blob received:`, {
         size: blob.size,
-        type: blob.type
+        type: blob.type,
       });
-      
+
       const blobUrl = URL.createObjectURL(blob);
-      console.log(`[FigureGallery] ✅ Created blob URL for ${figureId}: ${blobUrl}`);
-      
+      console.log(
+        `[FigureGallery] ✅ Created blob URL for ${figureId}: ${blobUrl}`
+      );
+
       // Store in ref instead of state to avoid re-render that would revoke the blob
       imageBlobUrlsRef.current.set(figureId, blobUrl);
-      
+
       // Force a re-render to show the image
       forceUpdate({});
-      
+
       return blobUrl;
     } catch (error) {
-      console.error('[FigureGallery] Error fetching image:', error);
+      console.error("[FigureGallery] Error fetching image:", error);
       throw error;
     }
   };
 
   const handleImageError = (figureId: string) => {
-    setImageErrors(prev => new Set(prev).add(figureId));
+    setImageErrors((prev) => new Set(prev).add(figureId));
   };
 
   return (
@@ -241,7 +256,10 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
       </Card>
 
       {/* Figure Detail Modal */}
-      <Dialog open={!!selectedFigure} onOpenChange={() => setSelectedFigure(null)}>
+      <Dialog
+        open={!!selectedFigure}
+        onOpenChange={() => setSelectedFigure(null)}
+      >
         <DialogContent className="max-w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[75vw] xl:max-w-[70vw] w-full max-h-[95vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
@@ -251,11 +269,12 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
               )}
             </DialogTitle>
           </DialogHeader>
-          
+
           {selectedFigure && (
             <div className="space-y-4">
               {/* Full Size Image */}
-              {selectedFigure.image_path && !imageErrors.has(selectedFigure.id) ? (
+              {selectedFigure.image_path &&
+              !imageErrors.has(selectedFigure.id) ? (
                 <div className="bg-muted rounded-lg p-8 flex items-center justify-center min-h-[500px]">
                   <FigureImage
                     imagePath={selectedFigure.image_path}
@@ -287,7 +306,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
               <div className="flex items-center gap-6 text-sm text-muted-foreground border-t pt-3">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">Figure ID:</span>
-                  <code className="bg-muted px-2 py-1 rounded">{selectedFigure.id}</code>
+                  <code className="bg-muted px-2 py-1 rounded">
+                    {selectedFigure.id}
+                  </code>
                 </div>
                 {selectedFigure.page && (
                   <div className="flex items-center gap-2">
@@ -303,4 +324,3 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     </>
   );
 }
-

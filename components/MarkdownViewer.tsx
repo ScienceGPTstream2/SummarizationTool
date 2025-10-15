@@ -1,24 +1,27 @@
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import parse from 'html-react-parser';
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import parse from "html-react-parser";
 
 interface MarkdownViewerProps {
   content: string;
   className?: string;
 }
 
-export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps) {
+export function MarkdownViewer({
+  content,
+  className = "",
+}: MarkdownViewerProps) {
   // Check if content has HTML tables
-  const hasHTMLTables = content.includes('<table');
-  
+  const hasHTMLTables = content.includes("<table");
+
   if (hasHTMLTables) {
     // For content with HTML tables, use html-react-parser for direct HTML rendering
     return (
-      <div 
+      <div
         className={`prose prose-sm max-w-none ${className}`}
         style={{
-          fontSize: '0.75rem',
-          lineHeight: '1rem'
+          fontSize: "0.75rem",
+          lineHeight: "1rem",
         }}
       >
         <style>{`
@@ -144,24 +147,16 @@ export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps)
             </h4>
           ),
           p: ({ children }) => (
-            <p className="text-sm leading-relaxed mb-3 last:mb-0">
-              {children}
-            </p>
+            <p className="text-sm leading-relaxed mb-3 last:mb-0">{children}</p>
           ),
           ul: ({ children }) => (
-            <ul className="list-disc pl-4 mb-3 space-y-1">
-              {children}
-            </ul>
+            <ul className="list-disc pl-4 mb-3 space-y-1">{children}</ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal pl-4 mb-3 space-y-1">
-              {children}
-            </ol>
+            <ol className="list-decimal pl-4 mb-3 space-y-1">{children}</ol>
           ),
           li: ({ children }) => (
-            <li className="text-sm leading-relaxed">
-              {children}
-            </li>
+            <li className="text-sm leading-relaxed">{children}</li>
           ),
           table: ({ children }) => (
             <div className="overflow-x-auto mb-4">
@@ -171,15 +166,9 @@ export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps)
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="bg-muted">
-              {children}
-            </thead>
+            <thead className="bg-muted">{children}</thead>
           ),
-          tbody: ({ children }) => (
-            <tbody>
-              {children}
-            </tbody>
-          ),
+          tbody: ({ children }) => <tbody>{children}</tbody>,
           tr: ({ children }) => (
             <tr className="border-b border-border hover:bg-muted/50">
               {children}
@@ -217,22 +206,14 @@ export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps)
             // Code blocks
             return (
               <pre className="bg-muted p-3 rounded text-xs font-mono overflow-x-auto mb-4">
-                <code className={className}>
-                  {children}
-                </code>
+                <code className={className}>{children}</code>
               </pre>
             );
           },
           strong: ({ children }) => (
-            <strong className="font-medium">
-              {children}
-            </strong>
+            <strong className="font-medium">{children}</strong>
           ),
-          em: ({ children }) => (
-            <em className="italic">
-              {children}
-            </em>
-          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
         }}
       >
         {content}

@@ -1,11 +1,14 @@
 """Schemas for entity extraction endpoints"""
+
 from pydantic import BaseModel
 from typing import Optional, List
+
 
 class Entity(BaseModel):
     name: str
     prompt: str
     extracted: Optional[str] = None
+
 
 class ExtractRequest(BaseModel):
     conversion_id: str
