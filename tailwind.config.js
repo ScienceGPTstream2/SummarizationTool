@@ -2,10 +2,10 @@
 export default {
   darkMode: ["class"],
   content: [
-    './index.html',
-    './App.tsx',
-    './components/**/*.{ts,tsx}',
-    './styles/**/*.{ts,tsx}',
+    "./index.html",
+    "./App.tsx",
+    "./components/**/*.{ts,tsx}",
+    "./styles/**/*.{ts,tsx}",
   ],
   prefix: "",
   theme: {
@@ -95,4 +95,4 @@ export default {
     },
   },
   plugins: [require("tailwindcss-animate")],
-}
+};

@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import requests
 
+
 class AzureLLMClient:
     def __init__(self):
         self.endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -24,16 +25,14 @@ class AzureLLMClient:
         endpoint_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
         max_tokens: int = 1024,
-        temperature: float = 0.0
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
-        used_endpoint = (endpoint_override or self.endpoint)
-        used_api_key = (api_key_override or self.api_key)
+        used_endpoint = endpoint_override or self.endpoint
+        used_api_key = api_key_override or self.api_key
         if not used_endpoint or not used_api_key:
             return {"success": False, "error": "Azure endpoint or api key missing."}
 
-        system_message = (
-            "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
-        )
+        system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
         user_message = f"""<markdown study>
 {markdown}
 </markdown study>
@@ -43,10 +42,12 @@ Prompt:
 """
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message},
         ]
 
-        used_deployment = deployment or self.default_deployment or self.default_model_name
+        used_deployment = (
+            deployment or self.default_deployment or self.default_model_name
+        )
         if not used_deployment:
             return {"success": False, "error": "Azure deployment name missing."}
 
@@ -60,10 +61,7 @@ Prompt:
             "stop": None,
         }
 
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": used_api_key
-        }
+        headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
         try:
             redacted_key = used_api_key
@@ -71,20 +69,26 @@ Prompt:
                 redacted_key = redacted_key[:4] + "..." + redacted_key[-4:]
             redacted_headers = {
                 "Content-Type": headers.get("Content-Type"),
-                "api-key": redacted_key
+                "api-key": redacted_key,
             }
             print(f"[LLMService] Request URL: {url}")
             print(f"[LLMService] Headers: {redacted_headers}")
             try:
                 msg_count = len(messages)
             except Exception:
-                msg_count = 'unknown'
-            print(f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}, temperature={temperature}")
-            
+                msg_count = "unknown"
+            print(
+                f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}, temperature={temperature}"
+            )
+
             start_time = time.time()
-            resp = await asyncio.to_thread(lambda: requests.post(url, headers=headers, json=payload, timeout=120))
+            resp = await asyncio.to_thread(
+                lambda: requests.post(url, headers=headers, json=payload, timeout=120)
+            )
             duration = time.time() - start_time
-            print(f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}")
+            print(
+                f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}"
+            )
             print(f"[LLMService] Request duration: {duration:.2f}s")
 
         except Exception as e:
@@ -104,7 +108,7 @@ Prompt:
             content = raw.get("choices", [])[0].get("message", {}).get("content", "")
         except Exception:
             content = json.dumps(raw)
-        
+
         usage = raw.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens")
         completion_tokens = usage.get("completion_tokens")
@@ -118,6 +122,6 @@ Prompt:
                 "deployment": used_deployment,
                 "duration": duration,
                 "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens
-            }
+                "completion_tokens": completion_tokens,
+            },
         }
