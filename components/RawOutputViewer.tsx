@@ -26,12 +26,9 @@ export function RawOutputViewer({
 
       try {
         const token = localStorage.getItem("token");
-        const response = await fetch(
-          `/api/documents/${conversionId}/content`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const response = await fetch(`/api/documents/${conversionId}/content`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         if (!response.ok) {
           console.warn("Markdown content not available");
@@ -88,7 +85,8 @@ export function RawOutputViewer({
         {!markdownContent && !loading && (
           <Alert className="bg-blue-50 border-blue-200">
             <AlertDescription className="text-blue-800">
-              💡 Markdown output will be available after processing the document.
+              💡 Markdown output will be available after processing the
+              document.
             </AlertDescription>
           </Alert>
         )}
@@ -113,4 +111,3 @@ export function RawOutputViewer({
     </Card>
   );
 }
-
