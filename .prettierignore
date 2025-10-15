@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+package-lock.json
+
+# Build outputs
+dist
+build
+.vite
+
+# Backend
+backend
+
+# Logs
+*.log
+logs
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+
+# Misc
+coverage
+.env
+*.local
+

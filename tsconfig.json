@@ -27,5 +27,13 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": [
+    "vite.config.ts",
+    "node_modules",
+    "dist",
+    "backend",
+    "templates/App.tsx",
+    "components/ui/form.tsx"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
