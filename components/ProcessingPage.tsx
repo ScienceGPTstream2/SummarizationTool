@@ -344,19 +344,17 @@ export function ProcessingPage({
             <div className="flex justify-end gap-3">
               <Button
                 variant="outline"
-                onClick={handleProcessPDF}
+                onClick={showResults ? handleReprocess : handleProcessPDF}
                 disabled={!selectedParser || isProcessing}
                 className={`${!selectedParser || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
                 aria-disabled={!selectedParser || isProcessing}
               >
-                {isProcessing ? "Processing..." : "Process PDF"}
+                {isProcessing
+                  ? "Processing..."
+                  : showResults
+                    ? "Reprocess Document"
+                    : "Process Document"}
               </Button>
-
-              {showResults && (
-                <Button variant="outline" onClick={handleReprocess}>
-                  Reprocess
-                </Button>
-              )}
             </div>
           </CardContent>
         </Card>
