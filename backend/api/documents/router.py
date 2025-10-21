@@ -9,6 +9,7 @@ from core.dependencies import get_current_user
 from schemas.documents import ProcessFileRequest
 from services.document.file_service import FileService
 from services.document.document_service import DocumentService
+from services.document.bbox_normalizer import normalize_bbox_format
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -165,9 +166,11 @@ async def get_document_figures(document_id: str):
 @router.get("/{document_id}/analysis", dependencies=[Depends(get_current_user)])
 async def get_document_analysis(document_id: str):
     """
-    Get the complete raw analysis result with ALL bounding boxes from Azure Document Intelligence
+    Get the complete raw analysis result with ALL bounding boxes
 
-    This endpoint returns the full JSON response from Azure Document Intelligence including:
+    This endpoint works for documents processed with either Azure Document Intelligence or Docling.
+
+    Azure Document Intelligence returns:
     - All pages with words, lines, and their bounding polygons
     - All paragraphs with bounding regions and roles (title, sectionHeading, etc.)
     - All tables with cells and bounding boxes
@@ -175,13 +178,22 @@ async def get_document_analysis(document_id: str):
     - All selection marks (checkboxes) with bounding boxes
     - All sections and structural information
 
-    Note: All field names are transformed from camelCase to snake_case for frontend compatibility.
+    Docling returns:
+    - All pages with dimensions
+    - All text items (paragraphs) with bounding regions and roles
+    - All tables with cells and bounding boxes
+    - All pictures/figures with bounding regions and captions
+    - Document structure (body, furniture, groups)
+
+    Note: Azure DI field names are transformed from camelCase to snake_case for frontend compatibility.
+    Docling already uses snake_case.
 
     Args:
         document_id: The document/conversion ID
 
     Returns:
-        Complete analysis result with all bounding box data (with snake_case field names)
+        Complete analysis result with all bounding box data
+        The response includes a "processor" field to identify the source (azure_doc_intelligence or docling)
     """
     try:
         analysis_result = await document_service.get_raw_analysis_result(document_id)
@@ -189,17 +201,25 @@ async def get_document_analysis(document_id: str):
         if analysis_result is None:
             raise HTTPException(
                 status_code=404,
-                detail="Analysis result not found. Document may not exist or was not processed with Azure Document Intelligence.",
+                detail="Analysis result not found. Document may not exist or was not processed yet.",
             )
 
-        # Transform camelCase keys to snake_case for frontend compatibility
-        analysis_result_snake_case = transform_keys_to_snake_case(analysis_result)
+        # Normalize both formats to a consistent structure for frontend
+        # This ensures both Docling and Azure DI have:
+        # - Same field names (snake_case)
+        # - Same units (points)
+        # - Same structure
+        normalized_result = normalize_bbox_format(analysis_result)
+
+        # Ensure processor field is always present in the result
+        processor = normalized_result.get("processor", "unknown")
 
         return JSONResponse(
             status_code=200,
             content={
                 "document_id": document_id,
-                "analysis_result": analysis_result_snake_case,
+                "processor": processor,
+                "analysis_result": normalized_result,
             },
         )
 

@@ -26,6 +26,7 @@ interface BoundingRegion {
 }
 
 interface AnalysisResult {
+  processor?: string; // "docling" or "azure_doc_intelligence"
   pages?: Array<{
     page_number: number;
     width: number;
@@ -71,34 +72,22 @@ interface AnalysisResult {
   }>;
 }
 
-type ElementType =
-  | "words"
-  | "lines"
-  | "paragraphs"
-  | "tables"
-  | "figures"
-  | "selection_marks";
+type ElementType = "paragraphs" | "tables" | "figures";
 
 const COLOR_MAP: Record<ElementType | string, string> = {
-  words: "rgba(51, 153, 255, 0.3)", // Light blue
-  lines: "rgba(0, 128, 204, 0.3)", // Blue
   paragraphs: "rgba(128, 0, 128, 0.3)", // Purple
   tables: "rgba(255, 128, 0, 0.4)", // Orange
   table_cells: "rgba(255, 179, 77, 0.2)", // Light orange
   figures: "rgba(0, 204, 0, 0.4)", // Green
-  selection_marks: "rgba(255, 0, 0, 0.4)", // Red
   title: "rgba(204, 0, 0, 0.4)", // Dark red
   section_heading: "rgba(153, 0, 102, 0.4)", // Dark purple
 };
 
 const COLOR_BORDER_MAP: Record<ElementType | string, string> = {
-  words: "rgb(51, 153, 255)",
-  lines: "rgb(0, 128, 204)",
   paragraphs: "rgb(128, 0, 128)",
   tables: "rgb(255, 128, 0)",
   table_cells: "rgb(255, 179, 77)",
   figures: "rgb(0, 204, 0)",
-  selection_marks: "rgb(255, 0, 0)",
   title: "rgb(204, 0, 0)",
   section_heading: "rgb(153, 0, 102)",
 };
@@ -207,9 +196,6 @@ export function PDFBoundingBoxViewer({
         );
 
         if (!response.ok) {
-          console.warn(
-            "Analysis result not available (may not be processed with Azure Document Intelligence)"
-          );
           setLoading(false);
           return;
         }
@@ -268,6 +254,8 @@ export function PDFBoundingBoxViewer({
 
   // Render current page with high quality
   useEffect(() => {
+    let renderTask: any = null;
+
     const renderPage = async () => {
       if (!pdfDocument || !canvasRef.current) return;
 
@@ -279,6 +267,11 @@ export function PDFBoundingBoxViewer({
 
         if (!context) return;
 
+        // Cancel any ongoing render
+        if (renderTask) {
+          renderTask.cancel();
+        }
+
         // Use device pixel ratio for sharp rendering on high-DPI displays
         const devicePixelRatio = window.devicePixelRatio || 1;
 
@@ -287,6 +280,7 @@ export function PDFBoundingBoxViewer({
         canvas.style.height = `${viewport.height}px`;
 
         // Set actual size in memory (scaled for high-DPI)
+        // This also automatically clears the canvas and resets transforms
         canvas.width = viewport.width * devicePixelRatio;
         canvas.height = viewport.height * devicePixelRatio;
 
@@ -298,18 +292,28 @@ export function PDFBoundingBoxViewer({
           viewport: viewport,
         };
 
-        await page.render(renderContext).promise;
+        renderTask = page.render(renderContext);
+        await renderTask.promise;
 
-        // Draw bounding boxes if enabled
+        // Draw bounding boxes if enabled and data is ready
         if (showBoundingBoxes && analysisResult) {
           drawBoundingBoxes(context, currentPage);
         }
-      } catch (err) {
-        console.error("Error rendering page:", err);
+      } catch (err: any) {
+        if (err?.name !== "RenderingCancelledException") {
+          console.error("Error rendering page:", err);
+        }
       }
     };
 
     renderPage();
+
+    // Cleanup: cancel render on unmount or when dependencies change
+    return () => {
+      if (renderTask) {
+        renderTask.cancel();
+      }
+    };
   }, [
     pdfDocument,
     currentPage,
@@ -325,19 +329,29 @@ export function PDFBoundingBoxViewer({
   ) => {
     if (!analysisResult) return;
 
-    const dpi = 72; // PDF standard DPI
+    // Get processor type to determine coordinate system
+    const processor = analysisResult.processor || "unknown";
+
+    // Don't draw if processor is unknown (data not fully loaded yet)
+    if (processor === "unknown") return;
+
+    const needsYFlip = processor === "docling"; // Docling uses PDF coordinates (bottom-left origin)
 
     // Helper function to convert polygon to canvas coordinates
-    const polygonToRect = (polygon: number[]) => {
+    const polygonToRect = (polygon: number[], pageHeight: number) => {
       if (!polygon || polygon.length < 8) return null;
 
-      // Polygon is in inches for PDF, convert to points (multiply by 72)
+      // Backend normalizer already converts everything to points
+      // Coordinate system differences:
+      // - Azure DI: Top-left origin (matches canvas) - NO flip needed
+      // - Docling: Bottom-left origin (PDF standard) - flip Y coordinates
+
       const xCoords = polygon
         .filter((_, i) => i % 2 === 0)
-        .map((x) => x * dpi * scale);
+        .map((x) => x * scale);
       const yCoords = polygon
         .filter((_, i) => i % 2 === 1)
-        .map((y) => y * dpi * scale);
+        .map((y) => (needsYFlip ? pageHeight - y : y) * scale);
 
       const x = Math.min(...xCoords);
       const y = Math.min(...yCoords);
@@ -347,12 +361,18 @@ export function PDFBoundingBoxViewer({
       return { x, y, width, height };
     };
 
+    // Get page dimensions
+    const pageInfo = analysisResult.pages?.find(
+      (p) => p.page_number === pageNum
+    );
+    const pageHeight = pageInfo?.height || 792; // Default US Letter height in points
+
     // Draw paragraphs
     if (visibleElements.has("paragraphs") && analysisResult.paragraphs) {
       analysisResult.paragraphs.forEach((para) => {
-        para.bounding_regions.forEach((region) => {
+        para.bounding_regions?.forEach((region) => {
           if (region.page_number === pageNum) {
-            const rect = polygonToRect(region.polygon);
+            const rect = polygonToRect(region.polygon, pageHeight);
             if (rect) {
               const colorKey = para.role || "paragraphs";
               context.strokeStyle =
@@ -378,9 +398,9 @@ export function PDFBoundingBoxViewer({
     // Draw tables
     if (visibleElements.has("tables") && analysisResult.tables) {
       analysisResult.tables.forEach((table, idx) => {
-        table.bounding_regions.forEach((region) => {
+        table.bounding_regions?.forEach((region) => {
           if (region.page_number === pageNum) {
-            const rect = polygonToRect(region.polygon);
+            const rect = polygonToRect(region.polygon, pageHeight);
             if (rect) {
               context.strokeStyle = COLOR_BORDER_MAP.tables;
               context.fillStyle = COLOR_MAP.tables;
@@ -401,9 +421,9 @@ export function PDFBoundingBoxViewer({
     // Draw figures
     if (visibleElements.has("figures") && analysisResult.figures) {
       analysisResult.figures.forEach((figure) => {
-        figure.bounding_regions.forEach((region) => {
+        figure.bounding_regions?.forEach((region) => {
           if (region.page_number === pageNum) {
-            const rect = polygonToRect(region.polygon);
+            const rect = polygonToRect(region.polygon, pageHeight);
             if (rect) {
               context.strokeStyle = COLOR_BORDER_MAP.figures;
               context.fillStyle = COLOR_MAP.figures;
@@ -419,69 +439,6 @@ export function PDFBoundingBoxViewer({
           }
         });
       });
-    }
-
-    // Draw words
-    if (visibleElements.has("words") && analysisResult.pages) {
-      const pageData = analysisResult.pages.find(
-        (p) => p.page_number === pageNum
-      );
-      if (pageData?.words) {
-        pageData.words.forEach((word) => {
-          const rect = polygonToRect(word.polygon);
-          if (rect) {
-            context.strokeStyle = COLOR_BORDER_MAP.words;
-            context.fillStyle = COLOR_MAP.words;
-            context.lineWidth = 1;
-            context.fillRect(rect.x, rect.y, rect.width, rect.height);
-            context.strokeRect(rect.x, rect.y, rect.width, rect.height);
-          }
-        });
-      }
-    }
-
-    // Draw lines
-    if (visibleElements.has("lines") && analysisResult.pages) {
-      const pageData = analysisResult.pages.find(
-        (p) => p.page_number === pageNum
-      );
-      if (pageData?.lines) {
-        pageData.lines.forEach((line) => {
-          const rect = polygonToRect(line.polygon);
-          if (rect) {
-            context.strokeStyle = COLOR_BORDER_MAP.lines;
-            context.fillStyle = COLOR_MAP.lines;
-            context.lineWidth = 1.5;
-            context.fillRect(rect.x, rect.y, rect.width, rect.height);
-            context.strokeRect(rect.x, rect.y, rect.width, rect.height);
-          }
-        });
-      }
-    }
-
-    // Draw selection marks
-    if (visibleElements.has("selection_marks") && analysisResult.pages) {
-      const pageData = analysisResult.pages.find(
-        (p) => p.page_number === pageNum
-      );
-      if (pageData?.selection_marks) {
-        pageData.selection_marks.forEach((mark) => {
-          const rect = polygonToRect(mark.polygon);
-          if (rect) {
-            context.strokeStyle = COLOR_BORDER_MAP.selection_marks;
-            context.fillStyle = COLOR_MAP.selection_marks;
-            context.lineWidth = 2;
-            context.fillRect(rect.x, rect.y, rect.width, rect.height);
-            context.strokeRect(rect.x, rect.y, rect.width, rect.height);
-
-            // Draw checkmark or X
-            context.fillStyle = COLOR_BORDER_MAP.selection_marks;
-            context.font = "bold 16px sans-serif";
-            const symbol = mark.state === "selected" ? "☑" : "☐";
-            context.fillText(symbol, rect.x + 2, rect.y + rect.height - 2);
-          }
-        });
-      }
     }
   };
 
@@ -591,41 +548,34 @@ export function PDFBoundingBoxViewer({
               <Layers className="h-4 w-4" />
               Display Elements:
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {(
-                [
-                  "paragraphs",
-                  "tables",
-                  "figures",
-                  "lines",
-                  "words",
-                  "selection_marks",
-                ] as ElementType[]
-              ).map((type) => (
-                <div
-                  key={type}
-                  className="flex items-center gap-2 bg-white px-3 py-2 rounded-md border border-gray-200 hover:border-gray-300 transition-colors"
-                >
-                  <Checkbox
-                    id={`show-${type}`}
-                    checked={visibleElements.has(type)}
-                    onCheckedChange={() => toggleElement(type)}
-                  />
-                  <Label
-                    htmlFor={`show-${type}`}
-                    className="text-xs font-medium capitalize cursor-pointer flex items-center gap-1.5"
+            <div className="grid grid-cols-3 gap-3">
+              {(["paragraphs", "tables", "figures"] as ElementType[]).map(
+                (type) => (
+                  <div
+                    key={type}
+                    className="flex items-center gap-2 bg-white px-3 py-2 rounded-md border border-gray-200 hover:border-gray-300 transition-colors"
                   >
-                    <span
-                      className="inline-block w-3 h-3 rounded border-2"
-                      style={{
-                        backgroundColor: COLOR_MAP[type],
-                        borderColor: COLOR_BORDER_MAP[type],
-                      }}
+                    <Checkbox
+                      id={`show-${type}`}
+                      checked={visibleElements.has(type)}
+                      onCheckedChange={() => toggleElement(type)}
                     />
-                    {type.replace("_", " ")}
-                  </Label>
-                </div>
-              ))}
+                    <Label
+                      htmlFor={`show-${type}`}
+                      className="text-xs font-medium capitalize cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span
+                        className="inline-block w-3 h-3 rounded border-2"
+                        style={{
+                          backgroundColor: COLOR_MAP[type],
+                          borderColor: COLOR_BORDER_MAP[type],
+                        }}
+                      />
+                      {type.replace("_", " ")}
+                    </Label>
+                  </div>
+                )
+              )}
             </div>
           </div>
         )}
