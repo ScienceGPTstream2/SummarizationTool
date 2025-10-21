@@ -142,6 +142,15 @@ class DoclingService:
                 ),
             )
 
+            # Extract and save bounding box information from DoclingDocument
+            raw_analysis_path = conversion_dir / "raw_analysis.json"
+            await loop.run_in_executor(
+                self.executor,
+                self._extract_bounding_boxes_sync,
+                result,
+                raw_analysis_path,
+            )
+
             # Read the markdown content for response
             async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
                 markdown_content = await f.read()
@@ -246,6 +255,7 @@ class DoclingService:
         output_base_dir = self.output_base_dir
         convert_sync = self._convert_document_sync
         extract_images_sync = self._extract_images_sync
+        extract_bboxes_sync = self._extract_bounding_boxes_sync
 
         def _run_and_finalize(conv_id: str, src: Union[str, Path], s_type: str):
             import logging as _logging
@@ -289,6 +299,10 @@ class DoclingService:
                 result.document.save_as_markdown(
                     str(markdown_path), image_mode=ImageRefMode.REFERENCED
                 )
+
+                # Extract and save bounding box information
+                raw_analysis_path = conv_dir / "raw_analysis.json"
+                extract_bboxes_sync(result, raw_analysis_path)
 
                 # Read markdown content for metadata
                 with open(markdown_path, "r", encoding="utf-8") as mf:
@@ -486,6 +500,310 @@ class DoclingService:
             "pictures_found": picture_image_count,
         }
 
+    def _extract_bounding_boxes_sync(self, result, raw_analysis_path: Path) -> None:
+        """
+        Extract bounding box information from DoclingDocument and save to JSON
+
+        This creates a structured representation of the document with all layout information
+        including bounding boxes for texts, tables, pictures, and document structure.
+
+        Args:
+            result: Docling conversion result
+            raw_analysis_path: Path to save the raw analysis JSON
+        """
+        try:
+            doc = result.document
+
+            # Build comprehensive analysis structure
+            analysis = {
+                "processor": "docling",
+                "api_version": "2.0",
+                "model_id": "docling-document",
+                "pages": [],
+                "paragraphs": [],
+                "tables": [],
+                "figures": [],
+                "document_structure": {"body": None, "furniture": None, "groups": []},
+            }
+
+            # Try to get markdown content (optional, may fail)
+            try:
+                analysis["content"] = doc.export_to_markdown()
+            except Exception:
+                analysis["content"] = ""
+
+            # Extract page information with bounding boxes
+            if hasattr(doc, "pages") and doc.pages:
+                for page_no, page in doc.pages.items():
+                    page_info = {
+                        "page_number": page_no,
+                        "width": (
+                            page.size.width
+                            if hasattr(page, "size") and page.size
+                            else None
+                        ),
+                        "height": (
+                            page.size.height
+                            if hasattr(page, "size") and page.size
+                            else None
+                        ),
+                        "unit": "pt",  # Docling uses points
+                        "words": [],
+                        "lines": [],
+                    }
+                    analysis["pages"].append(page_info)
+
+            # Extract text items with bounding boxes
+            if hasattr(doc, "texts") and doc.texts:
+                import logging
+
+                logging.info(f"[BBOX] Found {len(doc.texts)} text items")
+
+                for idx, text_item in enumerate(doc.texts):
+                    paragraph = {
+                        "id": f"text_{idx}",
+                        "content": text_item.text if hasattr(text_item, "text") else "",
+                        "role": (
+                            text_item.label
+                            if hasattr(text_item, "label")
+                            else "paragraph"
+                        ),
+                        "bounding_regions": [],
+                    }
+
+                    # Extract bounding box information from provenance
+                    if hasattr(text_item, "prov") and text_item.prov:
+                        for prov in text_item.prov:
+                            if hasattr(prov, "bbox") and prov.bbox:
+                                bbox = prov.bbox
+                                bounding_region = {
+                                    "page_number": (
+                                        prov.page_no
+                                        if hasattr(prov, "page_no")
+                                        else None
+                                    ),
+                                    "polygon": [
+                                        bbox.l,
+                                        bbox.t,  # top-left x, y
+                                        bbox.r,
+                                        bbox.t,  # top-right x, y
+                                        bbox.r,
+                                        bbox.b,  # bottom-right x, y
+                                        bbox.l,
+                                        bbox.b,  # bottom-left x, y
+                                    ],
+                                }
+                                paragraph["bounding_regions"].append(bounding_region)
+                    else:
+                        # Debug: log when bbox is missing
+                        if idx < 5:  # Only log first 5
+                            logging.debug(
+                                f"[BBOX] Text item {idx} has no prov or prov.bbox"
+                            )
+
+                    analysis["paragraphs"].append(paragraph)
+
+                # Log summary
+                bbox_count = sum(
+                    len(p["bounding_regions"]) for p in analysis["paragraphs"]
+                )
+                logging.info(
+                    f"[BBOX] Extracted {bbox_count} bounding regions from {len(analysis['paragraphs'])} paragraphs"
+                )
+
+            # Extract table items with bounding boxes
+            if hasattr(doc, "tables") and doc.tables:
+                for idx, table_item in enumerate(doc.tables):
+                    table = {
+                        "id": f"table_{idx}",
+                        "row_count": 0,
+                        "column_count": 0,
+                        "cells": [],
+                        "bounding_regions": [],
+                    }
+
+                    # Extract table structure if available
+                    if hasattr(table_item, "data") and table_item.data:
+                        table["row_count"] = (
+                            len(table_item.data.table_cells)
+                            if hasattr(table_item.data, "table_cells")
+                            else 0
+                        )
+
+                        # Extract cells with positions
+                        if hasattr(table_item.data, "table_cells"):
+                            for cell in table_item.data.table_cells:
+                                cell_info = {
+                                    "row_index": (
+                                        cell.row_index
+                                        if hasattr(cell, "row_index")
+                                        else 0
+                                    ),
+                                    "column_index": (
+                                        cell.col_index
+                                        if hasattr(cell, "col_index")
+                                        else 0
+                                    ),
+                                    "row_span": (
+                                        cell.row_span
+                                        if hasattr(cell, "row_span")
+                                        else 1
+                                    ),
+                                    "column_span": (
+                                        cell.col_span
+                                        if hasattr(cell, "col_span")
+                                        else 1
+                                    ),
+                                    "content": (
+                                        cell.text if hasattr(cell, "text") else ""
+                                    ),
+                                    "kind": "content",
+                                }
+                                table["cells"].append(cell_info)
+
+                    # Extract bounding box from provenance
+                    if hasattr(table_item, "prov") and table_item.prov:
+                        for prov in table_item.prov:
+                            if hasattr(prov, "bbox") and prov.bbox:
+                                bbox = prov.bbox
+                                bounding_region = {
+                                    "page_number": (
+                                        prov.page_no
+                                        if hasattr(prov, "page_no")
+                                        else None
+                                    ),
+                                    "polygon": [
+                                        bbox.l,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.b,
+                                        bbox.l,
+                                        bbox.b,
+                                    ],
+                                }
+                                table["bounding_regions"].append(bounding_region)
+
+                    analysis["tables"].append(table)
+
+            # Extract picture items with bounding boxes
+            if hasattr(doc, "pictures") and doc.pictures:
+                for idx, picture_item in enumerate(doc.pictures):
+                    figure = {
+                        "id": f"picture_{idx}",
+                        "caption": {
+                            "content": (
+                                str(picture_item.caption)
+                                if hasattr(picture_item, "caption")
+                                and picture_item.caption
+                                else None
+                            )
+                        },
+                        "bounding_regions": [],
+                    }
+
+                    # Extract bounding box from provenance
+                    if hasattr(picture_item, "prov") and picture_item.prov:
+                        for prov in picture_item.prov:
+                            if hasattr(prov, "bbox") and prov.bbox:
+                                bbox = prov.bbox
+                                bounding_region = {
+                                    "page_number": (
+                                        prov.page_no
+                                        if hasattr(prov, "page_no")
+                                        else None
+                                    ),
+                                    "polygon": [
+                                        bbox.l,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.b,
+                                        bbox.l,
+                                        bbox.b,
+                                    ],
+                                }
+                                figure["bounding_regions"].append(bounding_region)
+
+                    analysis["figures"].append(figure)
+
+            # Extract document structure (body, furniture, groups)
+            if hasattr(doc, "body") and doc.body:
+                analysis["document_structure"]["body"] = self._serialize_node_item(
+                    doc.body
+                )
+
+            if hasattr(doc, "furniture") and doc.furniture:
+                analysis["document_structure"]["furniture"] = self._serialize_node_item(
+                    doc.furniture
+                )
+
+            if hasattr(doc, "groups") and doc.groups:
+                for group in doc.groups:
+                    analysis["document_structure"]["groups"].append(
+                        self._serialize_node_item(group)
+                    )
+
+            # Save to JSON file
+            with open(raw_analysis_path, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, indent=2, ensure_ascii=False)
+
+        except Exception as e:
+            import logging
+            import traceback
+
+            error_trace = traceback.format_exc()
+            logging.error(f"Error extracting bounding boxes: {str(e)}\n{error_trace}")
+            # Create minimal analysis structure on error
+            analysis = {
+                "processor": "docling",
+                "error": str(e),
+                "error_trace": error_trace,
+                "pages": [],
+                "paragraphs": [],
+                "tables": [],
+                "figures": [],
+            }
+            with open(raw_analysis_path, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, indent=2)
+
+    def _serialize_node_item(self, node) -> Optional[Dict[str, Any]]:
+        """
+        Serialize a NodeItem to a dictionary
+
+        Args:
+            node: NodeItem from DoclingDocument
+
+        Returns:
+            Dictionary representation of the node
+        """
+        if not node:
+            return None
+
+        # Convert RefItem objects to strings for JSON serialization
+        def to_string(obj):
+            """Convert RefItem or any object to string"""
+            if obj is None:
+                return None
+            return str(obj)
+
+        def to_string_list(items):
+            """Convert list of RefItems to list of strings"""
+            if not items:
+                return []
+            return [str(item) for item in items]
+
+        return {
+            "label": to_string(node.label) if hasattr(node, "label") else None,
+            "self_ref": to_string(node.self_ref) if hasattr(node, "self_ref") else None,
+            "parent": to_string(node.parent) if hasattr(node, "parent") else None,
+            "children": (
+                to_string_list(node.children) if hasattr(node, "children") else []
+            ),
+        }
+
     async def get_conversion_by_id(
         self, conversion_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -579,6 +897,37 @@ class DoclingService:
         if metadata and "figures" in metadata:
             return metadata["figures"]
         return None
+
+    async def get_raw_analysis_result(
+        self, conversion_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the complete raw analysis result with ALL bounding boxes from Docling
+
+        This includes:
+        - All pages with dimensions
+        - All text items (paragraphs) with bounding regions and roles
+        - All tables with cells and bounding boxes
+        - All pictures/figures with bounding regions
+        - Document structure (body, furniture, groups)
+
+        Args:
+            conversion_id: The conversion ID
+
+        Returns:
+            Complete analysis result dictionary or None if not found
+        """
+        raw_analysis_path = self.output_base_dir / conversion_id / "raw_analysis.json"
+
+        if not raw_analysis_path.exists():
+            return None
+
+        try:
+            async with aiofiles.open(raw_analysis_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content)
+        except (json.JSONDecodeError, IOError):
+            return None
 
     async def _save_conversion_metadata(
         self, conversion_id: str, metadata: Dict[str, Any]
