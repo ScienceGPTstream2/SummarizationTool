@@ -146,6 +146,9 @@ class AzureDocIntelligenceService:
             # Convert full result to dictionary for JSON serialization (with ALL bounding boxes)
             result_dict = result.as_dict()
 
+            # Add processor field for format detection
+            result_dict["processor"] = "azure_doc_intelligence"
+
             # Save the FULL raw JSON response
             with open(raw_json_path, "w", encoding="utf-8") as f:
                 json.dump(result_dict, f, indent=2, ensure_ascii=False)

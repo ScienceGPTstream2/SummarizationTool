@@ -237,13 +237,22 @@ class DocumentService:
         """
         Get the complete raw analysis result with ALL bounding boxes
 
-        This is only available for documents processed with Azure Document Intelligence.
+        This is available for documents processed with either Azure Document Intelligence or Docling.
         The raw analysis includes all detected elements with their bounding box coordinates:
+
+        Azure DI provides:
         - Pages with words, lines, selection marks
         - Paragraphs with roles and bounding regions
         - Tables with cells and bounding boxes
         - Figures with bounding regions and captions
         - Sections and structural information
+
+        Docling provides:
+        - Pages with dimensions
+        - Text items (paragraphs) with bounding regions and roles
+        - Tables with cells and bounding boxes
+        - Pictures/figures with bounding regions
+        - Document structure (body, furniture, groups)
 
         Args:
             conversion_id: The conversion ID
@@ -251,6 +260,16 @@ class DocumentService:
         Returns:
             Complete analysis result dictionary or None if not found
         """
-        return await self.azure_doc_intelligence_service.get_raw_analysis_result(
+        # Try Azure Document Intelligence first
+        result = await self.azure_doc_intelligence_service.get_raw_analysis_result(
             conversion_id
         )
+        if result:
+            return result
+
+        # Try Docling
+        result = await self.docling_service.get_raw_analysis_result(conversion_id)
+        if result:
+            return result
+
+        return None
