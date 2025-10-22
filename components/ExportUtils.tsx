@@ -21,7 +21,6 @@ const getParserName = (parserId: string): string => {
     marker: "Marker",
     pymupdf4llm: "PyMuPDF4LLM",
     "gpt4-vision": "GPT 4.1 Vision Model",
-    "gemini-vision": "Gemini Vision Model",
   };
   return parserNames[parserId as keyof typeof parserNames] || parserId;
 };
@@ -34,9 +33,6 @@ const getModelName = (modelId: string): string => {
     "gpt-4.1": "GPT-4.1",
     "gpt-5": "GPT-5",
     "gpt-4o-mini": "GPT-4o Mini",
-    "gemini-pro": "Gemini Pro",
-    "gemini-ultra": "Gemini Ultra",
-    "gemini-flash": "Gemini Flash",
     "claude-3-opus": "Claude 3 Opus",
     "claude-3-sonnet": "Claude 3 Sonnet",
     "claude-3-haiku": "Claude 3 Haiku",

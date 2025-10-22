@@ -1,10 +1,14 @@
 import os
 from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
-from .gemini import GeminiLLMClient
 
 
 class LLMService:
+    """
+    LLM Service for entity extraction.
+    Only supports Azure OpenAI GPT-5 Mini model.
+    """
+
     def __init__(self):
         self.disabled = False
 
@@ -18,27 +22,21 @@ class LLMService:
         api_key_override: Optional[str] = None,
         max_tokens: int = 1024,
         temperature: float = 0.0,
-        provider: Optional[str] = None,
-        gemini_model: Optional[str] = None,
     ) -> Dict[str, Any]:
-        if provider == "gemini":
-            client = GeminiLLMClient()
-            if client.disabled:
-                return {"success": False, "error": "Gemini client is not configured."}
-            return await client.extract_entities_with_gemini(
-                markdown, extraction_prompt, gemini_model
-            )
-        else:
-            client = AzureLLMClient()
-            if client.disabled:
-                return {"success": False, "error": "Azure client is not configured."}
-            return await client.extract_entities_with_azure(
-                markdown,
-                extraction_prompt,
-                deployment,
-                api_version,
-                endpoint_override,
-                api_key_override,
-                max_tokens,
-                temperature,
-            )
+        """
+        Extract entities from markdown using Azure OpenAI.
+        Only Azure OpenAI is supported in this version.
+        """
+        client = AzureLLMClient()
+        if client.disabled:
+            return {"success": False, "error": "Azure OpenAI is not configured."}
+        return await client.extract_entities_with_azure(
+            markdown,
+            extraction_prompt,
+            deployment,
+            api_version,
+            endpoint_override,
+            api_key_override,
+            max_tokens,
+            temperature,
+        )
