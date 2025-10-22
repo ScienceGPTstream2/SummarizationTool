@@ -40,8 +40,6 @@ async def extract_entities(request: ExtractRequest):
                 api_key_override=request.azure_api_key,
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
-                provider=request.provider,
-                gemini_model=request.gemini_model,
             )
             if result.get("success"):
                 return {
