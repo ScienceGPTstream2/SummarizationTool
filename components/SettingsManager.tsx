@@ -65,7 +65,8 @@ export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
   azure_document_intelligence_api_key: {
     key: "azure_document_intelligence_api_key",
     displayName: "Azure Document Intelligence API Key",
-    description: "API key for Azure Document Intelligence service (document processing)",
+    description:
+      "API key for Azure Document Intelligence service (document processing)",
     placeholder: "Your Azure Document Intelligence API key",
     category: "Azure",
   },
