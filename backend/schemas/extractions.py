@@ -19,6 +19,5 @@ class ExtractRequest(BaseModel):
     azure_api_key: Optional[str] = None
     max_tokens: int = 1024
     temperature: float = 0.0
-    provider: Optional[str] = None
-    gemini_model: Optional[str] = None
+    provider: Optional[str] = "azure_openai"
     processor_used: Optional[str] = None

@@ -79,77 +79,13 @@ export function EntityExtractionPage({
   // Get available study types from templates
   const studyTypes = getAvailableStudyTypes();
 
-  // Get available models (merge non-Azure from settings and Azure from server)
+  // Get available models from settings manager (only Azure OpenAI GPT-5 Mini)
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   useEffect(() => {
     const loadModels = async () => {
-      // Non-Azure models from client settings
-      const nonAzureModels = settingsManager
-        .getAvailableModels()
-        .filter((m) => !m.provider.toLowerCase().includes("azure"));
-      let azureModels: ModelConfig[] = [];
-      try {
-        const token = localStorage.getItem("token");
-        const resp = await fetch("/api/models", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          azureModels = data;
-        }
-      } catch (error) {
-        console.error("Failed to fetch server models", error);
-      }
-
-      const geminiModels: ModelConfig[] = [
-        {
-          id: "gemini-2.5-pro",
-          name: "Gemini 2.5 Pro",
-          provider: "Gemini",
-          description: "Most capable model",
-          deployment: "gemini-2.5-pro",
-          requiredApiKey: "GEMINI_API_KEY",
-          category: "google",
-        },
-        {
-          id: "gemini-2.5-flash",
-          name: "Gemini 2.5 Flash",
-          provider: "Gemini",
-          description: "Fast and efficient",
-          deployment: "gemini-2.5-flash",
-          requiredApiKey: "GEMINI_API_KEY",
-          category: "google",
-        },
-        {
-          id: "gemini-2.5-flash-lite",
-          name: "Gemini 2.5 Flash Lite",
-          provider: "Gemini",
-          description: "Lightweight and fast",
-          deployment: "gemini-2.5-flash-lite",
-          requiredApiKey: "GEMINI_API_KEY",
-          category: "google",
-        },
-        {
-          id: "gemini-2.0-flash",
-          name: "Gemini 2.0 Flash",
-          provider: "Gemini",
-          description: "Fast and efficient",
-          deployment: "gemini-2.0-flash",
-          requiredApiKey: "GEMINI_API_KEY",
-          category: "google",
-        },
-        {
-          id: "gemini-2.0-flash-lite",
-          name: "Gemini 2.0 Flash Lite",
-          provider: "Gemini",
-          description: "Lightweight and fast",
-          deployment: "gemini-2.0-flash-lite",
-          requiredApiKey: "GEMINI_API_KEY",
-          category: "google",
-        },
-      ];
-
-      setAvailableModels([...nonAzureModels, ...azureModels, ...geminiModels]);
+      // Get all available models from settings manager
+      const models = settingsManager.getAvailableModels();
+      setAvailableModels(models);
     };
     loadModels();
   }, []);
@@ -207,7 +143,6 @@ export function EntityExtractionPage({
       const modelObj = availableModels.find((m) => m.id === selectedModel);
       const deploymentToUse = modelObj?.deployment || selectedModel;
       const apiVersionToUse = modelObj?.api_version || undefined;
-      const providerToUse = modelObj?.provider.toLowerCase();
 
       // Get user-provided API keys from settings if available
       const azureApiKey = settingsManager.getApiKey("azure_openai_api_key");
@@ -227,9 +162,8 @@ export function EntityExtractionPage({
           entities: updatedEntities,
           max_tokens: 1024,
           temperature: 0.0,
-          provider: providerToUse,
-          gemini_model:
-            providerToUse === "gemini" ? deploymentToUse : undefined,
+          provider: "azure_openai", // Only Azure OpenAI is supported
+          processor_used: documentData.processorUsed, // Include processor used for efficient markdown retrieval
           // Include user-provided API keys if available
           ...(azureApiKey && azureApiKey !== "YOUR_AZURE_OPENAI_API_KEY_HERE"
             ? { azure_api_key: azureApiKey }
