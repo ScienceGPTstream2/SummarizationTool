@@ -15,11 +15,16 @@ Place the following files in the project root:
 ```toml
 # Azure OpenAI secrets for Summarization_tool
 [azure_openai]
-endpoint = ""
-model_name = ""
-deployment = ""
-api_key = ""
-api_version = ""
+endpoint = "https://your-resource.openai.azure.com/"
+model_name = "gpt-5-mini"
+deployment = "gpt-5-mini"
+api_key = "YOUR_AZURE_OPENAI_API_KEY"
+api_version = "2024-12-01-preview"
+
+# Azure Document Intelligence configuration (document processing)
+[azure_doc_intelligence]
+endpoint = "https://your-resource.cognitiveservices.azure.com/"
+key = "YOUR_AZURE_DOC_INTELLIGENCE_KEY"
 ```
 
 ### 👥 users.toml

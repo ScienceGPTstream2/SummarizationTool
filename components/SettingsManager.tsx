@@ -30,133 +30,14 @@ export interface CustomModelConfig {
 }
 
 // Available models configuration (built-in)
+// Only supporting Azure OpenAI GPT-5 Mini for entity extraction
 export const allModels: ModelConfig[] = [
-  // OpenAI Models
-  {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    provider: "OpenAI",
-    description: "Latest multimodal model with enhanced capabilities",
-    requiredApiKey: "openai_api_key",
-    category: "openai",
-  },
-  {
-    id: "gpt-4-turbo",
-    name: "GPT-4 Turbo",
-    provider: "OpenAI",
-    description: "High-performance text model with large context",
-    requiredApiKey: "openai_api_key",
-    category: "openai",
-  },
-  {
-    id: "gpt-4.1",
-    name: "GPT-4.1",
-    provider: "OpenAI",
-    description: "Enhanced version with improved reasoning",
-    requiredApiKey: "openai_api_key",
-    category: "openai",
-  },
-  {
-    id: "gpt-5",
-    name: "GPT-5",
-    provider: "OpenAI",
-    description: "Next-generation language model (preview)",
-    requiredApiKey: "openai_api_key",
-    category: "openai",
-  },
-  {
-    id: "gpt-4o-mini",
-    name: "GPT-4o Mini",
-    provider: "OpenAI",
-    description: "Lightweight version for faster processing",
-    requiredApiKey: "openai_api_key",
-    category: "openai",
-  },
-
-  // Google Models
-  {
-    id: "gemini-pro",
-    name: "Gemini Pro",
-    provider: "Google",
-    description: "Advanced multimodal AI model",
-    requiredApiKey: "google_api_key",
-    category: "google",
-  },
-  {
-    id: "gemini-ultra",
-    name: "Gemini Ultra",
-    provider: "Google",
-    description: "Most capable Gemini model",
-    requiredApiKey: "google_api_key",
-    category: "google",
-  },
-  {
-    id: "gemini-flash",
-    name: "Gemini Flash",
-    provider: "Google",
-    description: "Fast and efficient processing",
-    requiredApiKey: "google_api_key",
-    category: "google",
-  },
-
-  // Anthropic Models
-  {
-    id: "claude-3-opus",
-    name: "Claude 3 Opus",
-    provider: "Anthropic",
-    description: "Most powerful Claude model for complex tasks",
-    requiredApiKey: "anthropic_api_key",
-    category: "anthropic",
-  },
-  {
-    id: "claude-3-sonnet",
-    name: "Claude 3 Sonnet",
-    provider: "Anthropic",
-    description: "Balanced performance and speed",
-    requiredApiKey: "anthropic_api_key",
-    category: "anthropic",
-  },
-  {
-    id: "claude-3-haiku",
-    name: "Claude 3 Haiku",
-    provider: "Anthropic",
-    description: "Fastest Claude model",
-    requiredApiKey: "anthropic_api_key",
-    category: "anthropic",
-  },
-
-  // Meta/Llama Models (via Together AI)
-  {
-    id: "llama-3.1-405b",
-    name: "Llama 3.1 405B",
-    provider: "Meta (Together AI)",
-    description: "Largest open-source language model",
-    requiredApiKey: "together_api_key",
-    category: "meta",
-  },
-  {
-    id: "llama-3.1-70b",
-    name: "Llama 3.1 70B",
-    provider: "Meta (Together AI)",
-    description: "High-performance open model",
-    requiredApiKey: "together_api_key",
-    category: "meta",
-  },
-  {
-    id: "llama-3.1-8b",
-    name: "Llama 3.1 8B",
-    provider: "Meta (Together AI)",
-    description: "Efficient open-source model",
-    requiredApiKey: "together_api_key",
-    category: "meta",
-  },
-
-  // Azure Models
+  // Azure OpenAI Models
   {
     id: "azure-gpt-5-mini",
-    name: "GPT-5 Mini (Azure)",
-    provider: "Azure",
-    description: "Azure deployment of gpt-5-mini",
+    name: "GPT-5 Mini",
+    provider: "Azure OpenAI",
+    description: "Azure OpenAI GPT-5 Mini model for entity extraction",
     requiredApiKey: "azure_openai_api_key",
     category: "azure",
     deployment: "gpt-5-mini",
@@ -165,48 +46,13 @@ export const allModels: ModelConfig[] = [
 ];
 
 // API Key configurations
+// Only supporting Azure services (OpenAI + Document Intelligence)
 export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
-  openai_api_key: {
-    key: "openai_api_key",
-    displayName: "OpenAI API Key",
-    description: "API key for OpenAI GPT models",
-    placeholder: "sk-...",
-    category: "OpenAI",
-  },
-  google_api_key: {
-    key: "google_api_key",
-    displayName: "Google AI API Key",
-    description: "API key for Google Gemini models",
-    placeholder: "AI...",
-    category: "Google",
-  },
-  anthropic_api_key: {
-    key: "anthropic_api_key",
-    displayName: "Anthropic API Key",
-    description: "API key for Claude models",
-    placeholder: "sk-ant-...",
-    category: "Anthropic",
-  },
-  together_api_key: {
-    key: "together_api_key",
-    displayName: "Together AI API Key",
-    description:
-      "API key for Llama and other open-source models via Together AI",
-    placeholder: "",
-    category: "Together AI",
-  },
-  replicate_api_key: {
-    key: "replicate_api_key",
-    displayName: "Replicate API Key",
-    description: "API key for models via Replicate",
-    placeholder: "r8_...",
-    category: "Replicate",
-  },
   azure_openai_api_key: {
     key: "azure_openai_api_key",
     displayName: "Azure OpenAI API Key",
-    description: "API key for Azure OpenAI Service",
-    placeholder: "",
+    description: "API key for Azure OpenAI Service (GPT-5 Mini)",
+    placeholder: "Your Azure OpenAI API key",
     category: "Azure",
   },
   azure_openai_endpoint: {
@@ -219,8 +65,9 @@ export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
   azure_document_intelligence_api_key: {
     key: "azure_document_intelligence_api_key",
     displayName: "Azure Document Intelligence API Key",
-    description: "API key for Azure Document Intelligence service",
-    placeholder: "",
+    description:
+      "API key for Azure Document Intelligence service (document processing)",
+    placeholder: "Your Azure Document Intelligence API key",
     category: "Azure",
   },
   azure_document_intelligence_endpoint: {
@@ -229,20 +76,6 @@ export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
     description: "Azure Document Intelligence service endpoint URL",
     placeholder: "https://your-resource.cognitiveservices.azure.com/",
     category: "Azure",
-  },
-  openrouter_api_key: {
-    key: "openrouter_api_key",
-    displayName: "OpenRouter API Key",
-    description: "API key for OpenRouter (unified API for multiple models)",
-    placeholder: "sk-or-...",
-    category: "OpenRouter",
-  },
-  groq_api_key: {
-    key: "groq_api_key",
-    displayName: "Groq API Key",
-    description: "API key for Groq (fast inference)",
-    placeholder: "gsk_...",
-    category: "Groq",
   },
 };
 
