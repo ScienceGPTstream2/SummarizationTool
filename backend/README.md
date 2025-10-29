@@ -25,6 +25,16 @@ api_version = "2024-12-01-preview"
 [azure_doc_intelligence]
 endpoint = "https://your-resource.cognitiveservices.azure.com/"
 key = "YOUR_AZURE_DOC_INTELLIGENCE_KEY"
+
+# Vertex AI configuration (optional, for evaluation with Gemini)
+[vertex_ai]
+project = "your-gcp-project-id"
+location = "us-central1"
+
+# Security configuration (JWT tokens)
+[security]
+jwt_secret = "your-secret-key-here"
+jwt_expiration_hours = 24
 ```
 
 ### 👥 users.toml
@@ -96,6 +106,45 @@ Start the backend FastAPI server:
 ```bash
 cd Summarization_tool/backend && uvicorn main:app --reload --port 8000 --host 0.0.0.0
 ```
+
+---
+
+## ✨ Features
+
+### 📄 Document Processing
+- Upload and process PDF documents
+- Two processing engines:
+  - **Azure Document Intelligence** - Premium processor with superior accuracy
+  - **Docling** - Open-source fallback processor
+- Extract markdown, tables, and figures
+- Bounding box visualization
+
+### 🤖 Entity Extraction
+- Extract custom entities using Azure OpenAI GPT-5 Mini
+- Define custom extraction prompts
+- Concurrent batch extraction
+- Token usage tracking
+
+### 📊 G-Eval Evaluation (NEW!)
+- Evaluate entity extractions using LLM-as-a-judge
+- Support for Azure OpenAI and Vertex AI (Gemini)
+- Built-in metrics:
+  - **Correctness** - Factual accuracy vs ground truth
+  - **Completeness** - Coverage of all key information  
+  - **Relevance** - Focus on requested entities
+- Custom metrics with domain-specific criteria
+- Batch evaluation support
+- Detailed scoring and reasoning
+
+See [Evaluation Guide](docs/EVALUATION_GUIDE.md) for detailed documentation.
+
+---
+
+## 📚 Documentation
+
+- **[Evaluation Guide](docs/EVALUATION_GUIDE.md)** - Complete guide to G-Eval metrics
+- **[Examples](examples/)** - Python examples and usage patterns
+- **[API Docs](http://localhost:8000/docs)** - Interactive API documentation (when server running)
 
 ---
 
