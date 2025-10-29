@@ -18,7 +18,7 @@ from core.config import load_config
 load_config()
 
 from core.middleware import setup_cors
-from api import auth, files, documents, extractions, server
+from api import auth, files, documents, extractions, server, evaluations
 
 
 def create_app() -> FastAPI:
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router)
     app.include_router(documents.router)
     app.include_router(extractions.router)
+    app.include_router(evaluations.router)
     app.include_router(server.router)
 
     return app
