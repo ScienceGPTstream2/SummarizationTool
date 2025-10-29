@@ -132,17 +132,18 @@ cd Summarization_tool/backend && uvicorn main:app --reload --port 8000 --host 0.
   - **Correctness** - Factual accuracy vs ground truth
   - **Completeness** - Coverage of all key information  
   - **Relevance** - Focus on requested entities
+  - **Safety** - PII detection and content safety
 - Custom metrics with domain-specific criteria
 - Batch evaluation support
 - Detailed scoring and reasoning
 
-See [Evaluation Guide](docs/EVALUATION_GUIDE.md) for detailed documentation.
+**Resources:**
+- 🔗 [DeepEval G-Eval Metrics](https://deepeval.com/docs/metrics-llm-evals) - Official DeepEval documentation
 
 ---
 
 ## 📚 Documentation
-
-- **[Evaluation Guide](docs/EVALUATION_GUIDE.md)** - Complete guide to G-Eval metrics
+- **[DeepEval Metrics](https://deepeval.com/docs/metrics-llm-evals)** - Official DeepEval LLM evaluation metrics documentation
 - **[Examples](examples/)** - Python examples and usage patterns
 - **[API Docs](http://localhost:8000/docs)** - Interactive API documentation (when server running)
 
