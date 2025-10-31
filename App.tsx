@@ -38,6 +38,19 @@ export interface DocumentData {
   conversionId?: string;
   markdownPath?: string;
   processorUsed?: string;
+  figures?: Array<{
+    id: string;
+    page: number | null;
+    caption: string | null;
+    image_path?: string;
+    bounding_regions?: Array<{
+      page_number: number;
+      polygon: number[];
+    }>;
+  }>;
+  figuresCount?: number;
+  tablesCount?: number;
+  showResults?: boolean;
 }
 
 export default function App() {
