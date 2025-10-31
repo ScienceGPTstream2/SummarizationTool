@@ -133,13 +133,12 @@ class DoclingService:
             markdown_filename = "document.md"
             markdown_path = conversion_dir / markdown_filename
 
-            # Save markdown with image references
-            # Use a lambda to properly pass keyword argument
+            # Save markdown with image references and convert tables to HTML
             await loop.run_in_executor(
                 self.executor,
-                lambda: result.document.save_as_markdown(
-                    str(markdown_path), image_mode=ImageRefMode.REFERENCED
-                ),
+                self._save_markdown_with_html_tables,
+                result,
+                markdown_path,
             )
 
             # Extract and save bounding box information from DoclingDocument
@@ -256,6 +255,7 @@ class DoclingService:
         convert_sync = self._convert_document_sync
         extract_images_sync = self._extract_images_sync
         extract_bboxes_sync = self._extract_bounding_boxes_sync
+        save_markdown_sync = self._save_markdown_with_html_tables
 
         def _run_and_finalize(conv_id: str, src: Union[str, Path], s_type: str):
             import logging as _logging
@@ -295,10 +295,8 @@ class DoclingService:
                 markdown_filename = "document.md"
                 markdown_path = conv_dir / markdown_filename
 
-                # Save markdown with image references
-                result.document.save_as_markdown(
-                    str(markdown_path), image_mode=ImageRefMode.REFERENCED
-                )
+                # Save markdown with image references and convert tables to HTML
+                save_markdown_sync(result, markdown_path)
 
                 # Extract and save bounding box information
                 raw_analysis_path = conv_dir / "raw_analysis.json"
@@ -404,58 +402,17 @@ class DoclingService:
         figures_dir.mkdir(parents=True, exist_ok=True)
 
         figures_metadata = []
-        page_image_count = 0
-        table_image_count = 0
         picture_image_count = 0
+        table_count = 0
 
         try:
-            # Extract page images (optional - can be disabled if too large)
-            # Commenting out for now to match Azure DI behavior (which doesn't save full page images)
-            # for page_no, page in result.document.pages.items():
-            #     if hasattr(page, 'image') and page.image:
-            #         page_no = page.page_no
-            #         figure_id = f"page-{page_no}"
-            #         page_image_filename = figures_dir / f"{figure_id}.png"
-            #         with page_image_filename.open("wb") as fp:
-            #             page.image.pil_image.save(fp, format="PNG")
-            #
-            #         figures_metadata.append({
-            #             "id": figure_id,
-            #             "page": page_no,
-            #             "caption": f"Page {page_no}",
-            #             "image_path": f"figures/{figure_id}.png",
-            #             "type": "page"
-            #         })
-            #         page_image_count += 1
-
-            # Extract tables and pictures with metadata
+            # Extract only pictures (not tables) as images
             for element, _level in result.document.iterate_items():
+                # Count tables but don't extract as images
                 if isinstance(element, TableItem):
-                    table_image_count += 1
-                    figure_id = f"table-{table_image_count}"
-                    element_image_filename = figures_dir / f"{figure_id}.png"
+                    table_count += 1
 
-                    with element_image_filename.open("wb") as fp:
-                        element.get_image(result.document).save(fp, "PNG")
-
-                    # Extract page number if available
-                    page_num = None
-                    if hasattr(element, "prov") and element.prov:
-                        for prov in element.prov:
-                            if hasattr(prov, "page_no"):
-                                page_num = prov.page_no
-                                break
-
-                    figures_metadata.append(
-                        {
-                            "id": figure_id,
-                            "page": page_num,
-                            "caption": f"Table {table_image_count}",
-                            "image_path": f"figures/{figure_id}.png",
-                            "type": "table",
-                        }
-                    )
-
+                # Extract picture images only
                 if isinstance(element, PictureItem):
                     picture_image_count += 1
                     figure_id = f"picture-{picture_image_count}"
@@ -496,9 +453,65 @@ class DoclingService:
         return {
             "figures_found": len(figures_metadata),
             "figures": figures_metadata,
-            "tables_found": table_image_count,
+            "tables_found": table_count,
             "pictures_found": picture_image_count,
         }
+
+    def _save_markdown_with_html_tables(self, result, markdown_path: Path) -> None:
+        """
+        Save markdown with tables converted to HTML format (matching Azure Doc Intelligence output)
+        Also saves individual table HTML files to tables/ directory
+
+        Args:
+            result: Docling conversion result
+            markdown_path: Path to save the markdown file
+        """
+        import re
+
+        # Create tables directory
+        conversion_dir = markdown_path.parent
+        tables_dir = conversion_dir / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+
+        # First, get the standard markdown output
+        markdown_content = result.document.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
+
+        # Extract HTML for each table and save to separate files
+        table_html_list = []
+        for idx, table in enumerate(result.document.tables, start=1):
+            try:
+                html_table = table.export_to_html(doc=result.document)
+                table_html_list.append(html_table)
+                
+                # Save individual table HTML file
+                table_html_path = tables_dir / f"table-{idx}.html"
+                with open(table_html_path, "w", encoding="utf-8") as f:
+                    f.write(html_table)
+                    
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to export table {idx} to HTML: {str(e)}")
+                table_html_list.append(None)
+
+        # Replace markdown tables with HTML tables
+        # Find all markdown tables in the content
+        table_pattern = r'\|[^\n]*\|[\n\r]+\|[-:\s|]+\|[\n\r]+(?:\|[^\n]*\|[\n\r]+)+'
+        
+        markdown_tables = list(re.finditer(table_pattern, markdown_content))
+        
+        # Replace from end to start to maintain correct positions
+        table_idx = 0
+        for match in reversed(markdown_tables):
+            if table_idx < len(table_html_list) and table_html_list[-(table_idx + 1)]:
+                # Replace markdown table with HTML table
+                start, end = match.span()
+                html_table = table_html_list[-(table_idx + 1)]
+                markdown_content = markdown_content[:start] + html_table + markdown_content[end:]
+            table_idx += 1
+
+        # Save the modified markdown
+        with open(markdown_path, "w", encoding="utf-8") as f:
+            f.write(markdown_content)
 
     def _extract_bounding_boxes_sync(self, result, raw_analysis_path: Path) -> None:
         """

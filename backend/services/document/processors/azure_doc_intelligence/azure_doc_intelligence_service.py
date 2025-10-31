@@ -164,6 +164,14 @@ class AzureDocIntelligenceService:
             with open(markdown_path, "w", encoding="utf-8") as f:
                 f.write(markdown_content)
 
+            # Extract and save tables as separate HTML files
+            await self._extract_and_save_tables(
+                result=result,
+                conversion_dir=conversion_dir,
+                markdown_content=markdown_content,
+                log_path=log_path,
+            )
+
             # Process figures if requested
             figures_metadata = []
 
@@ -378,6 +386,51 @@ class AzureDocIntelligenceService:
 
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(log_entry)
+
+    async def _extract_and_save_tables(
+        self,
+        result: Any,
+        conversion_dir: Path,
+        markdown_content: str,
+        log_path: Path,
+    ) -> None:
+        """
+        Extract tables from Azure result and save as separate HTML files
+
+        Args:
+            result: Azure Document Intelligence result
+            conversion_dir: Conversion directory
+            markdown_content: The markdown content containing HTML tables
+            log_path: Log file path
+        """
+        import re
+
+        if not result.tables or len(result.tables) == 0:
+            await self._log(log_path, "No tables found in document")
+            return
+
+        # Create tables directory
+        tables_dir = conversion_dir / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+
+        await self._log(log_path, f"Found {len(result.tables)} tables to extract")
+
+        # Extract HTML tables from markdown content using regex
+        # Match <table>...</table> blocks
+        table_pattern = r'<table>.*?</table>'
+        html_tables = re.findall(table_pattern, markdown_content, re.DOTALL)
+
+        # Save each table as a separate HTML file
+        for idx, html_table in enumerate(html_tables, start=1):
+            try:
+                table_html_path = tables_dir / f"table-{idx}.html"
+                with open(table_html_path, "w", encoding="utf-8") as f:
+                    f.write(html_table)
+                await self._log(log_path, f"Saved table {idx} to {table_html_path.name}")
+            except Exception as e:
+                await self._log(log_path, f"Failed to save table {idx}: {str(e)}")
+
+        await self._log(log_path, f"Extracted {len(html_tables)} tables to tables/ directory")
 
     async def _download_figure(
         self, result_id: str, figure_id: str, figures_dir: Path, log_path: Path
