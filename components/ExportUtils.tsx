@@ -52,6 +52,7 @@ const getStudyTypeName = (studyTypeId: string): string => {
     "case-study": "Case Study",
     review: "Literature Review",
     "level-1-in-vivo": "Level 1 - In vivo",
+    "level-2-in-vivo": "Level 2 - In vivo",
   };
   return (
     studyTypeNames[studyTypeId as keyof typeof studyTypeNames] || studyTypeId

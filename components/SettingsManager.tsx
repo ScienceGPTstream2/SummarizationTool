@@ -8,6 +8,8 @@ export interface ModelConfig {
   // Optional runtime fields for deployments (used for custom Azure models)
   deployment?: string;
   api_version?: string;
+  project_id?: string; // Added for Gemini
+  location?: string; // Added for Gemini
 }
 
 export interface ApiKeyConfig {
@@ -27,6 +29,8 @@ export interface CustomModelConfig {
   category?: string;
   deployment?: string;
   api_version?: string;
+  project_id?: string; // Added for Gemini
+  location?: string; // Added for Gemini
 }
 
 // Available models configuration (built-in)
@@ -43,10 +47,60 @@ export const allModels: ModelConfig[] = [
     deployment: "gpt-5-mini",
     api_version: "2024-12-01-preview",
   },
+  // Gemini Models (using correct Vertex AI model IDs)
+  {
+    id: "publishers/google/models/gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    provider: "Google Gemini",
+    description: "Google Gemini 2.5 Pro model for entity extraction",
+    requiredApiKey: "gemini_api_key",
+    category: "google",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "us-central1",
+  },
+  {
+    id: "publishers/google/models/gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash Lite",
+    provider: "Google Gemini",
+    description: "Google Gemini 2.5 Flash Lite model for entity extraction",
+    requiredApiKey: "gemini_api_key",
+    category: "google",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "us-central1",
+  },
+  {
+    id: "publishers/google/models/gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    provider: "Google Gemini",
+    description: "Google Gemini 2.5 Flash model for entity extraction",
+    requiredApiKey: "gemini_api_key",
+    category: "google",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "us-central1",
+  },
+  {
+    id: "publishers/google/models/gemini-2.0-flash-lite-001",
+    name: "Gemini 2.0 Flash Lite",
+    provider: "Google Gemini",
+    description: "Google Gemini 2.0 Flash Lite model for entity extraction",
+    requiredApiKey: "gemini_api_key",
+    category: "google",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "us-central1",
+  },
+  {
+    id: "publishers/google/models/gemini-2.0-flash-001",
+    name: "Gemini 2.0 Flash",
+    provider: "Google Gemini",
+    description: "Google Gemini 2.0 Flash model for entity extraction",
+    requiredApiKey: "gemini_api_key",
+    category: "google",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "us-central1",
+  },
 ];
 
 // API Key configurations
-// Only supporting Azure services (OpenAI + Document Intelligence)
 export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
   azure_openai_api_key: {
     key: "azure_openai_api_key",
@@ -77,14 +131,41 @@ export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
     placeholder: "https://your-resource.cognitiveservices.azure.com/",
     category: "Azure",
   },
+  gemini_api_key: {
+    key: "gemini_api_key",
+    displayName: "Gemini API Key",
+    description: "API key for Google Gemini models",
+    placeholder: "Your Google Gemini API key",
+    category: "Google",
+  },
+  gemini_project_id: {
+    key: "gemini_project_id",
+    displayName: "Gemini Project ID",
+    description: "Google Cloud Project ID for Gemini models",
+    placeholder: "Your Google Cloud Project ID",
+    category: "Google",
+  },
+  gemini_location: {
+    key: "gemini_location",
+    displayName: "Gemini Location",
+    description: "Google Cloud Location for Gemini models (e.g., us-central1)",
+    placeholder: "Your Google Cloud Location",
+    category: "Google",
+  },
 };
 
 // Settings management class
 export class SettingsManager {
   private apiKeys: Record<string, string> = {};
   private customModels: CustomModelConfig[] = [];
-  private serverConfig: { is_azure_openai_configured: boolean } = {
+  private serverConfig: {
+    is_azure_openai_configured: boolean;
+    is_gemini_configured: boolean;
+    is_azure_document_intelligence_configured: boolean;
+  } = {
     is_azure_openai_configured: false,
+    is_gemini_configured: false,
+    is_azure_document_intelligence_configured: false,
   };
 
   private storageKey = "ai-summarizer-settings";
@@ -205,6 +286,8 @@ export class SettingsManager {
           category: (m.category as any) || "azure",
           deployment: m.deployment,
           api_version: m.api_version,
+          project_id: m.project_id,
+          location: m.location,
         })
       ),
     ];
@@ -225,6 +308,25 @@ export class SettingsManager {
         );
       }
 
+      // For Gemini provider, require API key, project ID, and location
+      if (model.provider && model.provider.toLowerCase().includes("gemini")) {
+        if (this.serverConfig.is_gemini_configured) {
+          return true;
+        }
+        const apiKey = this.getApiKey("gemini_api_key");
+        const projectId = this.getApiKey("gemini_project_id");
+        const location = this.getApiKey("gemini_location");
+        return (
+          !!apiKey &&
+          !!projectId &&
+          !!location &&
+          apiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE" &&
+          projectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE" &&
+          location !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
+        );
+      }
+
+      // For other providers, just check the required API key
       const hasApiKey = this.getApiKey(model.requiredApiKey);
       return (
         !!hasApiKey &&
@@ -256,6 +358,26 @@ export class SettingsManager {
       );
     }
 
+    if (
+      (model as any).provider &&
+      (model as any).provider.toLowerCase().includes("gemini")
+    ) {
+      if (this.serverConfig.is_gemini_configured) {
+        return true;
+      }
+      const apiKey = this.getApiKey("gemini_api_key");
+      const projectId = this.getApiKey("gemini_project_id");
+      const location = this.getApiKey("gemini_location");
+      return (
+        !!apiKey &&
+        !!projectId &&
+        !!location &&
+        apiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE" &&
+        projectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE" &&
+        location !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
+      );
+    }
+
     const apiKey = this.getApiKey((model as any).requiredApiKey);
     return (
       !!apiKey &&
@@ -265,6 +387,9 @@ export class SettingsManager {
   }
 
   isAzureDocumentIntelligenceAvailable(): boolean {
+    if (this.serverConfig.is_azure_document_intelligence_configured) {
+      return true;
+    }
     const apiKey = this.getApiKey("azure_document_intelligence_api_key");
     const endpoint = this.getApiKey("azure_document_intelligence_endpoint");
     return (

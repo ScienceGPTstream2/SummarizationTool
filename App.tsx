@@ -25,6 +25,7 @@ export interface DocumentData {
   extractedText: string;
   annotatedOutput: string;
   studyType: string;
+  summaryPrompt?: string;
   selectedModel: string;
   entities: Array<{
     name: string;
