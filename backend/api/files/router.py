@@ -1,6 +1,6 @@
 """File management API endpoints"""
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 
 from core.dependencies import get_current_user
@@ -13,10 +13,26 @@ file_service = FileService()
 
 
 @router.post("/upload", dependencies=[Depends(get_current_user)])
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(request: Request, file: UploadFile = File(...)):
     """
     Upload and store a PDF file
     """
+    print(f"[UPLOAD] Request headers: {request.headers}")
+    # Check content-length header first to fail fast for large files
+    # This helps identify if a proxy/server is blocking the request before it reaches the app
+    if "content-length" in request.headers:
+        content_length = int(request.headers["content-length"])
+        # The router has a 20MB limit, but we'll check against a slightly larger 25MB buffer
+        # to see if the request even makes it past the proxy.
+        if content_length > 25 * 1024 * 1024:  # 25MB
+            raise HTTPException(
+                status_code=413,  # Payload Too Large
+                detail=(
+                    f"Request size ({content_length / 1024 / 1024:.2f}MB) exceeds the server's limit. "
+                    "This may be due to a proxy or server configuration."
+                ),
+            )
+
     try:
         # Log upload attempt
         print(
@@ -41,17 +57,18 @@ async def upload_file(file: UploadFile = File(...)):
         # SECURITY: Validate it's actually a PDF by checking magic bytes (file signature)
         # This prevents users from renaming malicious files to .pdf
         # PDF files MUST start with "%PDF-" (hex: 25 50 44 46 2D)
-        if len(content) < 5 or not content.startswith(b"%PDF-"):
-            print(f"[UPLOAD] Invalid PDF signature. First 10 bytes: {content[:10]}")
+        # More flexible check: search for magic bytes within the first 1024 bytes
+        if b"%PDF-" not in content[:1024]:
+            print(f"[UPLOAD] Invalid PDF signature. First 20 bytes: {content[:20]}")
             raise HTTPException(
                 status_code=400,
                 detail="File is not a valid PDF. The file content does not match PDF format.",
             )
 
-        # Validate file size (10MB limit)
+        # Validate file size (20MB limit)
 
-        if file_size > 10 * 1024 * 1024:  # 10MB in bytes
-            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+        if file_size > 20 * 1024 * 1024:  # 20MB in bytes
+            raise HTTPException(status_code=400, detail="File size exceeds 20MB limit")
 
         # Save file using file service
         file_path = await file_service.save_uploaded_file(file.filename, content)

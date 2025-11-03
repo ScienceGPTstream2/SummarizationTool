@@ -92,6 +92,9 @@ export function ProcessingPage({
   }
 
   useEffect(() => {
+    // Refresh server config when component mounts to get latest API key availability
+    settingsManager.refreshServerConfig();
+
     let timer: NodeJS.Timeout;
     if (isProcessing) {
       setElapsedTime(0);

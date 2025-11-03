@@ -30,6 +30,8 @@ import {
   File,
   AlertTriangle,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { DocumentData } from "../App";
 import {
   generateWordDocument,
@@ -72,6 +74,9 @@ export function EntityExtractionPage({
   const [entities, setEntities] = useState<Entity[]>(
     documentData.entities || []
   );
+  const [summaryPrompt, setSummaryPrompt] = useState(
+    documentData.summaryPrompt || ""
+  );
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showResults, setShowResults] = useState(!!documentData.finalSummary);
@@ -83,6 +88,8 @@ export function EntityExtractionPage({
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   useEffect(() => {
     const loadModels = async () => {
+      // Refresh server config when component mounts to get latest API key availability
+      await settingsManager.refreshServerConfig();
       // Get all available models from settings manager
       const models = settingsManager.getAvailableModels();
       setAvailableModels(models);
@@ -93,16 +100,20 @@ export function EntityExtractionPage({
   useEffect(() => {
     if (selectedStudyType && !documentData.entities.length) {
       // Load template entities for the selected study type
-      const templateEntities = loadStudyTypeTemplate(selectedStudyType);
+      const { entities: templateEntities, summaryPrompt: templateSummaryPrompt } =
+        loadStudyTypeTemplate(selectedStudyType);
       setEntities(templateEntities);
+      setSummaryPrompt(templateSummaryPrompt);
     }
   }, [selectedStudyType, documentData.entities.length]);
 
   const handleStudyTypeChange = (value: string) => {
     setSelectedStudyType(value);
     // Load template entities for the new study type
-    const templateEntities = loadStudyTypeTemplate(value);
+    const { entities: templateEntities, summaryPrompt: templateSummaryPrompt } =
+      loadStudyTypeTemplate(value);
     setEntities(templateEntities);
+    setSummaryPrompt(templateSummaryPrompt);
     setShowResults(false);
   };
 
@@ -141,12 +152,18 @@ export function EntityExtractionPage({
       const updatedEntities = [...entities];
 
       const modelObj = availableModels.find((m) => m.id === selectedModel);
-      const deploymentToUse = modelObj?.deployment || selectedModel;
-      const apiVersionToUse = modelObj?.api_version || undefined;
+      const modelTypeToUse = modelObj?.category === "google" ? "gemini" : "azure"; // Determine model_type
+      const modelIdToUse = modelObj?.id; // For Gemini models
+      const deploymentToUse = modelObj?.deployment; // For Azure models
+      const apiVersionToUse = modelObj?.api_version; // For Azure models
 
       // Get user-provided API keys from settings if available
       const azureApiKey = settingsManager.getApiKey("azure_openai_api_key");
       const azureEndpoint = settingsManager.getApiKey("azure_openai_endpoint");
+      const geminiApiKey = settingsManager.getApiKey("gemini_api_key");
+      const geminiProjectId = settingsManager.getApiKey("gemini_project_id");
+      const geminiLocation = settingsManager.getApiKey("gemini_location");
+
 
       const token = localStorage.getItem("token");
       const resp = await fetch("/api/extract", {
@@ -157,12 +174,13 @@ export function EntityExtractionPage({
         },
         body: JSON.stringify({
           conversion_id: conversionId,
+          model_type: modelTypeToUse,
+          model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
           entities: updatedEntities,
-          max_tokens: 1024,
+          max_tokens: 4096,
           temperature: 0.0,
-          provider: "azure_openai", // Only Azure OpenAI is supported
           processor_used: documentData.processorUsed, // Include processor used for efficient markdown retrieval
           // Include user-provided API keys if available
           ...(azureApiKey && azureApiKey !== "YOUR_AZURE_OPENAI_API_KEY_HERE"
@@ -171,6 +189,16 @@ export function EntityExtractionPage({
           ...(azureEndpoint &&
           azureEndpoint !== "YOUR_AZURE_OPENAI_ENDPOINT_HERE"
             ? { azure_endpoint: azureEndpoint }
+            : {}),
+          // Include Gemini specific keys if available and model is Gemini
+          ...(modelTypeToUse === "gemini" && geminiApiKey && geminiApiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+            ? { gemini_api_key: geminiApiKey }
+            : {}),
+          ...(modelTypeToUse === "gemini" && geminiProjectId && geminiProjectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE"
+            ? { gemini_project_id: geminiProjectId }
+            : {}),
+          ...(modelTypeToUse === "gemini" && geminiLocation && geminiLocation !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
+            ? { gemini_location: geminiLocation }
             : {}),
         }),
       });
@@ -206,11 +234,44 @@ export function EntityExtractionPage({
         };
       });
 
-      // Build a simple final summary combining key extracted entities (optional)
-      const summaryParts = newUpdatedEntities.map(
-        (e) => `**${e.name}**: ${e.extracted || "N/A"}`
-      );
-      const finalSummary = `## Extracted Entities Summary\n\n${summaryParts.join("\n\n")}`;
+      // Generate the paragraph summary
+      const summaryResp = await fetch("/api/generate_paragraph", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entities: newUpdatedEntities,
+          summary_prompt: summaryPrompt,
+          model_type: modelTypeToUse,
+          model_id: modelIdToUse,
+          deployment: deploymentToUse,
+          api_version: apiVersionToUse,
+          azure_endpoint: azureEndpoint,
+          azure_api_key: azureApiKey,
+          // Include Gemini specific keys if available and model is Gemini
+          ...(modelTypeToUse === "gemini" && geminiApiKey && geminiApiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+            ? { gemini_api_key: geminiApiKey }
+            : {}),
+          ...(modelTypeToUse === "gemini" && geminiProjectId && geminiProjectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE"
+            ? { gemini_project_id: geminiProjectId }
+            : {}),
+          ...(modelTypeToUse === "gemini" && geminiLocation && geminiLocation !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
+            ? { gemini_location: geminiLocation }
+            : {}),
+        }),
+      });
+
+      if (!summaryResp.ok) {
+        const errBody = await summaryResp.json().catch(() => ({}));
+        const detail =
+          errBody.detail || errBody.error || "Summary generation failed";
+        throw new Error(detail);
+      }
+
+      const summaryData = await summaryResp.json();
+      const finalSummary = summaryData.summary;
 
       // Persist results to parent state
       setDocumentData({
@@ -218,6 +279,7 @@ export function EntityExtractionPage({
         studyType: selectedStudyType,
         selectedModel: selectedModel,
         entities: newUpdatedEntities,
+        summaryPrompt: summaryPrompt,
         finalSummary,
       });
 
@@ -474,6 +536,24 @@ export function EntityExtractionPage({
                 </div>
               ))}
 
+              <Card className="border-gray-200">
+                <CardHeader>
+                  <CardTitle>Paragraph Generator Prompt</CardTitle>
+                  <CardDescription>
+                    This prompt will be used to generate the final paragraph
+                    from the extracted entities.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Textarea
+                    value={summaryPrompt}
+                    onChange={(e) => setSummaryPrompt(e.target.value)}
+                    placeholder="Enter the prompt for paragraph generation..."
+                    rows={8}
+                    className="resize-y min-h-[150px]"
+                  />
+                </CardContent>
+              </Card>
               <Button
                 variant="outline"
                 onClick={handleRunSummarization}
@@ -518,9 +598,11 @@ export function EntityExtractionPage({
                             className="border-b border-border pb-3 last:border-b-0"
                           >
                             <h4 className="font-medium mb-2">{entity.name}</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {entity.extracted}
-                            </p>
+                            <div className="prose prose-sm max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {entity.extracted}
+                              </ReactMarkdown>
+                            </div>
                           </div>
                         ))}
                     </div>
@@ -530,14 +612,14 @@ export function EntityExtractionPage({
 
               <Card className="border-gray-200">
                 <CardHeader>
-                  <CardTitle>Final Summary</CardTitle>
+                  <CardTitle>Generated Paragraph</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ScrollArea className="h-96">
                     <div className="prose prose-sm">
-                      <pre className="whitespace-pre-wrap text-sm">
+                      <p className="whitespace-pre-wrap text-sm">
                         {documentData.finalSummary}
-                      </pre>
+                      </p>
                     </div>
                   </ScrollArea>
                 </CardContent>

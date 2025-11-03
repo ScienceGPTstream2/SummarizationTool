@@ -34,6 +34,8 @@ async def extract_entities(request: ExtractRequest):
             result = await llm_service.extract_entities_from_markdown(
                 markdown=markdown,
                 extraction_prompt=entity.prompt,
+                model_type=request.model_type,
+                model_id=request.model_id,
                 deployment=request.deployment,
                 api_version=request.api_version,
                 endpoint_override=request.azure_endpoint,
