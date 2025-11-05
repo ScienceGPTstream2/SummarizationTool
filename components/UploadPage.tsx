@@ -241,7 +241,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 className="hidden"
               />
               <p className="text-sm text-muted-foreground mt-4">
-                Supports PDF files up to 10MB
+                Supports PDF files up to 20MB
               </p>
             </div>
           ) : (
