@@ -18,22 +18,23 @@ class AzureLLMClient:
 
     async def generate_paragraph_with_azure(
         self,
-        prompt: str,
+        user_prompt: str,
         deployment: Optional[str] = None,
         api_version: Optional[str] = None,
         endpoint_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
         max_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         used_endpoint = endpoint_override or self.endpoint
         used_api_key = api_key_override or self.api_key
         if not used_endpoint or not used_api_key:
             return {"success": False, "error": "Azure endpoint or api key missing."}
 
-        system_message = "You are a helpful assistant that specializes in summarizing scientific information. Your task is to synthesize the provided extracted entities into a concise, well-structured paragraph."
+        system_message = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": user_prompt},
         ]
 
         used_deployment = (
@@ -180,7 +181,7 @@ Prompt:
             except Exception:
                 msg_count = "unknown"
             print(
-                f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}, temperature={temperature}"
+                f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}"
             )
 
             start_time = time.time()

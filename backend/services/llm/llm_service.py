@@ -37,12 +37,15 @@ class LLMService:
         self,
         markdown: str,
         extraction_prompt: str,
-        model_type: str, # e.g., "azure", "gemini"
-        model_id: Optional[str] = None, # for Gemini
-        deployment: Optional[str] = None, # for Azure
-        api_version: Optional[str] = None, # for Azure
-        endpoint_override: Optional[str] = None, # for Azure
-        api_key_override: Optional[str] = None, # for Azure
+        model_type: str,  # e.g., "azure", "gemini"
+        model_id: Optional[str] = None,  # for Gemini
+        deployment: Optional[str] = None,  # for Azure
+        api_version: Optional[str] = None,  # for Azure
+        endpoint_override: Optional[str] = None,  # for Azure
+        api_key_override: Optional[str] = None,  # for Azure
+        gemini_api_key_override: Optional[str] = None,  # for Gemini
+        gemini_project_id_override: Optional[str] = None,  # for Gemini
+        gemini_location_override: Optional[str] = None,  # for Gemini
         max_tokens: int = 1024,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
@@ -71,19 +74,25 @@ class LLMService:
                 model_id,
                 max_tokens,
                 temperature,
+                gemini_api_key_override,
+                gemini_project_id_override,
+                gemini_location_override,
             )
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
 
     async def generate_paragraph(
         self,
-        prompt: str,
-        model_type: str, # e.g., "azure", "gemini"
-        model_id: Optional[str] = None, # for Gemini
-        deployment: Optional[str] = None, # for Azure
-        api_version: Optional[str] = None, # for Azure
-        endpoint_override: Optional[str] = None, # for Azure
-        api_key_override: Optional[str] = None, # for Azure
+        user_prompt: str,
+        model_type: str,  # e.g., "azure", "gemini"
+        model_id: Optional[str] = None,  # for Gemini
+        deployment: Optional[str] = None,  # for Azure
+        api_version: Optional[str] = None,  # for Azure
+        endpoint_override: Optional[str] = None,  # for Azure
+        api_key_override: Optional[str] = None,  # for Azure
+        gemini_api_key_override: Optional[str] = None,  # for Gemini
+        gemini_project_id_override: Optional[str] = None,  # for Gemini
+        gemini_location_override: Optional[str] = None,  # for Gemini
         max_tokens: int = 2048,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
@@ -94,21 +103,25 @@ class LLMService:
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
             return await self.azure_client.generate_paragraph_with_azure(
-                prompt,
+                user_prompt,
                 deployment,
                 api_version,
                 endpoint_override,
                 api_key_override,
                 max_tokens,
+                temperature,
             )
         elif model_type == "gemini":
             if self.gemini_client.disabled:
                 return {"success": False, "error": "Gemini is not configured."}
             return await self.gemini_client.generate_paragraph_with_gemini(
-                prompt,
+                user_prompt,
                 model_id,
                 max_tokens,
                 temperature,
+                gemini_api_key_override,
+                gemini_project_id_override,
+                gemini_location_override,
             )
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}

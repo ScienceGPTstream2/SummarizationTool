@@ -17,6 +17,7 @@ import toml
 # Load configuration before importing services
 from core.config import load_config
 
+
 # Moved load_secrets_to_env here to ensure all secrets are loaded early
 def load_secrets_to_env(secrets_path: str = None):
     """Loads secrets from a TOML file into environment variables."""
@@ -26,7 +27,7 @@ def load_secrets_to_env(secrets_path: str = None):
         if not os.path.exists(secrets_path):
             # Try absolute path (when running from project root)
             secrets_path = "Summarization_tool/backend/core/secrets.toml"
-    
+
     try:
         secrets = toml.load(secrets_path)
         for section, keys in secrets.items():
@@ -39,11 +40,20 @@ def load_secrets_to_env(secrets_path: str = None):
     except Exception as e:
         print(f"Error loading secrets from {secrets_path}: {e}")
 
+
 load_secrets_to_env()
 load_config()
 
 from core.middleware import setup_cors
-from api import auth, files, documents, extractions, server, paragraphgenerator
+from api import (
+    auth,
+    files,
+    documents,
+    extractions,
+    server,
+    paragraphgenerator,
+    evaluations,
+)
 
 
 def create_app() -> FastAPI:
@@ -69,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router)
     app.include_router(documents.router)
     app.include_router(extractions.router)
+    app.include_router(evaluations.router)
     app.include_router(server.router)
     app.include_router(paragraphgenerator.router)
 

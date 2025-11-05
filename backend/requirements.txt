@@ -12,3 +12,9 @@ azure-ai-documentintelligence>=1.0.2
 azure-core==1.35.1
 toml>=0.10.2
 PyMuPDF>=1.26.5
+deepeval>=3.6.9
+google-cloud-aiplatform>=1.122.0
+langchain-openai>=1.0.1
+langchain-google-vertexai>=3.0.1
+pytest>=8.4.2
+pytest-asyncio>=1.2.0

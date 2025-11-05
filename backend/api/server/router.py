@@ -52,7 +52,7 @@ async def get_available_models():
     Return list of models configured via environment (secrets.toml)
     """
     models = []
-    
+
     # Add Azure OpenAI models if configured
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
@@ -68,7 +68,7 @@ async def get_available_models():
                 "api_version": api_version,
             }
         )
-    
+
     # Add Gemini models if configured
     gemini_project_id = os.getenv("GEMINI_PROJECT_ID")
     gemini_location = os.getenv("GEMINI_LOCATION")
@@ -118,5 +118,5 @@ async def get_available_models():
             },
         ]
         models.extend(gemini_models)
-    
+
     return JSONResponse(status_code=200, content=models)

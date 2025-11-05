@@ -66,3 +66,7 @@ backend/uploads/
 /backend/metadata
 /backend/services/document/processors/markdown_output
 /backend/output
+/backend/core/hcsx-scigpt2-innocentrhino-acm-f87f8026be3d.json
+/backend/.deepeval/.deepeval_telemetry.txt
+/backend/tests/
+/files/

@@ -1,62 +1,78 @@
 export const level1EpidemiologyTemplate = {
   studyType: "level-1-epidemiology",
   displayName: "Level 1 - Epidemiology",
+  summaryPrompt:
+    "Take the following extracted entities and combine them into a single cohesive paragraph. Maintain all factual details exactly as provided. Do not modify, add, or omit any of the extracted information.",
   entities: [
     {
       name: "Study Author(s)",
-      prompt: "Extract the study author(s).\n\nFew-shot examples:\nInput: \"The study was conducted by John Doe, Jane Smith, and their team.\"\nOutput: \"John Doe, Jane Smith\"\nInput: \"Authors: Maria Garcia, David Chen.\"\nOutput: \"Maria Garcia, David Chen\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the study author(s).\n\nFew-shot examples:\nInput: "The study was conducted by John Doe, Jane Smith, and their team."\nOutput: "John Doe, Jane Smith"\nInput: "Authors: Maria Garcia, David Chen."\nOutput: "Maria Garcia, David Chen"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Author Affiliations",
-      prompt: "Extract the affiliations of the authors.\n\nFew-shot examples:\nInput: \"John Doe is from the Department of Epidemiology, University of Toronto. Jane Smith is from the Canadian Cancer Research Centre.\"\nOutput: \"Department of Epidemiology, University of Toronto; Canadian Cancer Research Centre\"\nInput: \"Author Affiliation: National Institute for Public Health, Ottawa.\"\nOutput: \"National Institute for Public Health, Ottawa\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the affiliations of the authors.\n\nFew-shot examples:\nInput: "John Doe is from the Department of Epidemiology, University of Toronto. Jane Smith is from the Canadian Cancer Research Centre."\nOutput: "Department of Epidemiology, University of Toronto; Canadian Cancer Research Centre"\nInput: "Author Affiliation: National Institute for Public Health, Ottawa."\nOutput: "National Institute for Public Health, Ottawa"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Study Title",
-      prompt: "Extract the title of the study.\n\nFew-shot examples:\nInput: \"Title: Association between pesticide exposure and Parkinson’s disease among agricultural workers.\"\nOutput: \"Association between pesticide exposure and Parkinson’s disease among agricultural workers\"\nInput: \"The paper 'Prenatal pesticide exposure and child neurodevelopment' presents...\"\nOutput: \"Prenatal pesticide exposure and child neurodevelopment\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the title of the study.\n\nFew-shot examples:\nInput: "Title: Association between pesticide exposure and Parkinson’s disease among agricultural workers."\nOutput: "Association between pesticide exposure and Parkinson’s disease among agricultural workers"\nInput: "The paper \'Prenatal pesticide exposure and child neurodevelopment\' presents..."\nOutput: "Prenatal pesticide exposure and child neurodevelopment"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Publication Date",
-      prompt: "Extract the publication date of the study.\n\nFew-shot examples:\nInput: \"Published online: 15 January 2023.\"\nOutput: \"15 January 2023\"\nInput: \"The work was published in May 2022.\"\nOutput: \"May 2022\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the publication date of the study.\n\nFew-shot examples:\nInput: "Published online: 15 January 2023."\nOutput: "15 January 2023"\nInput: "The work was published in May 2022."\nOutput: "May 2022"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Journal",
-      prompt: "Extract the name of the journal where the study was published.\n\nFew-shot examples:\nInput: \"The study appeared in the Journal of Environmental Health.\"\nOutput: \"Journal of Environmental Health\"\nInput: \"Published in: Environmental Research, Vol. 212, 2023.\"\nOutput: \"Environmental Research\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the name of the journal where the study was published.\n\nFew-shot examples:\nInput: "The study appeared in the Journal of Environmental Health."\nOutput: "Journal of Environmental Health"\nInput: "Published in: Environmental Research, Vol. 212, 2023."\nOutput: "Environmental Research"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Participant Numbers",
-      prompt: "Extract the total number of study participants, and where possible, specify the number of exposed and control subjects.\n\nFew-shot examples:\nInput: \"A total of 856 participants were included, with 423 exposed and 433 unexposed controls.\"\nOutput: \"856 total (423 exposed, 433 controls)\"\nInput: \"The study enrolled 120 pesticide applicators.\"\nOutput: \"120 participants (exposed group only)\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the total number of study participants, and where possible, specify the number of exposed and control subjects.\n\nFew-shot examples:\nInput: "A total of 856 participants were included, with 423 exposed and 433 unexposed controls."\nOutput: "856 total (423 exposed, 433 controls)"\nInput: "The study enrolled 120 pesticide applicators."\nOutput: "120 participants (exposed group only)"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Pesticide of Interest",
-      prompt: "Identify the pesticide or group of pesticides evaluated in the study.\n\nFew-shot examples:\nInput: \"Exposure to glyphosate was assessed among agricultural workers.\"\nOutput: \"glyphosate\"\nInput: \"The study examined organophosphate exposure.\"\nOutput: \"organophosphates\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Identify the pesticide or group of pesticides evaluated in the study.\n\nFew-shot examples:\nInput: "Exposure to glyphosate was assessed among agricultural workers."\nOutput: "glyphosate"\nInput: "The study examined organophosphate exposure."\nOutput: "organophosphates"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Method of Measurement",
-      prompt: "Extract the method used to quantify or estimate pesticide exposure. Include biomonitoring, questionnaires, job exposure matrices, or environmental sampling as applicable.\n\nFew-shot examples:\nInput: \"Exposure was determined using urinary metabolite concentrations measured by GC-MS.\"\nOutput: \"urinary metabolite analysis (GC-MS)\"\nInput: \"Exposure classification was based on self-reported pesticide use from structured interviews.\"\nOutput: \"self-reported pesticide use questionnaire\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the method used to quantify or estimate pesticide exposure. Include biomonitoring, questionnaires, job exposure matrices, or environmental sampling as applicable.\n\nFew-shot examples:\nInput: "Exposure was determined using urinary metabolite concentrations measured by GC-MS."\nOutput: "urinary metabolite analysis (GC-MS)"\nInput: "Exposure classification was based on self-reported pesticide use from structured interviews."\nOutput: "self-reported pesticide use questionnaire"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Biological Samples",
-      prompt: "Identify the type of biological sample collected for pesticide or biomarker analysis (e.g., blood, urine, serum, hair, breast milk).\n\nFew-shot examples:\nInput: \"Blood samples were collected for organochlorine analysis.\"\nOutput: \"blood\"\nInput: \"Urine samples were analyzed for pesticide metabolites.\"\nOutput: \"urine\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Identify the type of biological sample collected for pesticide or biomarker analysis (e.g., blood, urine, serum, hair, breast milk).\n\nFew-shot examples:\nInput: "Blood samples were collected for organochlorine analysis."\nOutput: "blood"\nInput: "Urine samples were analyzed for pesticide metabolites."\nOutput: "urine"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Health Outcome",
-      prompt: "Extract the primary health outcome(s) evaluated in relation to pesticide exposure.\n\nFew-shot examples:\nInput: \"The study evaluated associations between pesticide exposure and thyroid hormone levels.\"\nOutput: \"thyroid hormone levels\"\nInput: \"Investigated the relationship between chlorpyrifos exposure and childhood ADHD.\"\nOutput: \"childhood ADHD\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the primary health outcome(s) evaluated in relation to pesticide exposure.\n\nFew-shot examples:\nInput: "The study evaluated associations between pesticide exposure and thyroid hormone levels."\nOutput: "thyroid hormone levels"\nInput: "Investigated the relationship between chlorpyrifos exposure and childhood ADHD."\nOutput: "childhood ADHD"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Odds Ratio (Effect Measure) plus CI",
-      prompt: "Extract the reported effect estimate (odds ratio, relative risk, or hazard ratio) and the corresponding confidence interval.\n\nFew-shot examples:\nInput: \"Adjusted odds ratio for high-exposure group was 1.45 (95% CI: 1.10–1.90).\"\nOutput: \"OR 1.45 (95% CI: 1.10–1.90)\"\nInput: \"Relative risk for pesticide users versus non-users was 0.85 (95% CI: 0.60–1.20).\"\nOutput: \"RR 0.85 (95% CI: 0.60–1.20)\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the reported effect estimate (odds ratio, relative risk, or hazard ratio) and the corresponding confidence interval.\n\nFew-shot examples:\nInput: "Adjusted odds ratio for high-exposure group was 1.45 (95% CI: 1.10–1.90)."\nOutput: "OR 1.45 (95% CI: 1.10–1.90)"\nInput: "Relative risk for pesticide users versus non-users was 0.85 (95% CI: 0.60–1.20)."\nOutput: "RR 0.85 (95% CI: 0.60–1.20)"\nIf not reported, output "Not Reported."',
     },
     {
       name: "Study Author Conclusion",
-      prompt: "Extract the study author’s overall conclusion or interpretation regarding the association between pesticide exposure and the health outcome.\n\nFew-shot examples:\nInput: \"The authors concluded that exposure to organophosphates was associated with decreased neurodevelopmental scores in children.\"\nOutput: \"Exposure to organophosphates associated with decreased neurodevelopmental scores.\"\nInput: \"Authors found no significant association between glyphosate exposure and cancer risk.\"\nOutput: \"No significant association between glyphosate exposure and cancer risk.\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the study author’s overall conclusion or interpretation regarding the association between pesticide exposure and the health outcome.\n\nFew-shot examples:\nInput: "The authors concluded that exposure to organophosphates was associated with decreased neurodevelopmental scores in children."\nOutput: "Exposure to organophosphates associated with decreased neurodevelopmental scores."\nInput: "Authors found no significant association between glyphosate exposure and cancer risk."\nOutput: "No significant association between glyphosate exposure and cancer risk."\nIf not reported, output "Not Reported."',
     },
     {
       name: "Study Author Noted Strength",
-      prompt: "Extract the key strengths of the study as noted by the authors, such as large sample size, biomonitoring data, longitudinal design, or control for confounders.\n\nFew-shot examples:\nInput: \"Strengths include detailed exposure assessment and adjustment for multiple confounders.\"\nOutput: \"Detailed exposure assessment; controlled for confounders.\"\nInput: \"A major strength was the use of biomarker-based exposure measurement.\"\nOutput: \"Biomarker-based exposure measurement.\"\nIf not reported, output \"Not Reported.\""
+      prompt:
+        'Extract the key strengths of the study as noted by the authors, such as large sample size, biomonitoring data, longitudinal design, or control for confounders.\n\nFew-shot examples:\nInput: "Strengths include detailed exposure assessment and adjustment for multiple confounders."\nOutput: "Detailed exposure assessment; controlled for confounders."\nInput: "A major strength was the use of biomarker-based exposure measurement."\nOutput: "Biomarker-based exposure measurement."\nIf not reported, output "Not Reported."',
     },
     {
       name: "Study Author Noted Limitations",
-      prompt: "Extract the limitations of the study as acknowledged by the authors, such as small sample size, self-reported exposure, recall bias, or residual confounding.\n\nFew-shot examples:\nInput: \"Limitations include reliance on self-reported pesticide use and potential recall bias.\"\nOutput: \"Self-reported exposure; recall bias.\"\nInput: \"Authors noted limited statistical power due to small sample size.\"\nOutput: \"Small sample size; limited statistical power.\"\nIf not reported, output \"Not Reported.\""
-    }
-  ]
+      prompt:
+        'Extract the limitations of the study as acknowledged by the authors, such as small sample size, self-reported exposure, recall bias, or residual confounding.\n\nFew-shot examples:\nInput: "Limitations include reliance on self-reported pesticide use and potential recall bias."\nOutput: "Self-reported exposure; recall bias."\nInput: "Authors noted limited statistical power due to small sample size."\nOutput: "Small sample size; limited statistical power."\nIf not reported, output "Not Reported."',
+    },
+  ],
 };

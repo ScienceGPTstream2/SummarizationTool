@@ -87,6 +87,10 @@ async def process_uploaded_file(
             response_content["figures_found"] = result["metadata"]["figures_found"]
             response_content["figures"] = result["metadata"].get("figures", [])
 
+        # Include tables information if available
+        if "tables_found" in result["metadata"]:
+            response_content["tables_found"] = result["metadata"]["tables_found"]
+
         return JSONResponse(status_code=200, content=response_content)
 
     except HTTPException:
@@ -320,4 +324,70 @@ async def get_figure_image(document_id: str, figure_filename: str):
         print(f"[FIGURE] Error: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Error retrieving figure image: {str(e)}"
+        )
+
+
+@router.get(
+    "/{document_id}/tables/{table_filename}", dependencies=[Depends(get_current_user)]
+)
+async def get_table_html(document_id: str, table_filename: str):
+    """
+    Serve a specific table HTML file
+
+    Args:
+        document_id: The document/conversion ID
+        table_filename: The table filename (e.g., "table-1.html")
+
+    Returns:
+        The table HTML file
+    """
+    try:
+        base_path = Path(__file__).resolve().parents[2]
+
+        # Try unified output directory structure for both processors
+        possible_paths = [
+            base_path / "output" / "docling" / document_id / "tables" / table_filename,
+            base_path
+            / "output"
+            / "azure_doc_intelligence"
+            / document_id
+            / "tables"
+            / table_filename,
+        ]
+
+        print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")
+
+        table_path = None
+        for path in possible_paths:
+            print(f"[TABLE] Checking path: {path}")
+            if path.exists():
+                table_path = path
+                print(f"[TABLE] ✅ Found at: {path}")
+                break
+
+        if not table_path:
+            print(f"[TABLE] File not found in any location")
+            raise HTTPException(
+                status_code=404, detail=f"Table file not found: {table_filename}"
+            )
+
+        # Security check: ensure the file is within the expected output directory
+        output_dir = base_path / "output"
+        if not table_path.is_relative_to(output_dir):
+            print(f"[TABLE] Security check failed - path not within output directory")
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        print(f"[TABLE] ✅ Serving table: {table_filename}")
+
+        # Return the HTML file
+        return FileResponse(
+            path=str(table_path), media_type="text/html", filename=table_filename
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[TABLE] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving table file: {str(e)}"
         )
