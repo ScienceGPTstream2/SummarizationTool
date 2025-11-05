@@ -59,6 +59,7 @@ wheels/
 # Virtual environment
 venv/
 backend/venv/
+backend/.venv/
 backend/markdown_output/
 backend/uploads/
 

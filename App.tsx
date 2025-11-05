@@ -27,6 +27,7 @@ export interface DocumentData {
   extractedText: string;
   annotatedOutput: string;
   studyType: string;
+  summaryPrompt?: string;
   selectedModel: string;
   entities: Array<{
     name: string;
@@ -68,6 +69,12 @@ export interface DocumentData {
   figuresCount?: number;
   tablesCount?: number;
   showResults?: boolean;
+  // Evaluation configuration
+  evaluationConfig?: {
+    selectedMetrics?: string[];
+    selectedProviders?: string[];
+    customEvaluationSteps?: Record<string, string[]>;
+  };
 }
 
 export default function App() {
