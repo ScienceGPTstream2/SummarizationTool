@@ -346,12 +346,7 @@ async def get_table_html(document_id: str, table_filename: str):
 
         # Try unified output directory structure for both processors
         possible_paths = [
-            base_path
-            / "output"
-            / "docling"
-            / document_id
-            / "tables"
-            / table_filename,
+            base_path / "output" / "docling" / document_id / "tables" / table_filename,
             base_path
             / "output"
             / "azure_doc_intelligence"
@@ -379,9 +374,7 @@ async def get_table_html(document_id: str, table_filename: str):
         # Security check: ensure the file is within the expected output directory
         output_dir = base_path / "output"
         if not table_path.is_relative_to(output_dir):
-            print(
-                f"[TABLE] Security check failed - path not within output directory"
-            )
+            print(f"[TABLE] Security check failed - path not within output directory")
             raise HTTPException(status_code=403, detail="Access denied")
 
         print(f"[TABLE] ✅ Serving table: {table_filename}")

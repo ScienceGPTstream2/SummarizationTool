@@ -163,6 +163,7 @@ class EvaluationService:
         provider: str = "azure_openai",
         threshold: float = 0.5,
         strict_mode: bool = False,
+        custom_evaluation_steps: Optional[Dict[str, List[str]]] = None,
         **model_kwargs,
     ) -> Dict[str, Any]:
         """
@@ -178,6 +179,7 @@ class EvaluationService:
             provider: LLM provider for evaluation ('azure_openai' or 'vertex_ai')
             threshold: Score threshold for passing
             strict_mode: If True, only perfect scores pass
+            custom_evaluation_steps: Custom evaluation steps for each metric (optional)
             **model_kwargs: Additional model configuration
 
         Returns:
@@ -207,11 +209,20 @@ class EvaluationService:
                     continue
 
                 if metric_name in self.METRIC_FACTORIES:
+                    # Get custom steps for this metric if provided
+                    custom_steps = None
+                    if (
+                        custom_evaluation_steps
+                        and metric_name in custom_evaluation_steps
+                    ):
+                        custom_steps = custom_evaluation_steps[metric_name]
+
                     metric = self.create_metric(
                         metric_name=metric_name,
                         model=eval_model,
                         threshold=threshold,
                         strict_mode=strict_mode,
+                        custom_steps=custom_steps,
                     )
                     metric_objects.append(metric)
 

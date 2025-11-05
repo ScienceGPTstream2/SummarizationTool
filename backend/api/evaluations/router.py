@@ -5,6 +5,7 @@ Provides endpoints to evaluate entity extractions using deepeval's G-Eval framew
 with support for Azure OpenAI and Vertex AI evaluation models.
 """
 
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import List
@@ -65,8 +66,9 @@ async def evaluate_extraction(request: EvaluationRequest):
         elif request.provider == "vertex_ai":
             model_kwargs = {
                 "model_name": request.vertex_model_name,
-                "project": request.vertex_project,
-                "location": request.vertex_location,
+                "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
+                "location": request.vertex_location
+                or os.getenv("GEMINI_LOCATION", "us-central1"),
             }
 
         result = await evaluation_service.evaluate_extraction(
@@ -79,6 +81,7 @@ async def evaluate_extraction(request: EvaluationRequest):
             provider=request.provider,
             threshold=request.threshold,
             strict_mode=request.strict_mode,
+            custom_evaluation_steps=request.custom_evaluation_steps,
             **model_kwargs,
         )
 
@@ -143,8 +146,9 @@ async def evaluate_batch(request: BatchEvaluationRequest):
         elif request.provider == "vertex_ai":
             model_kwargs = {
                 "model_name": request.vertex_model_name,
-                "project": request.vertex_project,
-                "location": request.vertex_location,
+                "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
+                "location": request.vertex_location
+                or os.getenv("GEMINI_LOCATION", "us-central1"),
             }
 
         # Convert extractions to dict format
@@ -207,8 +211,9 @@ async def evaluate_with_custom_metric(request: CustomMetricRequest):
         elif request.provider == "vertex_ai":
             model_kwargs = {
                 "model_name": request.vertex_model_name,
-                "project": request.vertex_project,
-                "location": request.vertex_location,
+                "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
+                "location": request.vertex_location
+                or os.getenv("GEMINI_LOCATION", "us-central1"),
             }
 
         # Create evaluation model

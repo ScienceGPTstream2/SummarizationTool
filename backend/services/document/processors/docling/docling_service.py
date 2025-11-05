@@ -474,7 +474,9 @@ class DoclingService:
         tables_dir.mkdir(parents=True, exist_ok=True)
 
         # First, get the standard markdown output
-        markdown_content = result.document.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
+        markdown_content = result.document.export_to_markdown(
+            image_mode=ImageRefMode.REFERENCED
+        )
 
         # Extract HTML for each table and save to separate files
         table_html_list = []
@@ -482,23 +484,24 @@ class DoclingService:
             try:
                 html_table = table.export_to_html(doc=result.document)
                 table_html_list.append(html_table)
-                
+
                 # Save individual table HTML file
                 table_html_path = tables_dir / f"table-{idx}.html"
                 with open(table_html_path, "w", encoding="utf-8") as f:
                     f.write(html_table)
-                    
+
             except Exception as e:
                 import logging
+
                 logging.warning(f"Failed to export table {idx} to HTML: {str(e)}")
                 table_html_list.append(None)
 
         # Replace markdown tables with HTML tables
         # Find all markdown tables in the content
-        table_pattern = r'\|[^\n]*\|[\n\r]+\|[-:\s|]+\|[\n\r]+(?:\|[^\n]*\|[\n\r]+)+'
-        
+        table_pattern = r"\|[^\n]*\|[\n\r]+\|[-:\s|]+\|[\n\r]+(?:\|[^\n]*\|[\n\r]+)+"
+
         markdown_tables = list(re.finditer(table_pattern, markdown_content))
-        
+
         # Replace from end to start to maintain correct positions
         table_idx = 0
         for match in reversed(markdown_tables):
@@ -506,7 +509,9 @@ class DoclingService:
                 # Replace markdown table with HTML table
                 start, end = match.span()
                 html_table = table_html_list[-(table_idx + 1)]
-                markdown_content = markdown_content[:start] + html_table + markdown_content[end:]
+                markdown_content = (
+                    markdown_content[:start] + html_table + markdown_content[end:]
+                )
             table_idx += 1
 
         # Save the modified markdown

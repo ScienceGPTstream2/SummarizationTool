@@ -3,6 +3,7 @@ import LoginPage from "./components/LoginPage";
 import { UploadPage } from "./components/UploadPage";
 import { ProcessingPage } from "./components/ProcessingPage";
 import { EntityExtractionPage } from "./components/EntityExtractionPage";
+import { EvaluationPage } from "./components/EvaluationPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { Button } from "./components/ui/button";
 import { Settings, ArrowLeft } from "lucide-react";
@@ -15,6 +16,7 @@ export type Step =
   | "upload"
   | "processing"
   | "extraction"
+  | "evaluation"
   | "settings";
 
 export interface DocumentData {
@@ -33,6 +35,21 @@ export interface DocumentData {
     duration?: number;
     promptTokens?: number;
     completionTokens?: number;
+    groundTruth?: string;
+    evaluationResults?: Array<{
+      provider: string;
+      model: string;
+      metrics: Array<{
+        metric_name: string;
+        score: number;
+        threshold: number;
+        success: boolean;
+        reason: string;
+      }>;
+      aggregate_score: number;
+      all_passed: boolean;
+      evaluation_time: number;
+    }>;
   }>;
   finalSummary: string;
   conversionId?: string;
@@ -82,6 +99,8 @@ export default function App() {
       setCurrentStep("processing");
     } else if (step === "processing") {
       setCurrentStep("extraction");
+    } else if (step === "extraction") {
+      setCurrentStep("evaluation");
     }
   };
 
@@ -95,6 +114,8 @@ export default function App() {
       setCurrentStep("upload");
     } else if (currentStep === "extraction") {
       setCurrentStep("processing");
+    } else if (currentStep === "evaluation") {
+      setCurrentStep("extraction");
     } else if (currentStep === "settings") {
       setCurrentStep(previousStep);
     }
@@ -127,6 +148,15 @@ export default function App() {
       case "extraction":
         return (
           <EntityExtractionPage
+            onBack={handleBack}
+            onComplete={(data) => handleStepComplete("extraction", data)}
+            documentData={documentData}
+            setDocumentData={setDocumentData}
+          />
+        );
+      case "evaluation":
+        return (
+          <EvaluationPage
             onBack={handleBack}
             documentData={documentData}
             setDocumentData={setDocumentData}
@@ -199,6 +229,14 @@ export default function App() {
                     className={`w-3 h-3 rounded-full ${currentStep === "extraction" ? "bg-red-500" : "bg-muted"}`}
                   />
                   <span className="text-sm">Entity Extraction</span>
+                </div>
+                <div
+                  className={`flex items-center gap-2 ${currentStep === "evaluation" ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  <div
+                    className={`w-3 h-3 rounded-full ${currentStep === "evaluation" ? "bg-red-500" : "bg-muted"}`}
+                  />
+                  <span className="text-sm">Evaluation</span>
                 </div>
               </div>
             )}
