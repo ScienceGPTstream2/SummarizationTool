@@ -40,6 +40,9 @@ async def extract_entities(request: ExtractRequest):
                 api_version=request.api_version,
                 endpoint_override=request.azure_endpoint,
                 api_key_override=request.azure_api_key,
+                gemini_api_key_override=request.gemini_api_key,
+                gemini_project_id_override=request.gemini_project_id,
+                gemini_location_override=request.gemini_location,
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
             )

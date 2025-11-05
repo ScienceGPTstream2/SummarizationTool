@@ -19,6 +19,7 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { DocumentData } from "../App";
 import { settingsManager } from "./SettingsManager";
 import { FigureGallery } from "./FigureGallery";
+import { TablesGallery } from "./TablesGallery";
 import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
 import { RawOutputViewer } from "./RawOutputViewer";
 
@@ -71,16 +72,31 @@ export function ProcessingPage({
     documentData.parser || ""
   );
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showResults, setShowResults] = useState(!!documentData.extractedText);
-  const [conversionId, setConversionId] = useState<string | null>(null);
-  const [markdownPath, setMarkdownPath] = useState<string | null>(null);
-  const [processorUsed, setProcessorUsed] = useState<string | null>(null);
+  const [showResults, setShowResults] = useState(
+    documentData.showResults ?? !!documentData.extractedText
+  );
+  const [conversionId, setConversionId] = useState<string | null>(
+    documentData.conversionId || null
+  );
+  const [markdownPath, setMarkdownPath] = useState<string | null>(
+    documentData.markdownPath || null
+  );
+  const [processorUsed, setProcessorUsed] = useState<string | null>(
+    documentData.processorUsed || null
+  );
   const [processError, setProcessError] = useState<string | null>(null);
   const [extractedTextLocal, setExtractedTextLocal] = useState<string>(
     documentData.extractedText || ""
   );
-  const [figures, setFigures] = useState<FigureMetadata[]>([]);
-  const [figuresCount, setFiguresCount] = useState<number>(0);
+  const [figures, setFigures] = useState<FigureMetadata[]>(
+    documentData.figures || []
+  );
+  const [figuresCount, setFiguresCount] = useState<number>(
+    documentData.figuresCount || 0
+  );
+  const [tablesCount, setTablesCount] = useState<number>(
+    documentData.tablesCount || 0
+  );
   const [elapsedTime, setElapsedTime] = useState<number>(0);
 
   function formatTime(seconds: number): string {
@@ -168,6 +184,11 @@ export function ProcessingPage({
         setFigures(data.figures || []);
       }
 
+      // Check if tables were extracted
+      if (data.tables_found !== undefined) {
+        setTablesCount(data.tables_found);
+      }
+
       // Fetch the markdown content with processor info for efficiency
       const processorParam = data.processor_used
         ? `?processor_used=${encodeURIComponent(data.processor_used)}`
@@ -228,6 +249,10 @@ export function ProcessingPage({
       conversionId: conversionId ?? undefined,
       markdownPath: markdownPath ?? undefined,
       processorUsed: processorUsed ?? undefined,
+      figures: figures,
+      figuresCount: figuresCount,
+      tablesCount: tablesCount,
+      showResults: showResults,
     });
   };
 
@@ -369,6 +394,14 @@ export function ProcessingPage({
               <FigureGallery conversionId={conversionId} figures={figures} />
             )}
 
+            {/* Display Tables if available */}
+            {tablesCount > 0 && conversionId && (
+              <TablesGallery
+                conversionId={conversionId}
+                tablesCount={tablesCount}
+              />
+            )}
+
             {/* Two Column Layout: PDF Viewer and Raw Output */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               {/* Left Column: PDF Viewer with Bounding Boxes */}
@@ -422,6 +455,20 @@ export function ProcessingPage({
                               {figuresCount}
                             </span>{" "}
                             figure{figuresCount !== 1 ? "s" : ""} detected and
+                            extracted
+                          </div>
+                        </>
+                      )}
+                      {tablesCount > 0 && (
+                        <>
+                          <div className="text-sm text-muted-foreground mt-2">
+                            Tables Extracted
+                          </div>
+                          <div className="text-sm">
+                            <span className="font-medium text-blue-600">
+                              {tablesCount}
+                            </span>{" "}
+                            table{tablesCount !== 1 ? "s" : ""} detected and
                             extracted
                           </div>
                         </>

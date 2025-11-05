@@ -43,6 +43,7 @@ def load_config():
                 if doc_key:
                     os.environ.setdefault("AZURE_DOC_INTELLIGENCE_KEY", doc_key)
 
+                # Vertex AI configuration (for Gemini evaluation)
                 vertex_cfg = cfg.get("vertex_ai", {}) or {}
                 project = vertex_cfg.get("project")
                 location = vertex_cfg.get("location")
@@ -50,6 +51,20 @@ def load_config():
                     os.environ.setdefault("GEMINI_PROJECT", project)
                 if location:
                     os.environ.setdefault("GEMINI_LOCATION", location)
+
+                # Set up Google Cloud credentials for Vertex AI
+                # Look for service account key in backend/core/ directory
+                service_account_path = (
+                    Path(__file__).parent
+                    / "hcsx-scigpt2-innocentrhino-acm-f87f8026be3d.json"
+                )
+                if service_account_path.exists():
+                    os.environ.setdefault(
+                        "GOOGLE_APPLICATION_CREDENTIALS", str(service_account_path)
+                    )
+                    print(
+                        f"✅ Google Cloud credentials loaded from: {service_account_path.name}"
+                    )
 
                 # Security configuration (JWT)
                 security_cfg = cfg.get("security", {}) or {}

@@ -1,6 +1,7 @@
 {
   "studyType": "epidemiology-level-1",
   "displayName": "Epidemiology - Level 1",
+  "summaryPrompt": "Take the following extracted entities and combine them into a single cohesive paragraph. Maintain all factual details exactly as provided. Do not modify, add, or omit any of the extracted information.",
   "entities": [
     {
       "name": "Study Author(s)",
