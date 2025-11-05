@@ -29,6 +29,8 @@ import {
   FileText,
   File,
   AlertTriangle,
+  ArrowRight,
+  CheckCircle,
 } from "lucide-react";
 import { DocumentData } from "../App";
 import {
@@ -40,6 +42,8 @@ import {
   loadStudyTypeTemplate,
   getAvailableStudyTypes,
 } from "./TemplateLoader";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
 
@@ -54,12 +58,14 @@ interface Entity {
 
 interface EntityExtractionPageProps {
   onBack: () => void;
+  onComplete?: (data: Partial<DocumentData>) => void;
   documentData: DocumentData;
   setDocumentData: (data: DocumentData) => void;
 }
 
 export function EntityExtractionPage({
   onBack,
+  onComplete,
   documentData,
   setDocumentData,
 }: EntityExtractionPageProps) {
@@ -534,53 +540,84 @@ export function EntityExtractionPage({
                 </CardHeader>
                 <CardContent>
                   <ScrollArea className="h-96">
-                    <div className="prose prose-sm">
-                      <pre className="whitespace-pre-wrap text-sm">
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {documentData.finalSummary}
-                      </pre>
+                      </ReactMarkdown>
                     </div>
                   </ScrollArea>
                 </CardContent>
               </Card>
             </div>
 
-            <Card className="border-gray-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Download className="h-5 w-5" />
-                  Export Summary Report
-                </CardTitle>
-                <CardDescription>
-                  Download your complete analysis with full pipeline metadata
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-4">
+            <div className="grid lg:grid-cols-2 gap-6">
+              <Card className="border-gray-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Download className="h-5 w-5" />
+                    Export Summary Report
+                  </CardTitle>
+                  <CardDescription>
+                    Download your complete analysis with full pipeline metadata
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-4">
+                    <Button
+                      onClick={handleExportWord}
+                      disabled={isExporting}
+                      variant="outline"
+                      className="flex items-center gap-2"
+                    >
+                      <File className="h-4 w-4" />
+                      {isExporting ? "Exporting..." : "Export as Word (.docx)"}
+                    </Button>
+                    <Button
+                      onClick={handleExportMarkdown}
+                      disabled={isExporting}
+                      variant="outline"
+                      className="flex items-center gap-2"
+                    >
+                      <FileText className="h-4 w-4" />
+                      {isExporting
+                        ? "Exporting..."
+                        : "Export as Markdown (.md)"}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-3">
+                    Both formats include complete pipeline configuration, entity
+                    prompts, extraction results, and metadata.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-green-200 bg-green-50/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    Evaluate Extractions
+                  </CardTitle>
+                  <CardDescription>
+                    Assess extraction quality using AI-powered evaluation
+                    metrics
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
                   <Button
-                    onClick={handleExportWord}
-                    disabled={isExporting}
-                    variant="outline"
-                    className="flex items-center gap-2"
+                    onClick={() => onComplete?.(documentData)}
+                    variant="default"
+                    className="w-full bg-green-600 hover:bg-green-700"
                   >
-                    <File className="h-4 w-4" />
-                    {isExporting ? "Exporting..." : "Export as Word (.docx)"}
+                    Continue to Evaluation
+                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
-                  <Button
-                    onClick={handleExportMarkdown}
-                    disabled={isExporting}
-                    variant="outline"
-                    className="flex items-center gap-2"
-                  >
-                    <FileText className="h-4 w-4" />
-                    {isExporting ? "Exporting..." : "Export as Markdown (.md)"}
-                  </Button>
-                </div>
-                <p className="text-sm text-muted-foreground mt-3">
-                  Both formats include complete pipeline configuration, entity
-                  prompts, extraction results, and metadata.
-                </p>
-              </CardContent>
-            </Card>
+                  <p className="text-sm text-muted-foreground mt-3">
+                    Evaluate your extractions with multiple LLM judges
+                    (GPT-5-Mini, Gemini) for quality assessment.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
           </>
         )}
       </div>

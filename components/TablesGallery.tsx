@@ -123,9 +123,7 @@ function TablePreview({
           background-color: #e2e8f0;
         }
       `}</style>
-      <div className="table-preview-wrapper">
-        {parse(sanitizedHtml)}
-      </div>
+      <div className="table-preview-wrapper">{parse(sanitizedHtml)}</div>
     </div>
   );
 }
@@ -247,9 +245,7 @@ function TableDisplay({
           border-bottom: none;
         }
       `}</style>
-      <div className="table-full-display">
-        {parse(sanitizedHtml)}
-      </div>
+      <div className="table-full-display">{parse(sanitizedHtml)}</div>
     </div>
   );
 }
@@ -326,7 +322,10 @@ export function TablesGallery({
       </Card>
 
       {/* Table Detail Modal */}
-      <Dialog open={selectedTable !== null} onOpenChange={() => setSelectedTable(null)}>
+      <Dialog
+        open={selectedTable !== null}
+        onOpenChange={() => setSelectedTable(null)}
+      >
         <DialogContent className="max-w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[75vw] xl:max-w-[70vw] w-full max-h-[95vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
@@ -365,4 +364,3 @@ export function TablesGallery({
     </>
   );
 }
-

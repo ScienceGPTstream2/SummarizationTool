@@ -31,6 +31,10 @@ class EvaluationRequest(BaseModel):
     strict_mode: bool = Field(
         default=False, description="If True, only perfect scores pass"
     )
+    custom_evaluation_steps: Optional[Dict[str, List[str]]] = Field(
+        None,
+        description="Custom evaluation steps for each metric (e.g., {'correctness': ['step1', 'step2']})",
+    )
 
     # Azure OpenAI specific fields
     azure_deployment: Optional[str] = Field(

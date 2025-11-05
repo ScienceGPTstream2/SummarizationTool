@@ -417,7 +417,7 @@ class AzureDocIntelligenceService:
 
         # Extract HTML tables from markdown content using regex
         # Match <table>...</table> blocks
-        table_pattern = r'<table>.*?</table>'
+        table_pattern = r"<table>.*?</table>"
         html_tables = re.findall(table_pattern, markdown_content, re.DOTALL)
 
         # Save each table as a separate HTML file
@@ -426,11 +426,15 @@ class AzureDocIntelligenceService:
                 table_html_path = tables_dir / f"table-{idx}.html"
                 with open(table_html_path, "w", encoding="utf-8") as f:
                     f.write(html_table)
-                await self._log(log_path, f"Saved table {idx} to {table_html_path.name}")
+                await self._log(
+                    log_path, f"Saved table {idx} to {table_html_path.name}"
+                )
             except Exception as e:
                 await self._log(log_path, f"Failed to save table {idx}: {str(e)}")
 
-        await self._log(log_path, f"Extracted {len(html_tables)} tables to tables/ directory")
+        await self._log(
+            log_path, f"Extracted {len(html_tables)} tables to tables/ directory"
+        )
 
     async def _download_figure(
         self, result_id: str, figure_id: str, figures_dir: Path, log_path: Path
