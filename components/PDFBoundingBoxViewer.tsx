@@ -180,10 +180,18 @@ export function PDFBoundingBoxViewer({
 
   // Fetch analysis result with bounding boxes
   useEffect(() => {
-    const fetchAnalysis = async () => {
+    let isCancelled = false;
+    const retryTimeouts: NodeJS.Timeout[] = [];
+
+    const fetchAnalysis = async (retryCount = 0) => {
       if (!conversionId) {
         setLoading(false);
         return;
+      }
+
+      // Set loading state on first attempt
+      if (retryCount === 0) {
+        setLoading(true);
       }
 
       try {
@@ -195,21 +203,61 @@ export function PDFBoundingBoxViewer({
           }
         );
 
+        if (isCancelled) return;
+
         if (!response.ok) {
+          // If 404 and we haven't retried too many times, retry after a delay
+          // This handles the case where the file is still being saved
+          if (response.status === 404 && retryCount < 5) {
+            console.log(
+              `Analysis not ready yet, retrying in ${(retryCount + 1) * 1000}ms... (attempt ${retryCount + 1}/5)`
+            );
+            const timeout = setTimeout(() => {
+              if (!isCancelled) {
+                fetchAnalysis(retryCount + 1);
+              }
+            }, (retryCount + 1) * 1000); // Exponential backoff: 1s, 2s, 3s, 4s, 5s
+            retryTimeouts.push(timeout);
+            return;
+          }
           setLoading(false);
           return;
         }
 
         const data = await response.json();
+        if (isCancelled) return;
+
         setAnalysisResult(data.analysis_result);
         setLoading(false);
       } catch (err: any) {
-        console.error("Error fetching analysis:", err);
+        if (isCancelled) return;
+
+        // Retry on network errors too
+        if (retryCount < 5) {
+          console.log(
+            `Error fetching analysis, retrying in ${(retryCount + 1) * 1000}ms... (attempt ${retryCount + 1}/5)`,
+            err
+          );
+          const timeout = setTimeout(() => {
+            if (!isCancelled) {
+              fetchAnalysis(retryCount + 1);
+            }
+          }, (retryCount + 1) * 1000);
+          retryTimeouts.push(timeout);
+          return;
+        }
+        console.error("Error fetching analysis after retries:", err);
         setLoading(false);
       }
     };
 
     fetchAnalysis();
+
+    // Cleanup function to cancel pending retries
+    return () => {
+      isCancelled = true;
+      retryTimeouts.forEach((timeout) => clearTimeout(timeout));
+    };
   }, [conversionId]);
 
   // Load and render PDF
