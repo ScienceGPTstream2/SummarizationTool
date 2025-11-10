@@ -15,6 +15,13 @@ export default defineConfig({
     allowedHosts: ["summarize.sciencegpt.ca"],
     port: 3000,
     open: true,
+    watch: {
+      ignored: [
+        "**/backend/**",
+        "**/node_modules/**",
+        "**/.git/**",
+      ],
+    },
     proxy: {
       "/api": {
         target: "http://localhost:8000",
