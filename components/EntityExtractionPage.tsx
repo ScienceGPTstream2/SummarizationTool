@@ -195,9 +195,14 @@ export function EntityExtractionPage({
       const updatedEntities = [...entities];
 
       const modelObj = availableModels.find((m) => m.id === selectedModel);
-      const modelTypeToUse =
-        modelObj?.category === "google" ? "gemini" : "azure"; // Determine model_type
-      const modelIdToUse = modelObj?.id; // For Gemini models
+      // Determine model_type based on category
+      let modelTypeToUse = "azure"; // default
+      if (modelObj?.category === "google") {
+        modelTypeToUse = "gemini";
+      } else if (modelObj?.category === "anthropic") {
+        modelTypeToUse = "anthropic";
+      }
+      const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
