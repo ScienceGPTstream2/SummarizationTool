@@ -93,13 +93,48 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     available: true,
   },
   {
-    id: "anthropic",
+    id: "anthropic_sonnet_4_5",
     name: "Claude Sonnet 4.5",
     model: "claude-sonnet-4-5@20250929",
-    description: "Advanced reasoning - high quality evaluation",
+    description: "Latest Sonnet - balanced performance",
+    available: true,
+  },
+  {
+    id: "anthropic_opus_4_1",
+    name: "Claude Opus 4.1",
+    model: "claude-opus-4-1@20250805",
+    description: "Most capable - highest quality evaluation",
+    available: true,
+  },
+  {
+    id: "anthropic_sonnet_4",
+    name: "Claude Sonnet 4",
+    model: "claude-sonnet-4@20250514",
+    description: "Previous Sonnet - proven reliability",
+    available: true,
+  },
+  {
+    id: "anthropic_haiku_4_5",
+    name: "Claude Haiku 4.5",
+    model: "claude-haiku-4-5@20251001",
+    description: "Fastest - efficient evaluation",
     available: true,
   },
 ];
+
+// Helper function to get display-friendly model name
+const getDisplayModelName = (model: string): string => {
+  // Strip version info from Anthropic models
+  if (model.includes("@")) {
+    const baseName = model.split("@")[0];
+    // Convert claude-sonnet-4-5 to Claude Sonnet 4.5
+    return baseName
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
+  return model;
+};
 
 const METRICS: MetricOption[] = [
   {
@@ -459,6 +494,9 @@ export function EvaluationPage({
             ) {
               requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
               requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
+            } else if (providerId.startsWith("anthropic_")) {
+              requestBody.provider = "anthropic"; // Backend expects "anthropic"
+              requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
             }
 
             // Call evaluation API
@@ -796,7 +834,7 @@ export function EvaluationPage({
               <div>
                 <h3 className="font-semibold mb-3">Anthropic Models</h3>
                 <div className="space-y-3">
-                  {EVAL_PROVIDERS.filter((p) => p.id === "anthropic").map(
+                  {EVAL_PROVIDERS.filter((p) => p.id.startsWith("anthropic_")).map(
                     (provider) => (
                       <div
                         key={provider.id}
@@ -813,7 +851,7 @@ export function EvaluationPage({
                             htmlFor={provider.id}
                             className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                           >
-                            {provider.model}
+                            {getDisplayModelName(provider.model)}
                           </Label>
                           <p className="text-sm text-muted-foreground">
                             {provider.description}
@@ -1169,7 +1207,7 @@ export function EvaluationPage({
                                                           ) : (
                                                             <XCircle className="h-5 w-5 text-red-600" />
                                                           )}
-                                                          {result.model}
+                                                          {getDisplayModelName(result.model)}
                                                         </CardTitle>
                                                         <CardDescription className="flex items-center justify-between">
                                                           <span>
