@@ -11,7 +11,11 @@ from typing import Dict, Any, List, Optional
 
 from deepeval.test_case import LLMTestCase
 
-from .adapters import AzureOpenAIDeepEvalModel, VertexAIDeepEvalModel
+from .adapters import (
+    AzureOpenAIDeepEvalModel,
+    VertexAIDeepEvalModel,
+    AnthropicVertexDeepEvalModel,
+)
 from .metrics import (
     CorrectnessMetricFactory,
     CompletenessMetricFactory,
@@ -61,13 +65,13 @@ class EvaluationService:
         Create a DeepEval-compatible LLM model for evaluation
 
         Args:
-            provider: 'azure_openai' or 'vertex_ai'
+            provider: 'azure_openai', 'vertex_ai', or 'anthropic'
             deployment: Azure deployment name
             endpoint: Azure endpoint
             api_key: Azure API key
             model_name: Model name
-            project: GCP project for Vertex AI
-            location: GCP location for Vertex AI
+            project: GCP project for Vertex AI / Anthropic
+            location: GCP location for Vertex AI / Anthropic
 
         Returns:
             DeepEvalBaseLLM instance
@@ -84,6 +88,12 @@ class EvaluationService:
                 model_name=model_name or "gemini-2.5-flash",
                 project=project,
                 location=location,
+            )
+        elif provider == "anthropic":
+            return AnthropicVertexDeepEvalModel(
+                model_name=model_name or "claude-sonnet-4-5@20250929",
+                project=project,
+                location=location or "global",
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")

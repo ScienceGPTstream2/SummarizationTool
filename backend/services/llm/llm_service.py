@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
 from .gemini import GeminiLLMClient
+from .anthropic import AnthropicLLMClient
 import toml
 
 
@@ -32,6 +33,7 @@ class LLMService:
     def __init__(self):
         self.azure_client = AzureLLMClient()
         self.gemini_client = GeminiLLMClient()
+        self.anthropic_client = AnthropicLLMClient()
 
     async def extract_entities_from_markdown(
         self,
@@ -78,6 +80,16 @@ class LLMService:
                 gemini_project_id_override,
                 gemini_location_override,
             )
+        elif model_type == "anthropic":
+            if self.anthropic_client.disabled:
+                return {"success": False, "error": "Anthropic is not configured."}
+            return await self.anthropic_client.extract_entities_with_anthropic(
+                markdown,
+                extraction_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+            )
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
 
@@ -122,6 +134,15 @@ class LLMService:
                 gemini_api_key_override,
                 gemini_project_id_override,
                 gemini_location_override,
+            )
+        elif model_type == "anthropic":
+            if self.anthropic_client.disabled:
+                return {"success": False, "error": "Anthropic is not configured."}
+            return await self.anthropic_client.generate_paragraph_with_anthropic(
+                user_prompt,
+                model_id,
+                max_tokens,
+                temperature,
             )
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}

@@ -92,6 +92,13 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     description: "Faster, lightweight - quick evaluation",
     available: true,
   },
+  {
+    id: "anthropic",
+    name: "Claude Sonnet 4.5",
+    model: "claude-sonnet-4-5@20250929",
+    description: "Advanced reasoning - high quality evaluation",
+    available: true,
+  },
 ];
 
 const METRICS: MetricOption[] = [
@@ -782,6 +789,39 @@ export function EvaluationPage({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Anthropic Models */}
+              <div>
+                <h3 className="font-semibold mb-3">Anthropic Models</h3>
+                <div className="space-y-3">
+                  {EVAL_PROVIDERS.filter((p) => p.id === "anthropic").map(
+                    (provider) => (
+                      <div
+                        key={provider.id}
+                        className="flex items-start space-x-3 space-y-0"
+                      >
+                        <Checkbox
+                          id={provider.id}
+                          checked={selectedProviders.includes(provider.id)}
+                          onCheckedChange={() => toggleProvider(provider.id)}
+                          disabled={!provider.available}
+                        />
+                        <div className="space-y-1 leading-none">
+                          <Label
+                            htmlFor={provider.id}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                          >
+                            {provider.model}
+                          </Label>
+                          <p className="text-sm text-muted-foreground">
+                            {provider.description}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  )}
                 </div>
               </div>
             </CardContent>
