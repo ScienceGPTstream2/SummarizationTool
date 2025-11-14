@@ -152,14 +152,14 @@ export function EntityExtractionPage({
   // Get available study types from templates
   const studyTypes = getAvailableStudyTypes();
 
-  // Get available models from settings manager (only Azure OpenAI GPT-5 Mini)
+  // Get available models from backend API (includes all configured Azure and Gemini models)
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   useEffect(() => {
     const loadModels = async () => {
-      // Refresh server config when component mounts to get latest API key availability
+      // Refresh server config when component mounts to get latest configuration status
       await settingsManager.refreshServerConfig();
-      // Get all available models from settings manager
-      const models = settingsManager.getAvailableModels();
+      // Get all available models from backend (includes all Azure models from secrets.toml)
+      const models = await settingsManager.getAvailableModelsAsync();
       setAvailableModels(models);
     };
     loadModels();
@@ -252,12 +252,8 @@ export function EntityExtractionPage({
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
-      // Get user-provided API keys from settings if available
-      const azureApiKey = settingsManager.getApiKey("azure_openai_api_key");
-      const azureEndpoint = settingsManager.getApiKey("azure_openai_endpoint");
-      const geminiApiKey = settingsManager.getApiKey("gemini_api_key");
-      const geminiProjectId = settingsManager.getApiKey("gemini_project_id");
-      const geminiLocation = settingsManager.getApiKey("gemini_location");
+      // All API keys and configuration are read from backend secrets.toml
+      // No need to send API keys from frontend
 
       const token = localStorage.getItem("token");
 
@@ -291,31 +287,7 @@ export function EntityExtractionPage({
               max_tokens: 4096,
               temperature: 0.0,
               processor_used: documentData.processorUsed,
-              // Include user-provided API keys if available
-              ...(azureApiKey &&
-              azureApiKey !== "YOUR_AZURE_OPENAI_API_KEY_HERE"
-                ? { azure_api_key: azureApiKey }
-                : {}),
-              ...(azureEndpoint &&
-              azureEndpoint !== "YOUR_AZURE_OPENAI_ENDPOINT_HERE"
-                ? { azure_endpoint: azureEndpoint }
-                : {}),
-              // Include Gemini specific keys if available and model is Gemini
-              ...(modelTypeToUse === "gemini" &&
-              geminiApiKey &&
-              geminiApiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
-                ? { gemini_api_key: geminiApiKey }
-                : {}),
-              ...(modelTypeToUse === "gemini" &&
-              geminiProjectId &&
-              geminiProjectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE"
-                ? { gemini_project_id: geminiProjectId }
-                : {}),
-              ...(modelTypeToUse === "gemini" &&
-              geminiLocation &&
-              geminiLocation !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
-                ? { gemini_location: geminiLocation }
-                : {}),
+              // All API keys and configuration are read from backend secrets.toml
             }),
           });
 
@@ -418,24 +390,7 @@ export function EntityExtractionPage({
           model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
-          azure_endpoint: azureEndpoint,
-          azure_api_key: azureApiKey,
-          // Include Gemini specific keys if available and model is Gemini
-          ...(modelTypeToUse === "gemini" &&
-          geminiApiKey &&
-          geminiApiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
-            ? { gemini_api_key: geminiApiKey }
-            : {}),
-          ...(modelTypeToUse === "gemini" &&
-          geminiProjectId &&
-          geminiProjectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE"
-            ? { gemini_project_id: geminiProjectId }
-            : {}),
-          ...(modelTypeToUse === "gemini" &&
-          geminiLocation &&
-          geminiLocation !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
-            ? { gemini_location: geminiLocation }
-            : {}),
+          // All API keys and configuration are read from backend secrets.toml
         }),
       });
 

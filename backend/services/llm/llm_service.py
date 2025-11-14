@@ -74,7 +74,6 @@ class LLMService:
                 model_id,
                 max_tokens,
                 temperature,
-                gemini_api_key_override,
                 gemini_project_id_override,
                 gemini_location_override,
             )
@@ -119,7 +118,6 @@ class LLMService:
                 model_id,
                 max_tokens,
                 temperature,
-                gemini_api_key_override,
                 gemini_project_id_override,
                 gemini_location_override,
             )

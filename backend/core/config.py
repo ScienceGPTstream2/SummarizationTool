@@ -17,20 +17,82 @@ def load_config():
                 azure_cfg = cfg.get("azure_openai", {}) or {}
                 endpoint = azure_cfg.get("endpoint")
                 api_key = azure_cfg.get("api_key")
-                api_version = azure_cfg.get("api_version")
                 if endpoint:
                     os.environ.setdefault("AZURE_OPENAI_ENDPOINT", endpoint)
                 if api_key:
                     os.environ.setdefault("AZURE_OPENAI_KEY", api_key)
-                if api_version:
-                    os.environ.setdefault("AZURE_OPENAI_API_VERSION", api_version)
-                # Optional: set default deployment/model name so LLMService can pick it up
-                deployment = azure_cfg.get("deployment") or azure_cfg.get("model_name")
-                model_name = azure_cfg.get("model_name")
-                if deployment:
-                    os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT", deployment)
-                if model_name:
-                    os.environ.setdefault("AZURE_OPENAI_MODEL_NAME", model_name)
+                    os.environ.setdefault(
+                        "AZURE_OPENAI_API_KEY", api_key
+                    )  # Also set for compatibility
+
+                # Support multiple models (new format)
+                models = azure_cfg.get("models", [])
+                if models:
+                    # Store models as JSON string for the API endpoint to parse
+                    import json
+
+                    try:
+                        # Verify each model has the required fields
+                        for i, model in enumerate(models):
+                            deployment = model.get("deployment")
+                            endpoint = model.get("endpoint")
+                            api_key = model.get("api_key")
+                            if not deployment:
+                                print(
+                                    f"⚠️  Warning: Model {i} is missing 'deployment' field"
+                                )
+                            if not endpoint:
+                                print(
+                                    f"⚠️  Warning: Model '{deployment}' is missing 'endpoint' field"
+                                )
+                            if not api_key:
+                                print(
+                                    f"⚠️  Warning: Model '{deployment}' is missing 'api_key' field"
+                                )
+
+                        models_json = json.dumps(models, ensure_ascii=False)
+                        os.environ["AZURE_OPENAI_MODELS"] = models_json
+                        print(
+                            f"✅ Loaded {len(models)} Azure OpenAI models from secrets.toml"
+                        )
+                        # Print summary of loaded models
+                        for model in models:
+                            dep = model.get("deployment", "unknown")
+                            ep = model.get("endpoint", "missing")
+                            has_key = "✓" if model.get("api_key") else "✗"
+                            print(
+                                f"   - {dep}: endpoint={ep[:50]}..., api_key={has_key}"
+                            )
+                    except Exception as e:
+                        print(
+                            f"⚠️  Failed to serialize Azure OpenAI models to JSON: {e}"
+                        )
+                    # Set first model as default for backward compatibility
+                    if models and len(models) > 0:
+                        first_model = models[0]
+                        os.environ.setdefault(
+                            "AZURE_OPENAI_DEPLOYMENT", first_model.get("deployment", "")
+                        )
+                        os.environ.setdefault(
+                            "AZURE_OPENAI_MODEL_NAME", first_model.get("model_name", "")
+                        )
+                        os.environ.setdefault(
+                            "AZURE_OPENAI_API_VERSION",
+                            first_model.get("api_version", ""),
+                        )
+                else:
+                    # Backward compatibility: support old single model format
+                    api_version = azure_cfg.get("api_version")
+                    if api_version:
+                        os.environ.setdefault("AZURE_OPENAI_API_VERSION", api_version)
+                    deployment = azure_cfg.get("deployment") or azure_cfg.get(
+                        "model_name"
+                    )
+                    model_name = azure_cfg.get("model_name")
+                    if deployment:
+                        os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT", deployment)
+                    if model_name:
+                        os.environ.setdefault("AZURE_OPENAI_MODEL_NAME", model_name)
 
                 # Azure Document Intelligence configuration
                 azure_doc_cfg = cfg.get("azure_doc_intelligence", {}) or {}
