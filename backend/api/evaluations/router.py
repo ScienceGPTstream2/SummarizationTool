@@ -70,6 +70,12 @@ async def evaluate_extraction(request: EvaluationRequest):
                 "location": request.vertex_location
                 or os.getenv("GEMINI_LOCATION", "us-central1"),
             }
+        elif request.provider == "anthropic":
+            model_kwargs = {
+                "model_name": request.model_name,
+                "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
+                "location": "global",  # Anthropic models must use 'global' location
+            }
 
         result = await evaluation_service.evaluate_extraction(
             entity_name=request.entity_name,
@@ -149,6 +155,12 @@ async def evaluate_batch(request: BatchEvaluationRequest):
                 "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
                 "location": request.vertex_location
                 or os.getenv("GEMINI_LOCATION", "us-central1"),
+            }
+        elif request.provider == "anthropic":
+            model_kwargs = {
+                "model_name": request.model_name,
+                "project": request.vertex_project or os.getenv("GEMINI_PROJECT"),
+                "location": "global",  # Anthropic models must use 'global' location
             }
 
         # Convert extractions to dict format
