@@ -107,9 +107,15 @@ export function ProcessingPage({
     return `${mins}:${secs}`;
   }
 
+  const [serverConfigLoaded, setServerConfigLoaded] = useState(false);
+
   useEffect(() => {
-    // Refresh server config when component mounts to get latest API key availability
-    settingsManager.refreshServerConfig();
+    // Refresh server config when component mounts to get latest configuration status
+    const loadServerConfig = async () => {
+      await settingsManager.refreshServerConfig();
+      setServerConfigLoaded(true);
+    };
+    loadServerConfig();
 
     let timer: NodeJS.Timeout;
     if (isProcessing) {
@@ -303,13 +309,13 @@ export function ProcessingPage({
       </div>
 
       <div className="grid gap-6">
-        {!isAzureDocumentIntelligenceConfigured && (
+        {serverConfigLoaded && !isAzureDocumentIntelligenceConfigured && (
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              Azure Document Intelligence parser is not available. Configure
-              your Azure Document Intelligence API key in Settings to enable
-              this parser option.
+              Azure Document Intelligence parser is not available. Please
+              configure Azure Document Intelligence endpoint and API key in the
+              backend secrets.toml file.
             </AlertDescription>
           </Alert>
         )}
