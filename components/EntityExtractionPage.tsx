@@ -42,6 +42,9 @@ import {
   ArrowRight,
   CheckCircle,
   PlayCircle,
+  MapPin,
+  Hash,
+  Timer,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -57,11 +60,31 @@ import {
 } from "./TemplateLoader";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
+import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
+
+interface Reference {
+  text: string;
+  reference_index?: number;
+  best_match?: {
+    type: string;
+    similarity: number;
+    page_number?: number;
+    bounding_regions?: Array<{
+      page_number: number;
+      polygon: number[];
+    }>;
+    polygon?: number[];
+  };
+  paragraph_matches?: any[];
+  line_matches?: any[];
+}
 
 interface Entity {
   name: string;
   prompt: string;
   extracted?: string;
+  answer?: string;
+  references?: Reference[];
   duration?: number;
   promptTokens?: number;
   completionTokens?: number;
@@ -104,6 +127,27 @@ export function EntityExtractionPage({
   const [showRerunDialog, setShowRerunDialog] = useState(false);
   const [currentEntityIndex, setCurrentEntityIndex] = useState(0);
   const [isGeneratingParagraph, setIsGeneratingParagraph] = useState(false);
+  const [focusedReferenceByEntity, setFocusedReferenceByEntity] = useState<
+    Record<number, number | null>
+  >({});
+  useEffect(() => {
+    setFocusedReferenceByEntity((prev) => {
+      const updated = { ...prev };
+      let changed = false;
+      entities.forEach((entity, idx) => {
+        const activeIdx = updated[idx];
+        if (
+          activeIdx !== null &&
+          activeIdx !== undefined &&
+          (!entity.references || activeIdx >= entity.references.length)
+        ) {
+          updated[idx] = null;
+          changed = true;
+        }
+      });
+      return changed ? updated : prev;
+    });
+  }, [entities]);
 
   // Get available study types from templates
   const studyTypes = getAvailableStudyTypes();
@@ -153,6 +197,13 @@ export function EntityExtractionPage({
 
   const removeEntity = (index: number) => {
     setEntities(entities.filter((_, i) => i !== index));
+  };
+
+  const handleReferenceFocus = (entityIdx: number, refIdx: number) => {
+    setFocusedReferenceByEntity((prev) => ({
+      ...prev,
+      [entityIdx]: refIdx,
+    }));
   };
 
   const updateEntity = (
@@ -285,6 +336,8 @@ export function EntityExtractionPage({
             updatedEntities[i] = {
               ...entity,
               extracted: extracted.extracted,
+              answer: extracted.answer || extracted.extracted,
+              references: extracted.references || [],
               duration: meta.duration,
               promptTokens: meta.prompt_tokens,
               completionTokens: meta.completion_tokens,
@@ -615,109 +668,283 @@ export function EntityExtractionPage({
               {entities.map((entity, index) => {
                 const isExtracting = extractingEntities.has(entity.name);
                 const isCompleted = completedEntities.has(entity.name);
+                const referenceCount = entity.references?.length || 0;
+                const promptCharCount = entity.prompt?.length || 0;
 
                 return (
                   <div
                     key={index}
                     id={`entity-card-${index}`}
-                    className={`border-2 rounded-lg p-4 space-y-4 transition-all duration-300 ${
+                    className={`rounded-2xl border p-5 space-y-5 transition-all duration-300 ${
                       isExtracting
-                        ? "border-blue-400 shadow-lg bg-blue-50/30"
+                        ? "border-blue-300 bg-blue-50/40 shadow-md"
                         : isCompleted
-                          ? "border-green-400 bg-green-50/20"
-                          : "border-gray-200"
+                          ? "border-emerald-200 bg-emerald-50/30"
+                          : "border-gray-200 bg-white"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Label>Entity {index + 1}</Label>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-blue-900">
+                          Entity {index + 1}
+                        </span>
                         {isExtracting && (
-                          <span className="flex items-center gap-1 text-sm font-normal text-blue-600">
-                            <Sparkles className="h-4 w-4 animate-spin" />
-                            Extracting...
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                            <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                            Extracting
                           </span>
                         )}
                         {isCompleted && !isExtracting && (
-                          <span className="flex items-center gap-1 text-sm font-normal text-green-600">
-                            <CheckCircle />
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            <CheckCircle className="h-3.5 w-3.5" />
                             Completed
                           </span>
                         )}
                       </div>
-                      {entities.length > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeEntity(index)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span className="rounded-full bg-white px-3 py-1 font-medium shadow-sm">
+                          {referenceCount} references
+                        </span>
+                        <span className="rounded-full bg-white px-3 py-1 font-medium shadow-sm">
+                          {promptCharCount} chars
+                        </span>
+                        {entities.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-muted-foreground"
+                            onClick={() => removeEntity(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="grid gap-4">
-                      <div>
-                        <Label htmlFor={`entity-name-${index}`}>
-                          Entity Name
-                        </Label>
-                        <Input
-                          id={`entity-name-${index}`}
-                          value={entity.name}
-                          onChange={(e) =>
-                            updateEntity(index, "name", e.target.value)
-                          }
-                          placeholder="e.g., Authors, Funding Sources, Dose Level"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor={`entity-prompt-${index}`}>
-                          Extraction Prompt
-                        </Label>
-                        <Textarea
-                          id={`entity-prompt-${index}`}
-                          value={entity.prompt}
-                          onChange={(e) =>
-                            updateEntity(index, "prompt", e.target.value)
-                          }
-                          placeholder="Describe what information to extract with few-shot examples..."
-                          rows={6}
-                          className="resize-y min-h-[150px]"
-                        />
-                      </div>
-
-                      {entity.extracted && (
-                        <div>
-                          <Label>Extracted Information</Label>
-                          <div className="bg-muted p-3 rounded-md prose prose-sm max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {entity.extracted}
-                            </ReactMarkdown>
+                    {/* Split Layout: Left (Entity Info) / Right (PDF Viewer) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Left Side: Entity Configuration and Results */}
+                      <div className="space-y-4">
+                        <div className="grid gap-4">
+                          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <Label
+                                htmlFor={`entity-name-${index}`}
+                                className="text-sm font-semibold"
+                              >
+                                Entity Name
+                              </Label>
+                              <span className="text-xs text-gray-400">
+                                Used in reports & exports
+                              </span>
+                            </div>
+                            <Input
+                              id={`entity-name-${index}`}
+                              value={entity.name}
+                              onChange={(e) =>
+                                updateEntity(index, "name", e.target.value)
+                              }
+                              placeholder="e.g., Authors, Funding Sources, Dose Level"
+                              className="mt-3"
+                            />
                           </div>
-                          {entity.duration && (
-                            <div className="grid grid-cols-2 gap-4 mt-4">
-                              <div>
-                                <Label>Tokens</Label>
-                                <div className="bg-muted p-3 rounded-md">
-                                  <p className="text-sm">
-                                    {entity.promptTokens} (in) /{" "}
-                                    {entity.completionTokens} (out)
-                                  </p>
-                                </div>
+
+                          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <Label
+                                htmlFor={`entity-prompt-${index}`}
+                                className="text-sm font-semibold"
+                              >
+                                Extraction Prompt
+                              </Label>
+                              <span className="text-xs text-gray-500">
+                                {promptCharCount} characters
+                              </span>
+                            </div>
+                            <Textarea
+                              id={`entity-prompt-${index}`}
+                              value={entity.prompt}
+                              onChange={(e) =>
+                                updateEntity(index, "prompt", e.target.value)
+                              }
+                              placeholder="Describe what information to extract with few-shot examples..."
+                              rows={8}
+                              className="mt-3 resize-y min-h-[200px]"
+                            />
+                          </div>
+                        </div>
+
+                        {entity.extracted && (
+                          <div className="space-y-4">
+                            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm font-semibold">
+                                  Extracted Answer
+                                </Label>
+                                <span className="text-xs text-gray-500">
+                                  Markdown supported
+                                </span>
                               </div>
-                              <div>
-                                <Label>Time</Label>
-                                <div className="bg-muted p-3 rounded-md">
-                                  <p className="text-sm">
-                                    {entity.duration.toFixed(2)}s
-                                  </p>
+                              <div className="bg-gradient-to-br from-gray-50 to-blue-50 p-3 rounded-lg border border-gray-100 prose prose-sm max-w-none mt-3">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {entity.answer || entity.extracted}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+
+                            {/* References List */}
+                            {entity.references &&
+                              entity.references.length > 0 && (
+                                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-4">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <Label className="text-sm font-semibold flex items-center gap-2">
+                                      <MapPin className="h-4 w-4 text-blue-600" />
+                                      Source References (
+                                      {entity.references.length})
+                                    </Label>
+                                    <span className="text-xs text-gray-500">
+                                      Click a reference to jump in the PDF
+                                      viewer
+                                    </span>
+                                  </div>
+                                  <div className="border rounded-lg p-3 bg-gray-50 max-h-[360px] min-h-[220px] overflow-y-auto">
+                                    <div className="space-y-2">
+                                      {entity.references.map((ref, refIdx) => {
+                                        const pageNum =
+                                          ref.best_match?.page_number ||
+                                          ref.best_match?.bounding_regions?.[0]
+                                            ?.page_number;
+                                        const refColor = `hsl(${
+                                          (refIdx * 60) % 360
+                                        }, 70%, 50%)`;
+                                        const isActive =
+                                          focusedReferenceByEntity[index] ===
+                                          refIdx;
+
+                                        return (
+                                          <div
+                                            key={refIdx}
+                                            className={`text-xs bg-white p-3 rounded border-2 transition-all cursor-pointer ${
+                                              isActive
+                                                ? "border-blue-500 shadow-sm bg-blue-50/60"
+                                                : "border-gray-200 hover:border-blue-400"
+                                            }`}
+                                            style={{
+                                              borderLeftColor: refColor,
+                                              borderLeftWidth: "4px",
+                                            }}
+                                            onClick={() => {
+                                              handleReferenceFocus(
+                                                index,
+                                                refIdx
+                                              );
+                                            }}
+                                          >
+                                            <div className="flex items-start gap-2">
+                                              <div
+                                                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                                style={{
+                                                  backgroundColor: refColor,
+                                                }}
+                                              >
+                                                {refIdx + 1}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                <p className="text-gray-700 leading-relaxed">
+                                                  {ref.text.length > 120
+                                                    ? `${ref.text.substring(0, 120)}...`
+                                                    : ref.text}
+                                                </p>
+                                                {ref.best_match && (
+                                                  <div className="flex items-center gap-2 mt-1">
+                                                    {pageNum && (
+                                                      <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded hover:bg-blue-200">
+                                                        Page {pageNum}
+                                                      </span>
+                                                    )}
+                                                    {/* Similarity hidden per request */}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  {entity.duration && (
+                                    <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm flex flex-wrap gap-6">
+                                      <div className="flex items-center gap-2">
+                                        <Hash className="h-4 w-4 text-blue-600" />
+                                        <div>
+                                          <Label className="text-xs text-gray-500 uppercase tracking-wide">
+                                            Tokens
+                                          </Label>
+                                          <div className="text-base font-semibold text-gray-900">
+                                            {entity.promptTokens ?? "-"} in /{" "}
+                                            {entity.completionTokens ?? "-"} out
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Timer className="h-4 w-4 text-blue-600" />
+                                        <div>
+                                          <Label className="text-xs text-gray-500 uppercase tracking-wide">
+                                            Time
+                                          </Label>
+                                          <div className="text-base font-semibold text-gray-900">
+                                            {entity.duration.toFixed(2)}s
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
+                              )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right Side: PDF Viewer Beta */}
+                      <div className="border-l border-gray-200 pl-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="h-4 w-4 text-blue-600" />
+                            <Label className="text-sm font-semibold">
+                              PDF Viewer Beta
+                            </Label>
+                            <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
+                              BETA
+                            </span>
+                          </div>
+                          {documentData.fileId && documentData.conversionId ? (
+                            <div id={`pdf-viewer-${index}`}>
+                              <EntityPDFViewerBeta
+                                fileId={documentData.fileId}
+                                conversionId={documentData.conversionId}
+                                references={entity.references || []}
+                                focusedReferenceIndex={
+                                  focusedReferenceByEntity[index] ?? null
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <div className="h-[500px] flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                              <div className="text-center">
+                                <FileText className="h-10 w-10 text-gray-400 mx-auto mb-2" />
+                                <p className="text-xs text-gray-500">
+                                  PDF viewer not available. Please process a
+                                  document first.
+                                </p>
                               </div>
                             </div>
                           )}
                         </div>
-                      )}
+                      </div>
                     </div>
+
+                    {/* tokens info moved inside references block */}
                   </div>
                 );
               })}
@@ -810,38 +1037,6 @@ export function EntityExtractionPage({
         {showResults && (
           <>
             <div className="grid lg:grid-cols-2 gap-6">
-              <Card className="border-gray-200">
-                <CardHeader>
-                  <CardTitle>Extracted Entities</CardTitle>
-                  <CardDescription>
-                    Results from{" "}
-                    {availableModels.find((m) => m.id === selectedModel)
-                      ?.name || "Selected Model"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-96">
-                    <div className="space-y-4">
-                      {entities
-                        .filter((e) => e.extracted)
-                        .map((entity, index) => (
-                          <div
-                            key={index}
-                            className="border-b border-border pb-3 last:border-b-0"
-                          >
-                            <h4 className="font-medium mb-2">{entity.name}</h4>
-                            <div className="prose prose-sm max-w-none">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {entity.extracted}
-                              </ReactMarkdown>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-
               <Card className="border-gray-200">
                 <CardHeader>
                   <CardTitle>Generated Paragraph Summary</CardTitle>

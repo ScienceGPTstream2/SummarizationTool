@@ -7,7 +7,6 @@ from typing import Optional, Dict, Any, Union
 import json
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -149,6 +148,33 @@ class DoclingService:
                 result,
                 raw_analysis_path,
             )
+
+            # Dump DoclingDocument for debugging (to inspect JSON pointer paths)
+            try:
+                doc_json_path = conversion_dir / "docling_document.json"
+                # Prefer Pydantic v2 API if available
+                if hasattr(result.document, "model_dump_json"):
+                    async with aiofiles.open(doc_json_path, "w", encoding="utf-8") as f:
+                        await f.write(result.document.model_dump_json(indent=2))
+                elif hasattr(result.document, "model_dump"):
+                    async with aiofiles.open(doc_json_path, "w", encoding="utf-8") as f:
+                        await f.write(
+                            json.dumps(
+                                result.document.model_dump(mode="json"), indent=2
+                            )
+                        )
+                else:
+                    # Fallback best effort
+                    async with aiofiles.open(doc_json_path, "w", encoding="utf-8") as f:
+                        await f.write(
+                            json.dumps(
+                                result.document,
+                                default=lambda o: getattr(o, "__dict__", str(o)),
+                                indent=2,
+                            )
+                        )
+            except Exception:
+                pass
 
             # Read the markdown content for response
             async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
@@ -301,6 +327,33 @@ class DoclingService:
                 # Extract and save bounding box information
                 raw_analysis_path = conv_dir / "raw_analysis.json"
                 extract_bboxes_sync(result, raw_analysis_path)
+
+                # Dump DoclingDocument for debugging (to inspect JSON pointer paths)
+                try:
+                    doc_json_path = conv_dir / "docling_document.json"
+                    # Prefer Pydantic v2 API if available
+                    if hasattr(result.document, "model_dump_json"):
+                        with open(doc_json_path, "w", encoding="utf-8") as f:
+                            f.write(result.document.model_dump_json(indent=2))
+                    elif hasattr(result.document, "model_dump"):
+                        with open(doc_json_path, "w", encoding="utf-8") as f:
+                            f.write(
+                                json.dumps(
+                                    result.document.model_dump(mode="json"), indent=2
+                                )
+                            )
+                    else:
+                        # Fallback best effort
+                        with open(doc_json_path, "w", encoding="utf-8") as f:
+                            f.write(
+                                json.dumps(
+                                    result.document,
+                                    default=lambda o: getattr(o, "__dict__", str(o)),
+                                    indent=2,
+                                )
+                            )
+                except Exception:
+                    pass
 
                 # Read markdown content for metadata
                 with open(markdown_path, "r", encoding="utf-8") as mf:
@@ -838,16 +891,20 @@ class DoclingService:
 
     async def get_markdown_content(self, conversion_id: str) -> Optional[str]:
         """
-        Get markdown content by conversion ID
+        Get tagged markdown content by conversion ID for LLM entity extraction
+
+        Returns tagged markdown with paragraph-level references (e.g., [PARA_001_P3])
+        if available, otherwise falls back to regular markdown.
 
         Args:
             conversion_id: Unique conversion identifier
 
         Returns:
-            Markdown content as string or None if not found
+            Tagged markdown content as string or None if not found
         """
-        markdown_path = self.output_base_dir / conversion_id / "document.md"
+        conversion_dir = self.output_base_dir / conversion_id
 
+        markdown_path = conversion_dir / "document.md"
         if not markdown_path.exists():
             return None
 

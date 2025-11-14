@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Label } from "./ui/label";
-import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
 import {
   FileText,
@@ -104,16 +104,77 @@ export function PDFBoundingBoxViewer({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1.0);
-  const [fitToWidth, setFitToWidth] = useState(false);
+  const [fitToWidthScale, setFitToWidthScale] = useState(1.0);
+  const [zoomRatio, setZoomRatio] = useState(1.0);
+  const [isFitWidth, setIsFitWidth] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const scrollStartRef = useRef({ left: 0, top: 0 });
   const [pdfDocument, setPdfDocument] = useState<any>(null);
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
   const [visibleElements, setVisibleElements] = useState<Set<ElementType>>(
     new Set(["paragraphs", "tables", "figures"])
   );
+
+  const clampZoomRatio = (value: number) => Math.min(3, Math.max(0.5, value));
+  const canPan = zoomRatio > 1.02;
+
+  const handleZoomChange = (delta: number) => {
+    setIsFitWidth(false);
+    setZoomRatio((prev) => Number(clampZoomRatio(prev + delta).toFixed(2)));
+  };
+
+  const handleResetZoom = () => {
+    setIsFitWidth(false);
+    setZoomRatio(1);
+  };
+
+  const handleMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!canPan || !containerRef.current) return;
+    setIsPanning(true);
+    containerRef.current.classList.add("cursor-grabbing");
+    panStartRef.current = { x: e.clientX, y: e.clientY };
+    scrollStartRef.current = {
+      left: containerRef.current.scrollLeft,
+      top: containerRef.current.scrollTop,
+    };
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isPanning) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const deltaX = event.clientX - panStartRef.current.x;
+      const deltaY = event.clientY - panStartRef.current.y;
+      container.scrollLeft = scrollStartRef.current.left - deltaX;
+      container.scrollTop = scrollStartRef.current.top - deltaY;
+    };
+
+    const handleMouseUp = () => {
+      setIsPanning(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isPanning]);
+
+  useEffect(() => {
+    if (!isPanning && containerRef.current) {
+      containerRef.current.classList.remove("cursor-grabbing");
+    }
+  }, [isPanning]);
 
   // Load PDF.js dynamically
   useEffect(() => {
@@ -212,11 +273,14 @@ export function PDFBoundingBoxViewer({
             console.log(
               `Analysis not ready yet, retrying in ${(retryCount + 1) * 1000}ms... (attempt ${retryCount + 1}/5)`
             );
-            const timeout = setTimeout(() => {
-              if (!isCancelled) {
-                fetchAnalysis(retryCount + 1);
-              }
-            }, (retryCount + 1) * 1000); // Exponential backoff: 1s, 2s, 3s, 4s, 5s
+            const timeout = setTimeout(
+              () => {
+                if (!isCancelled) {
+                  fetchAnalysis(retryCount + 1);
+                }
+              },
+              (retryCount + 1) * 1000
+            ); // Exponential backoff: 1s, 2s, 3s, 4s, 5s
             retryTimeouts.push(timeout);
             return;
           }
@@ -238,11 +302,14 @@ export function PDFBoundingBoxViewer({
             `Error fetching analysis, retrying in ${(retryCount + 1) * 1000}ms... (attempt ${retryCount + 1}/5)`,
             err
           );
-          const timeout = setTimeout(() => {
-            if (!isCancelled) {
-              fetchAnalysis(retryCount + 1);
-            }
-          }, (retryCount + 1) * 1000);
+          const timeout = setTimeout(
+            () => {
+              if (!isCancelled) {
+                fetchAnalysis(retryCount + 1);
+              }
+            },
+            (retryCount + 1) * 1000
+          );
           retryTimeouts.push(timeout);
           return;
         }
@@ -281,24 +348,41 @@ export function PDFBoundingBoxViewer({
     loadPDF();
   }, [pdfUrl]);
 
-  // Calculate fit-to-width scale
+  // Calculate fit-to-width scale and keep baseline updated
   useEffect(() => {
     const calculateFitToWidth = async () => {
-      if (!pdfDocument || !containerRef.current || !fitToWidth) return;
+      if (!pdfDocument || !containerRef.current) return;
 
       try {
         const page = await pdfDocument.getPage(currentPage);
         const viewport = page.getViewport({ scale: 1.0 });
-        const containerWidth = containerRef.current.clientWidth - 64; // Subtract padding
+        const containerWidth = containerRef.current.clientWidth - 64; // padding
         const calculatedScale = containerWidth / viewport.width;
-        setScale(calculatedScale);
+        setFitToWidthScale(calculatedScale);
+        if (isFitWidth) {
+          setZoomRatio(1);
+        }
       } catch (err) {
         console.error("Error calculating fit to width:", err);
       }
     };
 
     calculateFitToWidth();
-  }, [pdfDocument, currentPage, fitToWidth]);
+
+    const handleResize = () => {
+      calculateFitToWidth();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [pdfDocument, currentPage, isFitWidth]);
+
+  // Apply zoom ratio to actual scale
+  useEffect(() => {
+    setScale(fitToWidthScale * zoomRatio);
+  }, [fitToWidthScale, zoomRatio]);
 
   // Render current page with high quality
   useEffect(() => {
@@ -322,22 +406,25 @@ export function PDFBoundingBoxViewer({
 
         // Use device pixel ratio for sharp rendering on high-DPI displays
         const devicePixelRatio = window.devicePixelRatio || 1;
+        const transform =
+          devicePixelRatio !== 1
+            ? [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0]
+            : null;
 
         // Set display size (css pixels)
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
 
         // Set actual size in memory (scaled for high-DPI)
-        // This also automatically clears the canvas and resets transforms
         canvas.width = viewport.width * devicePixelRatio;
         canvas.height = viewport.height * devicePixelRatio;
 
-        // Scale the context to match device pixel ratio
-        context.scale(devicePixelRatio, devicePixelRatio);
+        context.setTransform(1, 0, 0, 1, 0, 0);
 
         const renderContext = {
           canvasContext: context,
           viewport: viewport,
+          transform: transform || undefined,
         };
 
         renderTask = page.render(renderContext);
@@ -408,6 +495,10 @@ export function PDFBoundingBoxViewer({
 
       return { x, y, width, height };
     };
+
+    const pixelRatio = window.devicePixelRatio || 1;
+    context.save();
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
     // Get page dimensions
     const pageInfo = analysisResult.pages?.find(
@@ -488,6 +579,8 @@ export function PDFBoundingBoxViewer({
         });
       });
     }
+
+    context.restore();
   };
 
   const toggleElement = (element: ElementType) => {
@@ -664,27 +757,21 @@ export function PDFBoundingBoxViewer({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setFitToWidth(false);
-                setScale(Math.max(0.5, scale - 0.2));
-              }}
-              disabled={scale <= 0.5}
+              onClick={() => handleZoomChange(-0.2)}
+              disabled={zoomRatio <= 0.5}
               title="Zoom Out (-)"
               className="hover:bg-white transition-colors"
             >
               <ZoomOut className="h-4 w-4" />
             </Button>
             <span className="text-sm min-w-[65px] text-center font-bold px-3 py-1.5 bg-white rounded-md border border-gray-300 shadow-sm">
-              {Math.round(scale * 100)}%
+              {Math.round(zoomRatio * 100)}%
             </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setFitToWidth(false);
-                setScale(Math.min(3, scale + 0.2));
-              }}
-              disabled={scale >= 3}
+              onClick={() => handleZoomChange(0.2)}
+              disabled={zoomRatio >= 3}
               title="Zoom In (+)"
               className="hover:bg-white transition-colors"
             >
@@ -692,9 +779,17 @@ export function PDFBoundingBoxViewer({
             </Button>
             <div className="w-px h-6 bg-gray-300 mx-1"></div>
             <Button
-              variant={fitToWidth ? "default" : "outline"}
+              variant={isFitWidth ? "default" : "outline"}
               size="sm"
-              onClick={() => setFitToWidth(!fitToWidth)}
+              onClick={() =>
+                setIsFitWidth((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setZoomRatio(1);
+                  }
+                  return next;
+                })
+              }
               title="Fit to Width"
               className="font-medium transition-colors"
             >
@@ -703,10 +798,7 @@ export function PDFBoundingBoxViewer({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setFitToWidth(false);
-                setScale(1.0);
-              }}
+              onClick={handleResetZoom}
               title="Reset to 100%"
               className="hover:bg-white transition-colors"
             >
@@ -717,11 +809,15 @@ export function PDFBoundingBoxViewer({
 
         {/* PDF Canvas */}
         <div className="relative">
-          <ScrollArea
-            className="h-[850px] border-2 rounded-lg bg-gradient-to-b from-gray-50 to-gray-100"
+          <div
+            className="h-[850px] border-2 rounded-lg bg-gradient-to-b from-gray-50 to-gray-100 overflow-auto"
             ref={containerRef}
           >
-            <div className="flex justify-center items-start p-8 min-h-full">
+            <div
+              className={`p-8 min-h-full ${
+                canPan ? "" : "flex justify-center items-start"
+              }`}
+            >
               {loading ? (
                 <div className="flex items-center justify-center h-96">
                   <div className="text-center">
@@ -732,17 +828,24 @@ export function PDFBoundingBoxViewer({
                   </div>
                 </div>
               ) : (
-                <canvas
-                  ref={canvasRef}
-                  className="shadow-2xl bg-white border-2 border-gray-300 rounded-md transition-all duration-200"
-                  style={{
-                    maxWidth: "100%",
-                    height: "auto",
-                  }}
-                />
+                <div
+                  className={`inline-block min-w-max ${
+                    canPan
+                      ? isPanning
+                        ? "cursor-grabbing"
+                        : "cursor-grab"
+                      : "cursor-default"
+                  }`}
+                  onMouseDown={handleMouseDown}
+                >
+                  <canvas
+                    ref={canvasRef}
+                    className="shadow-2xl bg-white border-2 border-gray-300 rounded-md transition-all duration-200"
+                  />
+                </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-4">

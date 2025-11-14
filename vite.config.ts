@@ -16,11 +16,7 @@ export default defineConfig({
     port: 3000,
     open: true,
     watch: {
-      ignored: [
-        "**/backend/**",
-        "**/node_modules/**",
-        "**/.git/**",
-      ],
+      ignored: ["**/backend/**", "**/node_modules/**", "**/.git/**"],
     },
     proxy: {
       "/api": {
