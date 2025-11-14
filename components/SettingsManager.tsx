@@ -98,6 +98,17 @@ export const allModels: ModelConfig[] = [
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
   },
+  // Anthropic Models (via Vertex AI)
+  {
+    id: "claude-sonnet-4-5@20250929",
+    name: "Claude Sonnet 4.5",
+    provider: "Anthropic",
+    description: "Anthropic Claude Sonnet 4.5 model via Vertex AI",
+    requiredApiKey: "none", // Uses server-side service account
+    category: "anthropic",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "global",
+  },
 ];
 
 // API Key configurations
@@ -326,6 +337,11 @@ export class SettingsManager {
         );
       }
 
+      // For Anthropic provider, always available (uses server-side service account)
+      if (model.provider && model.provider.toLowerCase().includes("anthropic")) {
+        return true;
+      }
+
       // For other providers, just check the required API key
       const hasApiKey = this.getApiKey(model.requiredApiKey);
       return (
@@ -376,6 +392,14 @@ export class SettingsManager {
         projectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE" &&
         location !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
       );
+    }
+
+    // For Anthropic provider, always available (uses server-side service account)
+    if (
+      (model as any).provider &&
+      (model as any).provider.toLowerCase().includes("anthropic")
+    ) {
+      return true;
     }
 
     const apiKey = this.getApiKey((model as any).requiredApiKey);

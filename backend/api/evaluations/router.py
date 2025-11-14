@@ -357,6 +357,12 @@ async def get_metrics_info():
                 "models": ["gemini-2.0-flash-exp", "gemini-1.5-pro"],
                 "required_config": ["vertex_project", "vertex_model_name"],
             },
+            "anthropic": {
+                "name": "Anthropic (via Vertex AI)",
+                "models": ["claude-sonnet-4-5@20250929"],
+                "required_config": [],
+                "note": "Uses server-side service account authentication - no user config needed",
+            },
         },
         "custom_metrics": {
             "description": "Create domain-specific metrics with custom evaluation steps",
