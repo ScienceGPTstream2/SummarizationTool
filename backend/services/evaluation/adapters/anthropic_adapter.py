@@ -13,7 +13,7 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
     """
     Custom DeepEval model adapter for Anthropic via Vertex AI
     Follows official DeepEval documentation pattern
-    
+
     Uses AnthropicVertex SDK with service account authentication
     """
 
@@ -70,7 +70,7 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
             Generated text response
         """
         client = self.load_model()
-        
+
         # Prepare request parameters
         request_params = {
             "max_tokens": self.max_tokens,

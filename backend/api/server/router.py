@@ -15,20 +15,60 @@ async def get_server_config():
     """
     Return server-side configuration status for features like Azure OpenAI.
     """
-    # Check if the essential Azure OpenAI env vars are set and not empty
-    is_azure_openai_configured = all(
+    # Check if Azure OpenAI is configured
+    # Either global endpoint/key exists, or models with their own endpoints/keys exist
+    has_global_config = all(
         [
             os.getenv("AZURE_OPENAI_ENDPOINT"),
             os.getenv("AZURE_OPENAI_API_KEY"),
-            os.getenv("AZURE_OPENAI_DEPLOYMENT"),
         ]
     )
+    # Check if models are configured (they may have their own endpoints/keys)
+    import json
+
+    azure_models_json = os.getenv("AZURE_OPENAI_MODELS")
+    has_models = False
+    if azure_models_json:
+        try:
+            models_list = json.loads(azure_models_json)
+            # Check if at least one model has endpoint and api_key
+            for model_cfg in models_list:
+                if model_cfg.get("endpoint") and model_cfg.get("api_key"):
+                    has_models = True
+                    break
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    is_azure_openai_configured = has_global_config or has_models
+
+    # Check for Gemini configuration: project, location, and service account file
+    gemini_project_id = os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_PROJECT")
+    gemini_location = os.getenv("GEMINI_LOCATION", "us-central1")
+
+    # Check if service account file exists
+    from pathlib import Path
+
+    service_account_path = None
+    # Check GOOGLE_APPLICATION_CREDENTIALS env var first
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_path and Path(creds_path).exists():
+        service_account_path = Path(creds_path)
+    else:
+        # Try to find in backend/core/ directory
+        try:
+            core_dir = Path(__file__).resolve().parents[2] / "core"
+            if core_dir.exists():
+                json_files = list(core_dir.glob("*.json"))
+                if json_files:
+                    service_account_path = json_files[0]
+        except Exception:
+            pass
 
     is_gemini_configured = all(
         [
-            os.getenv("GEMINI_PROJECT_ID"),
-            os.getenv("GEMINI_LOCATION"),
-            os.getenv("GEMINI_API_KEY"),
+            gemini_project_id,
+            gemini_location,
+            service_account_path is not None,
         ]
     )
 
@@ -54,33 +94,109 @@ async def get_available_models():
     models = []
 
     # Add Azure OpenAI models if configured
-    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-    model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-    if deployment and model_name:
-        models.append(
-            {
-                "id": f"azure-{deployment}",
-                "name": model_name,
-                "provider": "Azure",
-                "description": f"Azure deployment of {model_name}",
-                "deployment": deployment,
-                "api_version": api_version,
-            }
-        )
+    # Support multiple models from secrets.toml
+    import json
 
-    # Add Gemini models if configured
-    gemini_project_id = os.getenv("GEMINI_PROJECT_ID")
-    gemini_location = os.getenv("GEMINI_LOCATION")
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if gemini_project_id and gemini_location and gemini_api_key:
-        # Add the Gemini models that are available (using correct Vertex AI model IDs)
+    azure_models_json = os.getenv("AZURE_OPENAI_MODELS")
+    if azure_models_json:
+        try:
+            azure_models_list = json.loads(azure_models_json)
+            for model_cfg in azure_models_list:
+                deployment = model_cfg.get("deployment")
+                model_name = model_cfg.get("model_name")
+                api_version = model_cfg.get("api_version")
+                endpoint = model_cfg.get(
+                    "endpoint"
+                )  # Optional: model-specific endpoint
+                api_key = model_cfg.get("api_key")  # Optional: model-specific key
+                if deployment and model_name:
+                    # Map model names to their characteristics
+                    model_descriptions = {
+                        "gpt-4o": "Balanced (fast + reasoning)",
+                        "gpt-5-mini": "Fast",
+                        "gpt-5-nano": "Ultra-fast",
+                        "o3-mini": "Reasoning",
+                        "o4-mini": "Fast",
+                        "o3": "Reasoning",
+                    }
+                    description = model_descriptions.get(
+                        model_name, f"Azure deployment of {model_name}"
+                    )
+
+                    model_data = {
+                        "id": f"azure-{deployment}",
+                        "name": model_name,
+                        "provider": "Azure",
+                        "description": description,
+                        "deployment": deployment,
+                        "api_version": api_version,
+                    }
+                    # Only include endpoint and api_key if they're model-specific (not in response, but for reference)
+                    models.append(model_data)
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"⚠️  Warning: Failed to parse AZURE_OPENAI_MODELS: {e}")
+
+    # Backward compatibility: support old single model format
+    if not azure_models_json:
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+        if deployment and model_name:
+            # Map model names to their characteristics
+            model_descriptions = {
+                "gpt-4o": "Balanced (fast + reasoning)",
+                "gpt-5-mini": "Fast",
+                "gpt-5-nano": "Ultra-fast",
+                "o3-mini": "Reasoning",
+                "o4-mini": "Fast",
+                "o3": "Reasoning",
+            }
+            description = model_descriptions.get(
+                model_name, f"Azure deployment of {model_name}"
+            )
+
+            models.append(
+                {
+                    "id": f"azure-{deployment}",
+                    "name": model_name,
+                    "provider": "Azure",
+                    "description": description,
+                    "deployment": deployment,
+                    "api_version": api_version,
+                }
+            )
+
+    # Add Gemini models if configured (using service account authentication)
+    gemini_project_id = os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_PROJECT")
+    gemini_location = os.getenv("GEMINI_LOCATION", "us-central1")
+
+    # Check if service account file exists
+    from pathlib import Path
+
+    service_account_path = None
+    # Check GOOGLE_APPLICATION_CREDENTIALS env var first
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_path and Path(creds_path).exists():
+        service_account_path = Path(creds_path)
+    else:
+        # Try to find in backend/core/ directory
+        try:
+            core_dir = Path(__file__).resolve().parents[2] / "core"
+            if core_dir.exists():
+                json_files = list(core_dir.glob("*.json"))
+                if json_files:
+                    service_account_path = json_files[0]
+        except Exception:
+            pass
+
+    if gemini_project_id and gemini_location and service_account_path:
+        # Add only Gemini 2.5 models (using correct Vertex AI model IDs)
         gemini_models = [
             {
                 "id": "publishers/google/models/gemini-2.5-pro",
                 "name": "Gemini 2.5 Pro",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Pro model for entity extraction",
+                "description": "Reasoning",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
@@ -88,7 +204,7 @@ async def get_available_models():
                 "id": "publishers/google/models/gemini-2.5-flash-lite",
                 "name": "Gemini 2.5 Flash Lite",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Flash Lite model for entity extraction",
+                "description": "Fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
@@ -96,27 +212,47 @@ async def get_available_models():
                 "id": "publishers/google/models/gemini-2.5-flash",
                 "name": "Gemini 2.5 Flash",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Flash model for entity extraction",
-                "project_id": gemini_project_id,
-                "location": gemini_location,
-            },
-            {
-                "id": "publishers/google/models/gemini-2.0-flash-lite-001",
-                "name": "Gemini 2.0 Flash Lite",
-                "provider": "Google Gemini",
-                "description": "Google Gemini 2.0 Flash Lite model for entity extraction",
-                "project_id": gemini_project_id,
-                "location": gemini_location,
-            },
-            {
-                "id": "publishers/google/models/gemini-2.0-flash-001",
-                "name": "Gemini 2.0 Flash",
-                "provider": "Google Gemini",
-                "description": "Google Gemini 2.0 Flash model for entity extraction",
+                "description": "Ultra-fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
         ]
         models.extend(gemini_models)
+
+    # Add Anthropic models if configured (using service account authentication via Vertex AI)
+    # Check for Anthropic configuration: project, location, and service account file
+    anthropic_project_id = (
+        os.getenv("ANTHROPIC_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT")
+    )
+    anthropic_location = os.getenv("ANTHROPIC_LOCATION", "global")
+
+    # Reuse the same service account path check (same service account for both Gemini and Anthropic)
+    # service_account_path is already checked above for Gemini
+
+    if anthropic_project_id and anthropic_location and service_account_path:
+        # Add only the two models that support structured outputs
+        # According to Anthropic docs: "Structured outputs are currently available as a public beta
+        # feature in the Claude API for Claude Sonnet 4.5 and Claude Opus 4.1."
+        anthropic_models = [
+            {
+                "id": "claude-sonnet-4-5@20250929",
+                "name": "Claude Sonnet 4.5",
+                "provider": "Anthropic",
+                "description": "Reasoning",
+                "project_id": anthropic_project_id,
+                "location": anthropic_location,
+            },
+            {
+                "id": "claude-opus-4-1@20250805",
+                "name": "Claude Opus 4.1",
+                "provider": "Anthropic",
+                "description": "Frontier reasoning",
+                "project_id": anthropic_project_id,
+                "location": anthropic_location,
+            },
+        ]
+        models.extend(anthropic_models)
 
     return JSONResponse(status_code=200, content=models)

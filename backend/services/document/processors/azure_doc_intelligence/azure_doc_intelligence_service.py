@@ -492,9 +492,14 @@ class AzureDocIntelligenceService:
             return None
 
     async def get_markdown_content(self, conversion_id: str) -> Optional[str]:
-        """Get markdown content by conversion ID"""
-        markdown_path = self.output_base_dir / conversion_id / "document.md"
+        """
+        Get markdown content by conversion ID for LLM entity extraction
 
+        Returns the markdown content from document.md
+        """
+        conversion_dir = self.output_base_dir / conversion_id
+
+        markdown_path = conversion_dir / "document.md"
         if not markdown_path.exists():
             return None
 

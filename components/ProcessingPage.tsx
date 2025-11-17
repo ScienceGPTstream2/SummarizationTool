@@ -37,18 +37,18 @@ const allParsers = [
     requiresApiKey: false,
   },
   {
-    id: "docling",
-    name: "Docling",
-    description:
-      "AI-powered document parsing with advanced layout understanding",
-    requiresApiKey: false,
-  },
-  {
     id: "azure_doc_intelligence",
     name: "Azure Document Intelligence",
     description:
       "Microsoft Azure cognitive service for form and document analysis",
     requiresApiKey: true,
+  },
+  {
+    id: "docling",
+    name: "Docling",
+    description:
+      "AI-powered document parsing with advanced layout understanding (PDF viewer not supported, coming soon)",
+    requiresApiKey: false,
   },
 ];
 
@@ -107,9 +107,15 @@ export function ProcessingPage({
     return `${mins}:${secs}`;
   }
 
+  const [serverConfigLoaded, setServerConfigLoaded] = useState(false);
+
   useEffect(() => {
-    // Refresh server config when component mounts to get latest API key availability
-    settingsManager.refreshServerConfig();
+    // Refresh server config when component mounts to get latest configuration status
+    const loadServerConfig = async () => {
+      await settingsManager.refreshServerConfig();
+      setServerConfigLoaded(true);
+    };
+    loadServerConfig();
 
     let timer: NodeJS.Timeout;
     if (isProcessing) {
@@ -303,13 +309,13 @@ export function ProcessingPage({
       </div>
 
       <div className="grid gap-6">
-        {!isAzureDocumentIntelligenceConfigured && (
+        {serverConfigLoaded && !isAzureDocumentIntelligenceConfigured && (
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              Azure Document Intelligence parser is not available. Configure
-              your Azure Document Intelligence API key in Settings to enable
-              this parser option.
+              Azure Document Intelligence parser is not available. Please
+              configure Azure Document Intelligence endpoint and API key in the
+              backend secrets.toml file.
             </AlertDescription>
           </Alert>
         )}

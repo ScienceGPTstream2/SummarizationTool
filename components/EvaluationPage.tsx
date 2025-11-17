@@ -96,28 +96,16 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     id: "anthropic_sonnet_4_5",
     name: "Claude Sonnet 4.5",
     model: "claude-sonnet-4-5@20250929",
-    description: "Latest Sonnet - balanced performance",
+    description:
+      "Latest Sonnet - balanced performance (supports structured outputs)",
     available: true,
   },
   {
     id: "anthropic_opus_4_1",
     name: "Claude Opus 4.1",
     model: "claude-opus-4-1@20250805",
-    description: "Most capable - highest quality evaluation",
-    available: true,
-  },
-  {
-    id: "anthropic_sonnet_4",
-    name: "Claude Sonnet 4",
-    model: "claude-sonnet-4@20250514",
-    description: "Previous Sonnet - proven reliability",
-    available: true,
-  },
-  {
-    id: "anthropic_haiku_4_5",
-    name: "Claude Haiku 4.5",
-    model: "claude-haiku-4-5@20251001",
-    description: "Fastest - efficient evaluation",
+    description:
+      "Most capable - highest quality evaluation (supports structured outputs)",
     available: true,
   },
 ];
@@ -834,32 +822,32 @@ export function EvaluationPage({
               <div>
                 <h3 className="font-semibold mb-3">Anthropic Models</h3>
                 <div className="space-y-3">
-                  {EVAL_PROVIDERS.filter((p) => p.id.startsWith("anthropic_")).map(
-                    (provider) => (
-                      <div
-                        key={provider.id}
-                        className="flex items-start space-x-3 space-y-0"
-                      >
-                        <Checkbox
-                          id={provider.id}
-                          checked={selectedProviders.includes(provider.id)}
-                          onCheckedChange={() => toggleProvider(provider.id)}
-                          disabled={!provider.available}
-                        />
-                        <div className="space-y-1 leading-none">
-                          <Label
-                            htmlFor={provider.id}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                          >
-                            {getDisplayModelName(provider.model)}
-                          </Label>
-                          <p className="text-sm text-muted-foreground">
-                            {provider.description}
-                          </p>
-                        </div>
+                  {EVAL_PROVIDERS.filter((p) =>
+                    p.id.startsWith("anthropic_")
+                  ).map((provider) => (
+                    <div
+                      key={provider.id}
+                      className="flex items-start space-x-3 space-y-0"
+                    >
+                      <Checkbox
+                        id={provider.id}
+                        checked={selectedProviders.includes(provider.id)}
+                        onCheckedChange={() => toggleProvider(provider.id)}
+                        disabled={!provider.available}
+                      />
+                      <div className="space-y-1 leading-none">
+                        <Label
+                          htmlFor={provider.id}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                        >
+                          {getDisplayModelName(provider.model)}
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          {provider.description}
+                        </p>
                       </div>
-                    )
-                  )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </CardContent>
@@ -1207,7 +1195,9 @@ export function EvaluationPage({
                                                           ) : (
                                                             <XCircle className="h-5 w-5 text-red-600" />
                                                           )}
-                                                          {getDisplayModelName(result.model)}
+                                                          {getDisplayModelName(
+                                                            result.model
+                                                          )}
                                                         </CardTitle>
                                                         <CardDescription className="flex items-center justify-between">
                                                           <span>
