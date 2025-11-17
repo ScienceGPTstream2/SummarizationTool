@@ -521,8 +521,8 @@ export function EntityExtractionPage({
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              No AI models are configured. Please go to Settings to configure
-              your API keys first.
+              No AI models are currently available. Loading models from backend
+              configuration...
             </AlertDescription>
           </Alert>
         )}
@@ -574,12 +574,12 @@ export function EntityExtractionPage({
                   <SelectValue
                     placeholder={
                       availableModels.length === 0
-                        ? "No models available - configure API keys"
+                        ? "Loading models from backend..."
                         : "Select AI model"
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[60vh] sm:max-h-[400px] overflow-y-auto">
                   {availableModels.map((model) => (
                     <SelectItem key={model.id} value={model.id}>
                       <div>
@@ -600,7 +600,7 @@ export function EntityExtractionPage({
 
               {availableModels.length === 0 && (
                 <p className="text-sm text-muted-foreground mt-2">
-                  Configure your API keys in Settings to enable AI models.
+                  Loading models from backend...
                 </p>
               )}
             </CardContent>

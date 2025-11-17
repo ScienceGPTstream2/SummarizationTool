@@ -110,11 +110,24 @@ async def get_available_models():
                 )  # Optional: model-specific endpoint
                 api_key = model_cfg.get("api_key")  # Optional: model-specific key
                 if deployment and model_name:
+                    # Map model names to their characteristics
+                    model_descriptions = {
+                        "gpt-4o": "Balanced (fast + reasoning)",
+                        "gpt-5-mini": "Fast",
+                        "gpt-5-nano": "Ultra-fast",
+                        "o3-mini": "Reasoning",
+                        "o4-mini": "Fast",
+                        "o3": "Reasoning",
+                    }
+                    description = model_descriptions.get(
+                        model_name, f"Azure deployment of {model_name}"
+                    )
+
                     model_data = {
                         "id": f"azure-{deployment}",
                         "name": model_name,
                         "provider": "Azure",
-                        "description": f"Azure deployment of {model_name}",
+                        "description": description,
                         "deployment": deployment,
                         "api_version": api_version,
                     }
@@ -129,12 +142,25 @@ async def get_available_models():
         model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
         api_version = os.getenv("AZURE_OPENAI_API_VERSION")
         if deployment and model_name:
+            # Map model names to their characteristics
+            model_descriptions = {
+                "gpt-4o": "Balanced (fast + reasoning)",
+                "gpt-5-mini": "Fast",
+                "gpt-5-nano": "Ultra-fast",
+                "o3-mini": "Reasoning",
+                "o4-mini": "Fast",
+                "o3": "Reasoning",
+            }
+            description = model_descriptions.get(
+                model_name, f"Azure deployment of {model_name}"
+            )
+
             models.append(
                 {
                     "id": f"azure-{deployment}",
                     "name": model_name,
                     "provider": "Azure",
-                    "description": f"Azure deployment of {model_name}",
+                    "description": description,
                     "deployment": deployment,
                     "api_version": api_version,
                 }
@@ -170,7 +196,7 @@ async def get_available_models():
                 "id": "publishers/google/models/gemini-2.5-pro",
                 "name": "Gemini 2.5 Pro",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Pro model for entity extraction",
+                "description": "Reasoning",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
@@ -178,7 +204,7 @@ async def get_available_models():
                 "id": "publishers/google/models/gemini-2.5-flash-lite",
                 "name": "Gemini 2.5 Flash Lite",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Flash Lite model for entity extraction",
+                "description": "Fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
@@ -186,11 +212,47 @@ async def get_available_models():
                 "id": "publishers/google/models/gemini-2.5-flash",
                 "name": "Gemini 2.5 Flash",
                 "provider": "Google Gemini",
-                "description": "Google Gemini 2.5 Flash model for entity extraction",
+                "description": "Ultra-fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
         ]
         models.extend(gemini_models)
+
+    # Add Anthropic models if configured (using service account authentication via Vertex AI)
+    # Check for Anthropic configuration: project, location, and service account file
+    anthropic_project_id = (
+        os.getenv("ANTHROPIC_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT")
+    )
+    anthropic_location = os.getenv("ANTHROPIC_LOCATION", "global")
+
+    # Reuse the same service account path check (same service account for both Gemini and Anthropic)
+    # service_account_path is already checked above for Gemini
+
+    if anthropic_project_id and anthropic_location and service_account_path:
+        # Add only the two models that support structured outputs
+        # According to Anthropic docs: "Structured outputs are currently available as a public beta
+        # feature in the Claude API for Claude Sonnet 4.5 and Claude Opus 4.1."
+        anthropic_models = [
+            {
+                "id": "claude-sonnet-4-5@20250929",
+                "name": "Claude Sonnet 4.5",
+                "provider": "Anthropic",
+                "description": "Reasoning",
+                "project_id": anthropic_project_id,
+                "location": anthropic_location,
+            },
+            {
+                "id": "claude-opus-4-1@20250805",
+                "name": "Claude Opus 4.1",
+                "provider": "Anthropic",
+                "description": "Frontier reasoning",
+                "project_id": anthropic_project_id,
+                "location": anthropic_location,
+            },
+        ]
+        models.extend(anthropic_models)
 
     return JSONResponse(status_code=200, content=models)

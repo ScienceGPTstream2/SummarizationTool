@@ -111,10 +111,20 @@ def load_config():
                 location = vertex_cfg.get("location")
                 if project:
                     os.environ.setdefault("GEMINI_PROJECT", project)
+                    os.environ.setdefault("GEMINI_PROJECT_ID", project)
                 if location:
                     os.environ.setdefault("GEMINI_LOCATION", location)
 
-                # Set up Google Cloud credentials for Vertex AI
+                # Anthropic configuration (for Claude models via Vertex AI)
+                anthropic_cfg = cfg.get("anthropic", {}) or {}
+                anthropic_project = anthropic_cfg.get("project_id")
+                anthropic_location = anthropic_cfg.get("location")
+                if anthropic_project:
+                    os.environ.setdefault("ANTHROPIC_PROJECT_ID", anthropic_project)
+                if anthropic_location:
+                    os.environ.setdefault("ANTHROPIC_LOCATION", anthropic_location)
+
+                # Set up Google Cloud credentials for Vertex AI (shared by Gemini and Anthropic)
                 # Look for service account key in backend/core/ directory
                 service_account_path = (
                     Path(__file__).parent

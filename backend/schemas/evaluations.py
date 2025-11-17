@@ -54,7 +54,9 @@ class EvaluationRequest(BaseModel):
     )
 
     # Anthropic specific fields (uses Vertex AI infrastructure)
-    model_name: Optional[str] = Field(None, description="Model name for Anthropic providers")
+    model_name: Optional[str] = Field(
+        None, description="Model name for Anthropic providers"
+    )
 
 
 class SingleExtractionEval(BaseModel):

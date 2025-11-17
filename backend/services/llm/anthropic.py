@@ -1,96 +1,318 @@
 import os
+import json
 import asyncio
 import time
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Union, Type
 from datetime import datetime
 from anthropic import AnthropicVertex
+from pydantic import BaseModel, Field
+
+
+# Pydantic models for structured output
+class MarkdownReference(BaseModel):
+    """A reference to a specific section of the markdown that was used"""
+
+    text: str = Field(
+        description="The exact text excerpt from the markdown that was referenced"
+    )
+
+
+class ExtractionResult(BaseModel):
+    """Structured result containing both the extracted answer and its references"""
+
+    answer: str = Field(
+        description="The extracted information or answer based on the prompt"
+    )
+    references: List[MarkdownReference] = Field(
+        description="List of specific text excerpts from the markdown that were used to generate this answer"
+    )
 
 
 class AnthropicLLMClient:
     def __init__(self):
-        # Set the Google Application Credentials environment variable
-        credentials_path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "..",
-            "core",
-            "hcsx-scigpt2-innocentrhino-acm-f87f8026be3d.json",
+        # Load from environment variables or use defaults
+        self.project_id = (
+            os.environ.get("ANTHROPIC_PROJECT_ID") or "hcsx-scigpt2-innocentrhino-acm"
         )
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        self.location = os.environ.get("ANTHROPIC_LOCATION", "global")
 
-        self.project_id = "hcsx-scigpt2-innocentrhino-acm"
-        self.location = "global"
-        self.disabled = False  # Always available since we have the service account
+        # Find service account file (same pattern as Gemini)
+        self.service_account_path = self._find_service_account_file()
+
+        # Client is disabled if service account is missing
+        self.disabled = not self.service_account_path
+
+        # Set the Google Application Credentials environment variable if service account found
+        if self.service_account_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(
+                self.service_account_path
+            )
+
+    def _find_service_account_file(self) -> Optional[Path]:
+        """Find service account JSON file (same pattern as Gemini)"""
+        # Check GOOGLE_APPLICATION_CREDENTIALS env var first
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if creds_path and Path(creds_path).exists():
+            return Path(creds_path)
+
+        # Try to find in backend/core/ directory (where secrets.toml is)
+        try:
+            # Try relative to this file
+            core_dir = Path(__file__).resolve().parents[1] / "core"
+            if core_dir.exists():
+                json_files = list(core_dir.glob("*.json"))
+                if json_files:
+                    return json_files[0]
+        except Exception:
+            pass
+
+        return None
 
     async def _call_anthropic_api(
         self,
+        model_id: str,
         messages: list,
-        model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
         system: Optional[str] = None,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
+        response_json_schema: Optional[Union[Type[BaseModel], Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        print(
-            f"[LLMService] Anthropic API call starting - Model: {model}, Location: {self.location}"
+        # Use overrides if provided, otherwise fall back to instance variables
+        used_project_id = project_id_override or self.project_id
+        used_location = location_override or self.location
+        used_service_account_path = (
+            service_account_path_override or self.service_account_path
         )
-        print(f"[LLMService] Project ID: {self.project_id}")
+
+        print(
+            f"[LLMService] Anthropic API call starting - Model: {model_id}, Location: {used_location}"
+        )
+        print(
+            f"[LLMService] Project ID: {used_project_id}, Service Account: {used_service_account_path.name if used_service_account_path else 'NOT FOUND'}"
+        )
+
+        if not used_project_id or not used_location or not used_service_account_path:
+            print(
+                f"[LLMService] Anthropic disabled - Project ID: {bool(used_project_id)}, Location: {bool(used_location)}, Service Account: {bool(used_service_account_path)}"
+            )
+            return {
+                "success": False,
+                "error": "Anthropic project ID, location, or service account missing.",
+            }
+
+        # Set GOOGLE_APPLICATION_CREDENTIALS for this request if override provided
+        if service_account_path_override:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(
+                used_service_account_path
+            )
 
         try:
             # Initialize the Anthropic Vertex client
-            client = AnthropicVertex(region=self.location, project_id=self.project_id)
+            client = AnthropicVertex(region=used_location, project_id=used_project_id)
 
             start_time = time.time()
             print(f"[LLMService] Making Anthropic request...")
 
-            # Prepare request parameters
-            request_params = {
-                "max_tokens": max_tokens,
-                "messages": messages,
-                "model": model,
-            }
+            # Check if structured outputs are requested
+            use_structured_outputs = response_json_schema is not None
 
-            # Add system message if provided
-            if system:
-                request_params["system"] = system
+            if use_structured_outputs:
+                # Use beta API with structured outputs
+                print(f"[LLMService] Using structured outputs with beta API")
+                try:
+                    # Use client.beta.messages.parse() if we have a Pydantic model class
+                    # Otherwise use client.beta.messages.create() with output_format
+                    if (
+                        isinstance(response_json_schema, type)
+                        and issubclass(response_json_schema, BaseModel)
+                        and response_json_schema is not BaseModel
+                    ):
+                        # Pydantic model - use parse() method
+                        response = await asyncio.to_thread(
+                            lambda: client.beta.messages.parse(
+                                model=model_id,
+                                max_tokens=max_tokens,
+                                betas=["structured-outputs-2025-11-13"],
+                                messages=messages,
+                                system=system,
+                                output_format=response_json_schema,
+                                temperature=temperature if temperature != 1.0 else None,
+                            )
+                        )
+                        # Parse the structured result
+                        parsed_result = response.parsed_output
+                        content = parsed_result.answer
+                        references = [
+                            {"text": ref.text} for ref in parsed_result.references
+                        ]
 
-            # Add temperature if not default
-            if temperature != 1.0:  # Anthropic default is 1.0
-                request_params["temperature"] = temperature
+                        duration = time.time() - start_time
+                        usage = response.usage
+                        input_tokens = usage.input_tokens if usage else None
+                        output_tokens = usage.output_tokens if usage else None
 
-            # Make the API call
-            message = await asyncio.to_thread(
-                lambda: client.messages.create(**request_params)
-            )
+                        print(
+                            f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
+                        )
+                        print(f"[LLMService] Extracted content length: {len(content)}")
+                        print(f"[LLMService] References count: {len(references)}")
 
-            duration = time.time() - start_time
+                        return {
+                            "success": True,
+                            "content": content,  # Keep for backward compatibility
+                            "answer": content,  # New structured field
+                            "references": references,  # New references field
+                            "raw": response.model_dump(),
+                            "meta": {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "model": model_id,
+                                "duration": duration,
+                                "prompt_tokens": input_tokens,
+                                "completion_tokens": output_tokens,
+                            },
+                        }
+                    else:
+                        # Dictionary schema - use create() with output_format
+                        request_params = {
+                            "max_tokens": max_tokens,
+                            "messages": messages,
+                            "model": model_id,
+                            "betas": ["structured-outputs-2025-11-13"],
+                            "output_format": response_json_schema,
+                        }
 
-            print(f"[LLMService] Anthropic response received - Duration: {duration:.2f}s")
+                        if system:
+                            request_params["system"] = system
 
-            # Extract content from response
-            content = ""
-            if message.content and len(message.content) > 0:
-                content = message.content[0].text
+                        if temperature != 1.0:
+                            request_params["temperature"] = temperature
 
-            print(f"[LLMService] Extracted content length: {len(content)}")
-            print(f"[LLMService] Content preview: {content[:200]}...")
+                        message = await asyncio.to_thread(
+                            lambda: client.beta.messages.create(**request_params)
+                        )
 
-            # Extract usage information
-            usage = message.usage
-            input_tokens = usage.input_tokens if usage else None
-            output_tokens = usage.output_tokens if usage else None
+                        duration = time.time() - start_time
 
-            return {
-                "success": True,
-                "content": content,
-                "raw": message.model_dump(),
-                "meta": {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "model": model,
-                    "duration": duration,
-                    "prompt_tokens": input_tokens,
-                    "completion_tokens": output_tokens,
-                },
-            }
+                        # Parse JSON response
+                        content_text = ""
+                        if message.content and len(message.content) > 0:
+                            content_text = message.content[0].text
+
+                        # Parse the structured JSON
+                        try:
+                            parsed_json = json.loads(content_text)
+                            result = ExtractionResult.model_validate(parsed_json)
+                            content = result.answer
+                            references = [
+                                {"text": ref.text} for ref in result.references
+                            ]
+
+                            print(
+                                f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
+                            )
+                            print(
+                                f"[LLMService] Extracted content length: {len(content)}"
+                            )
+                            print(f"[LLMService] References count: {len(references)}")
+                        except (json.JSONDecodeError, Exception) as e:
+                            print(
+                                f"[LLMService] Failed to parse structured output: {e}"
+                            )
+                            print(
+                                f"[LLMService] Response text: {content_text[:500]}..."
+                            )
+                            return {
+                                "success": False,
+                                "error": f"Failed to parse structured output: {str(e)}",
+                                "raw": message.model_dump(),
+                            }
+
+                        usage = message.usage
+                        input_tokens = usage.input_tokens if usage else None
+                        output_tokens = usage.output_tokens if usage else None
+
+                        return {
+                            "success": True,
+                            "content": content,  # Keep for backward compatibility
+                            "answer": content,  # New structured field
+                            "references": references,  # New references field
+                            "raw": message.model_dump(),
+                            "meta": {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "model": model_id,
+                                "duration": duration,
+                                "prompt_tokens": input_tokens,
+                                "completion_tokens": output_tokens,
+                            },
+                        }
+                except Exception as e:
+                    print(f"[LLMService] Structured output request failed: {e}")
+                    print(f"[LLMService] Exception type: {type(e).__name__}")
+                    import traceback
+
+                    print(f"[LLMService] Traceback: {traceback.format_exc()}")
+                    # Fallback to regular API call
+                    print(f"[LLMService] Falling back to regular API call...")
+                    use_structured_outputs = False
+
+            if not use_structured_outputs:
+                # Regular API call (no structured outputs)
+                request_params = {
+                    "max_tokens": max_tokens,
+                    "messages": messages,
+                    "model": model_id,
+                }
+
+                # Add system message if provided
+                if system:
+                    request_params["system"] = system
+
+                # Add temperature if not default
+                if temperature != 1.0:  # Anthropic default is 1.0
+                    request_params["temperature"] = temperature
+
+                # Make the API call
+                message = await asyncio.to_thread(
+                    lambda: client.messages.create(**request_params)
+                )
+
+                duration = time.time() - start_time
+
+                print(
+                    f"[LLMService] Anthropic response received - Duration: {duration:.2f}s"
+                )
+
+                # Extract content from response
+                content = ""
+                if message.content and len(message.content) > 0:
+                    content = message.content[0].text
+
+                print(f"[LLMService] Extracted content length: {len(content)}")
+                print(f"[LLMService] Content preview: {content[:200]}...")
+
+                # Extract usage information
+                usage = message.usage
+                input_tokens = usage.input_tokens if usage else None
+                output_tokens = usage.output_tokens if usage else None
+
+                return {
+                    "success": True,
+                    "content": content,
+                    "answer": content,  # For backward compatibility
+                    "references": [],  # Empty references if not using structured outputs
+                    "raw": message.model_dump(),
+                    "meta": {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "model": model_id,
+                        "duration": duration,
+                        "prompt_tokens": input_tokens,
+                        "completion_tokens": output_tokens,
+                    },
+                }
         except Exception as e:
             print(f"[LLMService] Anthropic request failed with exception: {e}")
             print(f"[LLMService] Exception type: {type(e).__name__}")
@@ -104,14 +326,28 @@ class AnthropicLLMClient:
         markdown: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,  # Increased default for structured outputs
         temperature: float = 0.0,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
     ) -> Dict[str, Any]:
+        # Supported models for structured outputs (only Claude Sonnet 4.5 and Claude Opus 4.1)
+        # According to Anthropic docs: "Structured outputs are currently available as a public beta
+        # feature in the Claude API for Claude Sonnet 4.5 and Claude Opus 4.1."
+        supported_models = [
+            "claude-sonnet-4-5@20250929",
+            "claude-opus-4-1@20250805",
+        ]
+
         # Default to Claude Sonnet 4.5
         used_model_id = model_id or "claude-sonnet-4-5@20250929"
 
-        # System message for entity extraction
-        system = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
+        # System message - updated for structured extraction if supported
+        if used_model_id in supported_models:
+            system = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+        else:
+            system = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
 
         # User message with markdown and extraction prompt
         user_message = f"""<markdown study>
@@ -124,8 +360,22 @@ Prompt:
 
         messages = [{"role": "user", "content": user_message}]
 
+        # Use structured outputs only for supported models (Sonnet 4.5 and Opus 4.1)
+        # Use Pydantic model directly with parse() method
+        response_json_schema = (
+            ExtractionResult if used_model_id in supported_models else None
+        )
+
         return await self._call_anthropic_api(
-            messages, used_model_id, max_tokens, temperature, system
+            used_model_id,
+            messages,
+            max_tokens,
+            temperature,
+            system,
+            project_id_override,
+            location_override,
+            service_account_path_override,
+            response_json_schema,
         )
 
     async def generate_paragraph_with_anthropic(
@@ -134,6 +384,9 @@ Prompt:
         model_id: Optional[str] = None,
         max_tokens: int = 2048,
         temperature: float = 0.0,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
     ) -> Dict[str, Any]:
         # Default to Claude Sonnet 4.5
         used_model_id = model_id or "claude-sonnet-4-5@20250929"
@@ -144,5 +397,13 @@ Prompt:
         messages = [{"role": "user", "content": user_prompt}]
 
         return await self._call_anthropic_api(
-            messages, used_model_id, max_tokens, temperature, system
+            used_model_id,
+            messages,
+            max_tokens,
+            temperature,
+            system,
+            project_id_override,
+            location_override,
+            service_account_path_override,
+            response_json_schema=None,  # No structured output for paragraph generation
         )
