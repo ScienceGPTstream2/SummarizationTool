@@ -53,6 +53,9 @@ class EvaluationRequest(BaseModel):
         default="us-central1", description="GCP location"
     )
 
+    # Anthropic specific fields (uses Vertex AI infrastructure)
+    model_name: Optional[str] = Field(None, description="Model name for Anthropic providers")
+
 
 class SingleExtractionEval(BaseModel):
     """Schema for a single extraction in batch evaluation"""
@@ -89,6 +92,9 @@ class BatchEvaluationRequest(BaseModel):
     vertex_model_name: Optional[str] = "gemini-2.5-flash"
     vertex_project: Optional[str] = None
     vertex_location: Optional[str] = "us-central1"
+
+    # Anthropic specific fields (uses Vertex AI infrastructure)
+    model_name: Optional[str] = None
 
 
 class CustomMetricRequest(BaseModel):

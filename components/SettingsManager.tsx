@@ -78,6 +78,47 @@ export const allModels: ModelConfig[] = [
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
   },
+  // Anthropic Models (via Vertex AI)
+  {
+    id: "claude-sonnet-4-5@20250929",
+    name: "Claude Sonnet 4.5",
+    provider: "Anthropic",
+    description: "Anthropic Claude Sonnet 4.5 model via Vertex AI",
+    requiredApiKey: "none", // Uses server-side service account
+    category: "anthropic",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "global",
+  },
+  {
+    id: "claude-opus-4-1@20250805",
+    name: "Claude Opus 4.1",
+    provider: "Anthropic",
+    description: "Anthropic Claude Opus 4.1 - Most capable model via Vertex AI",
+    requiredApiKey: "none", // Uses server-side service account
+    category: "anthropic",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "global",
+  },
+  {
+    id: "claude-sonnet-4@20250514",
+    name: "Claude Sonnet 4",
+    provider: "Anthropic",
+    description: "Anthropic Claude Sonnet 4 model via Vertex AI",
+    requiredApiKey: "none", // Uses server-side service account
+    category: "anthropic",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "global",
+  },
+  {
+    id: "claude-haiku-4-5@20251001",
+    name: "Claude Haiku 4.5",
+    provider: "Anthropic",
+    description: "Anthropic Claude Haiku 4.5 - Fast and efficient via Vertex AI",
+    requiredApiKey: "none", // Uses server-side service account
+    category: "anthropic",
+    project_id: "hcsx-scigpt2-innocentrhino-acm",
+    location: "global",
+  },
 ];
 
 // API Key configurations
@@ -325,9 +366,17 @@ export class SettingsManager {
         return this.serverConfig.is_gemini_configured;
       }
 
-      // For other providers, default to server config check
-      // If no specific server config exists, allow the model (backend will handle validation)
-      return true;
+      // For Anthropic provider, always available (uses server-side service account)
+      if (model.provider && model.provider.toLowerCase().includes("anthropic")) {
+        return true;
+      }
+
+      // For other providers, just check the required API key
+      const hasApiKey = this.getApiKey(model.requiredApiKey);
+      return (
+        !!hasApiKey &&
+        hasApiKey !== "YOUR_" + model.requiredApiKey.toUpperCase() + "_HERE"
+      );
     });
   }
 
@@ -353,8 +402,20 @@ export class SettingsManager {
       return this.serverConfig.is_gemini_configured;
     }
 
-    // For other providers, default to true (backend will handle validation)
-    return true;
+    // For Anthropic provider, always available (uses server-side service account)
+    if (
+      (model as any).provider &&
+      (model as any).provider.toLowerCase().includes("anthropic")
+    ) {
+      return true;
+    }
+
+    const apiKey = this.getApiKey((model as any).requiredApiKey);
+    return (
+      !!apiKey &&
+      apiKey !==
+        "YOUR_" + ((model as any).requiredApiKey || "").toUpperCase() + "_HERE"
+    );
   }
 
   isAzureDocumentIntelligenceAvailable(): boolean {
