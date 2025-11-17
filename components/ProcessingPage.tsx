@@ -37,18 +37,18 @@ const allParsers = [
     requiresApiKey: false,
   },
   {
-    id: "docling",
-    name: "Docling",
-    description:
-      "AI-powered document parsing with advanced layout understanding",
-    requiresApiKey: false,
-  },
-  {
     id: "azure_doc_intelligence",
     name: "Azure Document Intelligence",
     description:
       "Microsoft Azure cognitive service for form and document analysis",
     requiresApiKey: true,
+  },
+  {
+    id: "docling",
+    name: "Docling",
+    description:
+      "AI-powered document parsing with advanced layout understanding (PDF viewer not supported, coming soon)",
+    requiresApiKey: false,
   },
 ];
 
