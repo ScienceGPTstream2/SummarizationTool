@@ -47,13 +47,13 @@ export const allModels: ModelConfig[] = [
     deployment: "gpt-5-mini",
     api_version: "2024-12-01-preview",
   },
-  // Gemini Models (using correct Vertex AI model IDs)
+  // Gemini Models (using service account authentication - no user API key required)
   {
     id: "publishers/google/models/gemini-2.5-pro",
     name: "Gemini 2.5 Pro",
     provider: "Google Gemini",
     description: "Google Gemini 2.5 Pro model for entity extraction",
-    requiredApiKey: "gemini_api_key",
+    requiredApiKey: "", // No API key required - uses service account from secrets.toml
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
@@ -63,7 +63,7 @@ export const allModels: ModelConfig[] = [
     name: "Gemini 2.5 Flash Lite",
     provider: "Google Gemini",
     description: "Google Gemini 2.5 Flash Lite model for entity extraction",
-    requiredApiKey: "gemini_api_key",
+    requiredApiKey: "", // No API key required - uses service account from secrets.toml
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
@@ -73,27 +73,7 @@ export const allModels: ModelConfig[] = [
     name: "Gemini 2.5 Flash",
     provider: "Google Gemini",
     description: "Google Gemini 2.5 Flash model for entity extraction",
-    requiredApiKey: "gemini_api_key",
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-  },
-  {
-    id: "publishers/google/models/gemini-2.0-flash-lite-001",
-    name: "Gemini 2.0 Flash Lite",
-    provider: "Google Gemini",
-    description: "Google Gemini 2.0 Flash Lite model for entity extraction",
-    requiredApiKey: "gemini_api_key",
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-  },
-  {
-    id: "publishers/google/models/gemini-2.0-flash-001",
-    name: "Gemini 2.0 Flash",
-    provider: "Google Gemini",
-    description: "Google Gemini 2.0 Flash model for entity extraction",
-    requiredApiKey: "gemini_api_key",
+    requiredApiKey: "", // No API key required - uses service account from secrets.toml
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
@@ -133,7 +113,8 @@ export const allModels: ModelConfig[] = [
     id: "claude-haiku-4-5@20251001",
     name: "Claude Haiku 4.5",
     provider: "Anthropic",
-    description: "Anthropic Claude Haiku 4.5 - Fast and efficient via Vertex AI",
+    description:
+      "Anthropic Claude Haiku 4.5 - Fast and efficient via Vertex AI",
     requiredApiKey: "none", // Uses server-side service account
     category: "anthropic",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
@@ -141,64 +122,70 @@ export const allModels: ModelConfig[] = [
   },
 ];
 
-// API Key configurations
+// API Key configurations - Informational template only
+// All actual configuration is read from backend secrets.toml
 export const apiKeyConfigs: Record<string, ApiKeyConfig> = {
   azure_openai_api_key: {
     key: "azure_openai_api_key",
     displayName: "Azure OpenAI API Key",
-    description: "API key for Azure OpenAI Service (GPT-5 Mini)",
-    placeholder: "Your Azure OpenAI API key",
+    description:
+      "API key for Azure OpenAI Service. Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Azure",
   },
   azure_openai_endpoint: {
     key: "azure_openai_endpoint",
     displayName: "Azure OpenAI Endpoint",
-    description: "Azure OpenAI service endpoint URL",
-    placeholder: "https://your-resource.openai.azure.com/",
+    description:
+      "Azure OpenAI service endpoint URL. Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Azure",
   },
   azure_document_intelligence_api_key: {
     key: "azure_document_intelligence_api_key",
     displayName: "Azure Document Intelligence API Key",
     description:
-      "API key for Azure Document Intelligence service (document processing)",
-    placeholder: "Your Azure Document Intelligence API key",
+      "API key for Azure Document Intelligence service (document processing). Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Azure",
   },
   azure_document_intelligence_endpoint: {
     key: "azure_document_intelligence_endpoint",
     displayName: "Azure Document Intelligence Endpoint",
-    description: "Azure Document Intelligence service endpoint URL",
-    placeholder: "https://your-resource.cognitiveservices.azure.com/",
+    description:
+      "Azure Document Intelligence service endpoint URL. Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Azure",
   },
   gemini_api_key: {
     key: "gemini_api_key",
-    displayName: "Gemini API Key",
-    description: "API key for Google Gemini models",
-    placeholder: "Your Google Gemini API key",
+    displayName: "Gemini Service Account",
+    description:
+      "Google Cloud service account for Gemini models. Note: Configuration is read from backend secrets.toml (GOOGLE_APPLICATION_CREDENTIALS) - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Google",
   },
   gemini_project_id: {
     key: "gemini_project_id",
     displayName: "Gemini Project ID",
-    description: "Google Cloud Project ID for Gemini models",
-    placeholder: "Your Google Cloud Project ID",
+    description:
+      "Google Cloud Project ID for Gemini models. Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Google",
   },
   gemini_location: {
     key: "gemini_location",
     displayName: "Gemini Location",
-    description: "Google Cloud Location for Gemini models (e.g., us-central1)",
-    placeholder: "Your Google Cloud Location",
+    description:
+      "Google Cloud Location for Gemini models (e.g., us-central1). Note: Configuration is read from backend secrets.toml - this field is for reference only.",
+    placeholder: "Configured in backend secrets.toml",
     category: "Google",
   },
 };
 
-// Settings management class
+// Settings management class - UI template only
+// All actual configuration is read from backend secrets.toml
 export class SettingsManager {
-  private apiKeys: Record<string, string> = {};
-  private customModels: CustomModelConfig[] = [];
   private serverConfig: {
     is_azure_openai_configured: boolean;
     is_gemini_configured: boolean;
@@ -209,16 +196,50 @@ export class SettingsManager {
     is_azure_document_intelligence_configured: false,
   };
 
-  private storageKey = "ai-summarizer-settings";
-
   constructor() {
-    this.loadSettings();
     // Don't load server config in constructor - will be called after login
   }
 
   // Public method to load server config after login
   async refreshServerConfig() {
     await this.loadServerConfig();
+  }
+
+  // Fetch models from backend API
+  async fetchBackendModels(): Promise<ModelConfig[]> {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        return [];
+      }
+
+      const response = await fetch("/api/models", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const backendModels = await response.json();
+        // Convert backend model format to ModelConfig format
+        return backendModels.map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          provider: m.provider,
+          description: m.description || "",
+          requiredApiKey: "", // No API key required - uses backend secrets
+          category: m.provider?.toLowerCase().includes("azure")
+            ? "azure"
+            : m.provider?.toLowerCase().includes("google")
+              ? "google"
+              : "other",
+          deployment: m.deployment,
+          api_version: m.api_version,
+          project_id: m.project_id,
+          location: m.location,
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch backend models:", error);
+    }
+    return [];
   }
 
   private async loadServerConfig() {
@@ -240,218 +261,69 @@ export class SettingsManager {
     }
   }
 
-  private loadSettings() {
-    // Backwards compatible loader:
-    // - If localStorage contains a flat map (legacy), treat it as apiKeys.
-    // - If it contains { apiKeys, customModels } structure, load both.
-    const stored = localStorage.getItem(this.storageKey);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          (parsed.apiKeys || parsed.customModels)
-        ) {
-          this.apiKeys = parsed.apiKeys || {};
-          this.customModels = parsed.customModels || [];
-        } else if (parsed && typeof parsed === "object") {
-          // Legacy: flat map of api keys
-          this.apiKeys = parsed;
-          this.customModels = [];
-        } else {
-          this.apiKeys = {};
-          this.customModels = [];
-        }
-      } catch (error) {
-        console.error("Failed to parse stored settings:", error);
-        this.apiKeys = {};
-        this.customModels = [];
-      }
-    }
+  // Get server configuration status
+  getServerConfig() {
+    return { ...this.serverConfig };
   }
 
-  saveSettings() {
-    const payload = {
-      apiKeys: this.apiKeys,
-      customModels: this.customModels,
-    };
-    localStorage.setItem(this.storageKey, JSON.stringify(payload));
-  }
-
-  getApiKey(keyName: string): string {
-    return this.apiKeys[keyName] || "";
-  }
-
-  setApiKey(keyName: string, value: string) {
-    if (value.trim()) {
-      this.apiKeys[keyName] = value.trim();
-    } else {
-      delete this.apiKeys[keyName];
-    }
-    this.saveSettings();
-  }
-
-  getAllApiKeys(): Record<string, string> {
-    return { ...this.apiKeys };
-  }
-
-  // Custom models management
-  addCustomModel(model: CustomModelConfig) {
-    // Overwrite if same id exists
-    this.customModels = this.customModels.filter((m) => m.id !== model.id);
-    this.customModels.push(model);
-    this.saveSettings();
-  }
-
-  removeCustomModel(modelId: string) {
-    this.customModels = this.customModels.filter((m) => m.id !== modelId);
-    this.saveSettings();
-  }
-
-  getCustomModels(): CustomModelConfig[] {
-    return [...this.customModels];
-  }
-
-  // Combine built-in + custom models and filter by availability of required keys
-  getAvailableModels(): ModelConfig[] {
-    const combined: ModelConfig[] = [
-      ...allModels,
-      ...this.customModels.map(
-        (m): ModelConfig => ({
-          id: m.id,
-          name: m.name,
-          provider: m.provider,
-          description: m.description || "",
-          requiredApiKey: m.requiredApiKey || "azure_openai_api_key",
-          category: (m.category as any) || "azure",
-          deployment: m.deployment,
-          api_version: m.api_version,
-          project_id: m.project_id,
-          location: m.location,
-        })
-      ),
-    ];
-
-    return combined.filter((model) => {
-      // For Azure provider require both api key and endpoint
-      if (model.provider && model.provider.toLowerCase().includes("azure")) {
-        if (this.serverConfig.is_azure_openai_configured) {
-          return true;
-        }
-        const apiKey = this.getApiKey("azure_openai_api_key");
-        const endpoint = this.getApiKey("azure_openai_endpoint");
-        return (
-          !!apiKey &&
-          !!endpoint &&
-          apiKey !== "YOUR_AZURE_OPENAI_API_KEY_HERE" &&
-          endpoint !== "YOUR_AZURE_OPENAI_ENDPOINT_HERE"
-        );
-      }
-
-      // For Gemini provider, require API key, project ID, and location
-      if (model.provider && model.provider.toLowerCase().includes("gemini")) {
-        if (this.serverConfig.is_gemini_configured) {
-          return true;
-        }
-        const apiKey = this.getApiKey("gemini_api_key");
-        const projectId = this.getApiKey("gemini_project_id");
-        const location = this.getApiKey("gemini_location");
-        return (
-          !!apiKey &&
-          !!projectId &&
-          !!location &&
-          apiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE" &&
-          projectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE" &&
-          location !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
-        );
-      }
-
-      // For Anthropic provider, always available (uses server-side service account)
-      if (model.provider && model.provider.toLowerCase().includes("anthropic")) {
-        return true;
-      }
-
-      // For other providers, just check the required API key
-      const hasApiKey = this.getApiKey(model.requiredApiKey);
-      return (
-        !!hasApiKey &&
-        hasApiKey !== "YOUR_" + model.requiredApiKey.toUpperCase() + "_HERE"
-      );
-    });
-  }
-
-  isModelAvailable(modelId: string): boolean {
-    const model = [...allModels, ...this.customModels].find(
-      (m) => m.id === modelId
-    );
+  // Check if a model is available based on server configuration
+  // Note: This is a synchronous helper, but actual model list should come from getAvailableModelsAsync()
+  isModelAvailable(modelId: string, models: ModelConfig[]): boolean {
+    const model = models.find((m) => m.id === modelId);
     if (!model) return false;
 
-    if (
-      (model as any).provider &&
-      (model as any).provider.toLowerCase().includes("azure")
-    ) {
-      if (this.serverConfig.is_azure_openai_configured) {
-        return true;
-      }
-      const apiKey = this.getApiKey("azure_openai_api_key");
-      const endpoint = this.getApiKey("azure_openai_endpoint");
-      return (
-        !!apiKey &&
-        !!endpoint &&
-        apiKey !== "YOUR_AZURE_OPENAI_API_KEY_HERE" &&
-        endpoint !== "YOUR_AZURE_OPENAI_ENDPOINT_HERE"
-      );
+    // All models rely solely on server configuration (secrets.toml)
+    if (model.provider && model.provider.toLowerCase().includes("azure")) {
+      return this.serverConfig.is_azure_openai_configured;
     }
 
-    if (
-      (model as any).provider &&
-      (model as any).provider.toLowerCase().includes("gemini")
-    ) {
-      if (this.serverConfig.is_gemini_configured) {
-        return true;
-      }
-      const apiKey = this.getApiKey("gemini_api_key");
-      const projectId = this.getApiKey("gemini_project_id");
-      const location = this.getApiKey("gemini_location");
-      return (
-        !!apiKey &&
-        !!projectId &&
-        !!location &&
-        apiKey !== "YOUR_GOOGLE_GEMINI_API_KEY_HERE" &&
-        projectId !== "YOUR_GOOGLE_CLOUD_PROJECT_ID_HERE" &&
-        location !== "YOUR_GOOGLE_CLOUD_LOCATION_HERE"
-      );
+    if (model.provider && model.provider.toLowerCase().includes("gemini")) {
+      return this.serverConfig.is_gemini_configured;
     }
 
     // For Anthropic provider, always available (uses server-side service account)
-    if (
-      (model as any).provider &&
-      (model as any).provider.toLowerCase().includes("anthropic")
-    ) {
+    if (model.provider && model.provider.toLowerCase().includes("anthropic")) {
       return true;
     }
 
-    const apiKey = this.getApiKey((model as any).requiredApiKey);
-    return (
-      !!apiKey &&
-      apiKey !==
-        "YOUR_" + ((model as any).requiredApiKey || "").toUpperCase() + "_HERE"
-    );
+    // For other providers, default to true (backend will handle validation)
+    return true;
   }
 
   isAzureDocumentIntelligenceAvailable(): boolean {
-    if (this.serverConfig.is_azure_document_intelligence_configured) {
+    // Only check server configuration (secrets.toml)
+    return this.serverConfig.is_azure_document_intelligence_configured;
+  }
+
+  // Get available models from backend (async)
+  // This is the source of truth - all models come from backend secrets.toml
+  async getAvailableModelsAsync(): Promise<ModelConfig[]> {
+    // Fetch models from backend (these are the source of truth)
+    const backendModels = await this.fetchBackendModels();
+
+    // Filter by server configuration availability
+    return backendModels.filter((model) => {
+      // For Azure provider, only check server config
+      if (model.provider && model.provider.toLowerCase().includes("azure")) {
+        return this.serverConfig.is_azure_openai_configured;
+      }
+
+      // For Gemini provider, only check server config (uses service account from secrets.toml)
+      if (model.provider && model.provider.toLowerCase().includes("gemini")) {
+        return this.serverConfig.is_gemini_configured;
+      }
+
+      // For Anthropic provider, always available (uses server-side service account)
+      if (
+        model.provider &&
+        model.provider.toLowerCase().includes("anthropic")
+      ) {
+        return true;
+      }
+
+      // For other providers, default to true (backend will handle validation)
       return true;
-    }
-    const apiKey = this.getApiKey("azure_document_intelligence_api_key");
-    const endpoint = this.getApiKey("azure_document_intelligence_endpoint");
-    return (
-      !!apiKey &&
-      !!endpoint &&
-      apiKey !== "YOUR_AZURE_DOCUMENT_INTELLIGENCE_API_KEY_HERE" &&
-      endpoint !== "YOUR_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT_HERE"
-    );
+    });
   }
 }
 

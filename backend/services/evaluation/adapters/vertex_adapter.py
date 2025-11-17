@@ -4,6 +4,9 @@ This follows the official DeepEval documentation pattern with safety settings
 """
 
 import os
+import asyncio
+import time
+import random
 from typing import Optional
 from deepeval.models.base_model import DeepEvalBaseLLM
 from langchain_google_vertexai import (
@@ -81,7 +84,7 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
 
     def generate(self, prompt: str) -> str:
         """
-        Generate text using Vertex AI via LangChain
+        Generate text using Vertex AI via LangChain with retry logic for rate limits
 
         Args:
             prompt: The prompt to send to the model
@@ -89,12 +92,68 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         Returns:
             Generated text response
         """
+        # Retry configuration
+        max_retries = 5
+        base_delay = 1.0  # Start with 1 second
+        max_delay = 30.0  # Cap at 30 seconds
+
         chat_model = self.load_model()
-        return chat_model.invoke(prompt).content
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Calculate exponential backoff with jitter
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    jitter = random.uniform(0, 1)
+                    total_delay = delay + jitter
+                    print(
+                        f"[VertexAdapter] Retry attempt {attempt + 1}/{max_retries} after {total_delay:.2f}s delay..."
+                    )
+                    time.sleep(total_delay)
+
+                return chat_model.invoke(prompt).content
+
+            except Exception as e:
+                error_str = str(e).lower()
+                error_code = getattr(e, "status_code", None)
+
+                # Check if it's a retryable error (429, 500, 503, 504)
+                is_rate_limit = (
+                    error_code == 429
+                    or "429" in error_str
+                    or "rate limit" in error_str
+                    or "resource_exhausted" in error_str
+                    or "quota" in error_str
+                )
+                is_server_error = (
+                    error_code in [500, 503, 504]
+                    or "500" in error_str
+                    or "503" in error_str
+                    or "504" in error_str
+                    or "internal" in error_str
+                    or "unavailable" in error_str
+                    or "deadline_exceeded" in error_str
+                )
+
+                if (is_rate_limit or is_server_error) and attempt < max_retries - 1:
+                    error_type = "rate limit" if is_rate_limit else "server error"
+                    print(
+                        f"[VertexAdapter] Received {error_type} error, will retry. Error: {str(e)}"
+                    )
+                    last_error = e
+                    continue
+                else:
+                    # Non-retryable error or max retries reached
+                    if attempt >= max_retries - 1:
+                        print(
+                            f"[VertexAdapter] Max retries reached. Final error: {str(e)}"
+                        )
+                    raise
 
     async def a_generate(self, prompt: str) -> str:
         """
-        Async generate text using Vertex AI via LangChain
+        Async generate text using Vertex AI via LangChain with retry logic for rate limits
 
         Args:
             prompt: The prompt to send to the model
@@ -102,9 +161,65 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         Returns:
             Generated text response
         """
+        # Retry configuration
+        max_retries = 5
+        base_delay = 1.0  # Start with 1 second
+        max_delay = 30.0  # Cap at 30 seconds
+
         chat_model = self.load_model()
-        res = await chat_model.ainvoke(prompt)
-        return res.content
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Calculate exponential backoff with jitter
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    jitter = random.uniform(0, 1)
+                    total_delay = delay + jitter
+                    print(
+                        f"[VertexAdapter] Retry attempt {attempt + 1}/{max_retries} after {total_delay:.2f}s delay..."
+                    )
+                    await asyncio.sleep(total_delay)
+
+                res = await chat_model.ainvoke(prompt)
+                return res.content
+
+            except Exception as e:
+                error_str = str(e).lower()
+                error_code = getattr(e, "status_code", None)
+
+                # Check if it's a retryable error (429, 500, 503, 504)
+                is_rate_limit = (
+                    error_code == 429
+                    or "429" in error_str
+                    or "rate limit" in error_str
+                    or "resource_exhausted" in error_str
+                    or "quota" in error_str
+                )
+                is_server_error = (
+                    error_code in [500, 503, 504]
+                    or "500" in error_str
+                    or "503" in error_str
+                    or "504" in error_str
+                    or "internal" in error_str
+                    or "unavailable" in error_str
+                    or "deadline_exceeded" in error_str
+                )
+
+                if (is_rate_limit or is_server_error) and attempt < max_retries - 1:
+                    error_type = "rate limit" if is_rate_limit else "server error"
+                    print(
+                        f"[VertexAdapter] Received {error_type} error, will retry. Error: {str(e)}"
+                    )
+                    last_error = e
+                    continue
+                else:
+                    # Non-retryable error or max retries reached
+                    if attempt >= max_retries - 1:
+                        print(
+                            f"[VertexAdapter] Max retries reached. Final error: {str(e)}"
+                        )
+                    raise
 
     def get_model_name(self) -> str:
         """Return the model name"""

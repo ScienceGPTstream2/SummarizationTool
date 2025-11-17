@@ -2,19 +2,141 @@ import os
 import json
 import asyncio
 import time
-from typing import Dict, Any, Optional
+import random
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import requests
+from pydantic import BaseModel, Field
+from openai import OpenAI
+
+
+# Pydantic models for structured output
+class MarkdownReference(BaseModel):
+    """A reference to a specific section of the markdown that was used"""
+
+    text: str = Field(
+        description="The exact text excerpt from the markdown that was referenced"
+    )
+
+
+class ExtractionResult(BaseModel):
+    """Structured result containing both the extracted answer and its references"""
+
+    answer: str = Field(
+        description="The extracted information or answer based on the prompt"
+    )
+    references: List[MarkdownReference] = Field(
+        description="List of specific text excerpts from the markdown that were used to generate this answer"
+    )
 
 
 class AzureLLMClient:
     def __init__(self):
         self.endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
         self.api_key = os.environ.get("AZURE_OPENAI_KEY")
-        self.api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2023-05-15")
+        self.api_version = os.environ.get(
+            "AZURE_OPENAI_API_VERSION", "2024-08-01-preview"
+        )
         self.default_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
         self.default_model_name = os.environ.get("AZURE_OPENAI_MODEL_NAME")
-        self.disabled = not self.endpoint or not self.api_key
+        # Load configured models to look up API versions, endpoints, and keys
+        self._load_configured_models()
+        # Client is disabled only if there's no global endpoint/key AND no configured models
+        # (models can have their own endpoints/keys, so we check if any models exist)
+        has_global_creds = self.endpoint and self.api_key
+        has_configured_models = len(self.configured_models) > 0
+        self.disabled = not has_global_creds and not has_configured_models
+
+    def _load_configured_models(self):
+        """Load configured models from environment to enable API version, endpoint, and key lookup"""
+        import json
+
+        self.configured_models = {}  # deployment -> {api_version, endpoint, api_key}
+        azure_models_json = os.environ.get("AZURE_OPENAI_MODELS")
+        if azure_models_json:
+            try:
+                models_list = json.loads(azure_models_json)
+                print(
+                    f"[AzureLLMClient] Loading {len(models_list)} configured models..."
+                )
+                for model_cfg in models_list:
+                    deployment = model_cfg.get("deployment")
+                    if deployment:
+                        endpoint = model_cfg.get("endpoint")
+                        api_key = model_cfg.get("api_key")
+                        api_version = model_cfg.get("api_version")
+                        model_info = {
+                            "api_version": api_version,
+                            "endpoint": endpoint,  # Model-specific endpoint
+                            "api_key": api_key,  # Model-specific key
+                        }
+                        self.configured_models[deployment] = model_info
+                        # Verify we have the required fields
+                        if not endpoint:
+                            print(
+                                f"⚠️  Warning: Model '{deployment}' has no endpoint configured"
+                            )
+                        if not api_key:
+                            print(
+                                f"⚠️  Warning: Model '{deployment}' has no api_key configured"
+                            )
+                        else:
+                            # Show first few chars of endpoint for verification
+                            ep_preview = (
+                                endpoint[:50] + "..."
+                                if endpoint and len(endpoint) > 50
+                                else endpoint
+                            )
+                            print(
+                                f"   ✓ {deployment}: endpoint={ep_preview}, api_version={api_version}, api_key={'✓' if api_key else '✗'}"
+                            )
+            except Exception as e:
+                print(f"⚠️  Failed to load configured models for lookup: {e}")
+
+    def _get_api_version_for_deployment(
+        self, deployment: str, provided_api_version: Optional[str] = None
+    ) -> str:
+        """Get the API version for a specific deployment, with fallback logic"""
+        # If API version is explicitly provided, use it
+        if provided_api_version:
+            return provided_api_version
+        # Try to look up from configured models
+        if deployment in self.configured_models:
+            model_info = self.configured_models[deployment]
+            if model_info.get("api_version"):
+                return model_info["api_version"]
+        # Fall back to default API version
+        return self.api_version or "2024-08-01-preview"
+
+    def _get_endpoint_for_deployment(
+        self, deployment: str, provided_endpoint: Optional[str] = None
+    ) -> Optional[str]:
+        """Get the endpoint for a specific deployment, with fallback logic"""
+        # If endpoint is explicitly provided, use it
+        if provided_endpoint:
+            return provided_endpoint
+        # Try to look up from configured models
+        if deployment in self.configured_models:
+            model_info = self.configured_models[deployment]
+            if model_info.get("endpoint"):
+                return model_info["endpoint"]
+        # Fall back to default endpoint
+        return self.endpoint
+
+    def _get_api_key_for_deployment(
+        self, deployment: str, provided_api_key: Optional[str] = None
+    ) -> Optional[str]:
+        """Get the API key for a specific deployment, with fallback logic"""
+        # If API key is explicitly provided, use it
+        if provided_api_key:
+            return provided_api_key
+        # Try to look up from configured models
+        if deployment in self.configured_models:
+            model_info = self.configured_models[deployment]
+            if model_info.get("api_key"):
+                return model_info["api_key"]
+        # Fall back to default API key
+        return self.api_key
 
     async def generate_paragraph_with_azure(
         self,
@@ -26,8 +148,19 @@ class AzureLLMClient:
         max_tokens: int = 2048,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
-        used_endpoint = endpoint_override or self.endpoint
-        used_api_key = api_key_override or self.api_key
+        used_deployment = (
+            deployment or self.default_deployment or self.default_model_name
+        )
+        if not used_deployment:
+            return {"success": False, "error": "Azure deployment name missing."}
+
+        # Get endpoint and API key for this specific deployment
+        used_endpoint = endpoint_override or self._get_endpoint_for_deployment(
+            used_deployment
+        )
+        used_api_key = api_key_override or self._get_api_key_for_deployment(
+            used_deployment
+        )
         if not used_endpoint or not used_api_key:
             return {"success": False, "error": "Azure endpoint or api key missing."}
 
@@ -43,8 +176,15 @@ class AzureLLMClient:
         if not used_deployment:
             return {"success": False, "error": "Azure deployment name missing."}
 
-        used_api_version = api_version or self.api_version or "2023-05-15"
+        # Get API version for this specific deployment
+        used_api_version = self._get_api_version_for_deployment(
+            used_deployment, api_version
+        )
         url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
+
+        print(
+            f"[LLMService] Using deployment: {used_deployment}, API version: {used_api_version}"
+        )
 
         payload = {
             "messages": messages,
@@ -55,47 +195,149 @@ class AzureLLMClient:
 
         headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
-        try:
-            redacted_key = used_api_key
-            if isinstance(redacted_key, str) and len(redacted_key) > 8:
-                redacted_key = redacted_key[:4] + "..." + redacted_key[-4:]
-            redacted_headers = {
-                "Content-Type": headers.get("Content-Type"),
-                "api-key": redacted_key,
-            }
-            print(f"[LLMService] Request URL: {url}")
-            print(f"[LLMService] Headers: {redacted_headers}")
+        # Retry configuration
+        max_retries = 5
+        base_delay = 1.0  # Start with 1 second
+        max_delay = 30.0  # Cap at 30 seconds
+        retryable_status_codes = [429, 500, 503, 504]  # Rate limit and server errors
+
+        last_error = None
+        resp = None
+        raw = None
+        duration = None
+
+        for attempt in range(max_retries):
             try:
-                msg_count = len(messages)
-            except Exception:
-                msg_count = "unknown"
-            print(
-                f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}"
-            )
+                if attempt > 0:
+                    # Calculate exponential backoff with jitter
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    jitter = random.uniform(0, 1)
+                    total_delay = delay + jitter
+                    print(
+                        f"[LLMService] Retry attempt {attempt + 1}/{max_retries} after {total_delay:.2f}s delay..."
+                    )
+                    await asyncio.sleep(total_delay)
+                else:
+                    redacted_key = used_api_key
+                    if isinstance(redacted_key, str) and len(redacted_key) > 8:
+                        redacted_key = redacted_key[:4] + "..." + redacted_key[-4:]
+                    redacted_headers = {
+                        "Content-Type": headers.get("Content-Type"),
+                        "api-key": redacted_key,
+                    }
+                    print(f"[LLMService] Request URL: {url}")
+                    print(f"[LLMService] Headers: {redacted_headers}")
+                    try:
+                        msg_count = len(messages)
+                    except Exception:
+                        msg_count = "unknown"
+                    print(
+                        f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}"
+                    )
 
-            start_time = time.time()
-            resp = await asyncio.to_thread(
-                lambda: requests.post(url, headers=headers, json=payload, timeout=120)
-            )
-            duration = time.time() - start_time
-            print(
-                f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}"
-            )
-            print(f"[LLMService] Request duration: {duration:.2f}s")
+                start_time = time.time()
+                resp = await asyncio.to_thread(
+                    lambda: requests.post(
+                        url, headers=headers, json=payload, timeout=120
+                    )
+                )
+                duration = time.time() - start_time
+                print(
+                    f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}"
+                )
+                print(f"[LLMService] Request duration: {duration:.2f}s")
 
-        except Exception as e:
-            print(f"[LLMService] Request failed with exception: {e}")
-            return {"success": False, "error": f"Request failed: {str(e)}"}
+                try:
+                    raw = resp.json()
+                except Exception:
+                    if not resp.ok:
+                        return {
+                            "success": False,
+                            "error": f"Non-JSON response: {resp.text}",
+                        }
 
-        try:
-            raw = resp.json()
-        except Exception:
-            return {"success": False, "error": f"Non-JSON response: {resp.text}"}
+                # Check for retryable errors
+                if resp.status_code in retryable_status_codes:
+                    error_msg = (
+                        raw.get("error", {}).get("message", "")
+                        if isinstance(raw, dict)
+                        else str(raw)
+                    )
+                    status_text = {
+                        429: "RESOURCE_EXHAUSTED (rate limit)",
+                        500: "INTERNAL (server error)",
+                        503: "UNAVAILABLE (service overloaded)",
+                        504: "DEADLINE_EXCEEDED (timeout)",
+                    }.get(resp.status_code, f"HTTP {resp.status_code}")
 
-        if not resp.ok:
-            err = raw.get("error") if isinstance(raw, dict) else resp.text
-            print(f"[LLMService] Error response: {raw}")
-            return {"success": False, "error": err, "raw": raw}
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
+                        )
+                        last_error = error_msg
+                        continue  # Retry
+                    else:
+                        # Last attempt failed
+                        print(
+                            f"[LLMService] Max retries reached. Final error: {status_text}"
+                        )
+                        err = raw.get("error") if isinstance(raw, dict) else resp.text
+                        error_msg = (
+                            f"Azure API error (status {resp.status_code}): {err}"
+                        )
+                        print(f"[LLMService] Error response: {raw}")
+                        return {"success": False, "error": error_msg, "raw": raw}
+
+                # Non-retryable error or success
+                if not resp.ok:
+                    err = raw.get("error") if isinstance(raw, dict) else resp.text
+                    error_msg = f"Azure API error (status {resp.status_code}): {err}"
+                    if resp.status_code == 404:
+                        error_msg += f"\n⚠️  Deployment '{used_deployment}' with API version '{used_api_version}' not found. "
+                        error_msg += f"Please verify the deployment name and API version are correct in secrets.toml"
+                    print(f"[LLMService] Error response: {raw}")
+                    print(f"[LLMService] {error_msg}")
+                    return {"success": False, "error": error_msg, "raw": raw}
+
+                # Success - break out of retry loop
+                break
+
+            except requests.exceptions.Timeout as e:
+                if attempt < max_retries - 1:
+                    print(f"[LLMService] Request timeout, will retry. Error: {str(e)}")
+                    last_error = str(e)
+                    continue
+                else:
+                    print(f"[LLMService] Max retries reached after timeout")
+                    return {
+                        "success": False,
+                        "error": f"Request timeout after {max_retries} attempts: {str(e)}",
+                    }
+
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    print(
+                        f"[LLMService] Request exception, will retry. Error: {str(e)}"
+                    )
+                    last_error = str(e)
+                    continue
+                else:
+                    print(f"[LLMService] Max retries reached after request exception")
+                    return {
+                        "success": False,
+                        "error": f"Request failed after {max_retries} attempts: {str(e)}",
+                    }
+
+            except Exception as e:
+                print(f"[LLMService] Request failed with exception: {e}")
+                return {"success": False, "error": f"Request failed: {str(e)}"}
+
+        # Extract content safely (we should have a successful response at this point)
+        if not resp or not raw:
+            return {
+                "success": False,
+                "error": "Failed to get valid response after retries",
+            }
 
         try:
             content = raw.get("choices", [])[0].get("message", {}).get("content", "")
@@ -130,101 +372,348 @@ class AzureLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
-        used_endpoint = endpoint_override or self.endpoint
-        used_api_key = api_key_override or self.api_key
-        if not used_endpoint or not used_api_key:
-            return {"success": False, "error": "Azure endpoint or api key missing."}
-
-        system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
-        user_message = f"""<markdown study>
-{markdown}
-</markdown study>
-
-Prompt:
-{extraction_prompt}
-"""
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ]
-
         used_deployment = (
             deployment or self.default_deployment or self.default_model_name
         )
         if not used_deployment:
             return {"success": False, "error": "Azure deployment name missing."}
 
-        used_api_version = api_version or self.api_version or "2023-05-15"
-        url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
+        # Get endpoint and API key for this specific deployment
+        used_endpoint = endpoint_override or self._get_endpoint_for_deployment(
+            used_deployment
+        )
+        used_api_key = api_key_override or self._get_api_key_for_deployment(
+            used_deployment
+        )
+        if not used_endpoint or not used_api_key:
+            return {"success": False, "error": "Azure endpoint or api key missing."}
 
-        payload = {
-            "messages": messages,
-            "max_completion_tokens": max_tokens,
-            "n": 1,
-            "stop": None,
-        }
+        # Get API version for this specific deployment
+        used_api_version = self._get_api_version_for_deployment(
+            used_deployment, api_version
+        )
 
-        headers = {"Content-Type": "application/json", "api-key": used_api_key}
-
+        # Use structured outputs with OpenAI SDK
+        # Check if API version supports structured outputs (2024-08-01-preview or later)
         try:
-            redacted_key = used_api_key
-            if isinstance(redacted_key, str) and len(redacted_key) > 8:
-                redacted_key = redacted_key[:4] + "..." + redacted_key[-4:]
-            redacted_headers = {
-                "Content-Type": headers.get("Content-Type"),
-                "api-key": redacted_key,
-            }
-            print(f"[LLMService] Request URL: {url}")
-            print(f"[LLMService] Headers: {redacted_headers}")
-            try:
-                msg_count = len(messages)
-            except Exception:
-                msg_count = "unknown"
-            print(
-                f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}"
+            # Create OpenAI client for Azure
+            client = OpenAI(
+                base_url=f"{used_endpoint.rstrip('/')}/openai/v1/", api_key=used_api_key
             )
 
-            start_time = time.time()
-            resp = await asyncio.to_thread(
-                lambda: requests.post(url, headers=headers, json=payload, timeout=120)
-            )
-            duration = time.time() - start_time
+            system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+            user_message = f"""<markdown study>
+{markdown}
+</markdown study>
+
+Prompt:
+{extraction_prompt}
+"""
+
             print(
-                f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}"
+                f"[LLMService] Using structured outputs with deployment: {used_deployment}"
             )
-            print(f"[LLMService] Request duration: {duration:.2f}s")
+            print(f"[LLMService] API version: {used_api_version}")
+
+            # Retry configuration for OpenAI SDK calls
+            max_retries = 5
+            base_delay = 1.0  # Start with 1 second
+            max_delay = 30.0  # Cap at 30 seconds
+
+            completion = None
+            duration = None
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        # Calculate exponential backoff with jitter
+                        delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                        jitter = random.uniform(0, 1)
+                        total_delay = delay + jitter
+                        print(
+                            f"[LLMService] Retry attempt {attempt + 1}/{max_retries} after {total_delay:.2f}s delay..."
+                        )
+                        await asyncio.sleep(total_delay)
+
+                    start_time = time.time()
+
+                    # Use structured outputs with parse method
+                    # Note: GPT-5 Mini doesn't support temperature parameter, only default (1)
+                    # So we don't pass temperature for structured outputs
+                    completion = await asyncio.to_thread(
+                        lambda: client.beta.chat.completions.parse(
+                            model=used_deployment,
+                            messages=[
+                                {"role": "system", "content": system_message},
+                                {"role": "user", "content": user_message},
+                            ],
+                            response_format=ExtractionResult,
+                            max_completion_tokens=max_tokens,
+                            # temperature parameter not supported for GPT-5 Mini structured outputs
+                        )
+                    )
+
+                    duration = time.time() - start_time
+                    print(f"[LLMService] Request duration: {duration:.2f}s")
+                    break  # Success - exit retry loop
+
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # Check if it's a retryable error (rate limit, server errors)
+                    is_rate_limit = (
+                        "429" in error_str
+                        or "rate limit" in error_str
+                        or "rate_limit" in error_str
+                        or "quota" in error_str
+                        or "too many requests" in error_str
+                    )
+                    is_server_error = (
+                        "500" in error_str
+                        or "503" in error_str
+                        or "504" in error_str
+                        or "internal" in error_str
+                        or "unavailable" in error_str
+                        or "timeout" in error_str
+                    )
+
+                    if (is_rate_limit or is_server_error) and attempt < max_retries - 1:
+                        error_type = "rate limit" if is_rate_limit else "server error"
+                        print(
+                            f"[LLMService] Received {error_type} error, will retry. Error: {str(e)}"
+                        )
+                        last_error = str(e)
+                        continue
+                    else:
+                        # Non-retryable error or max retries reached
+                        if attempt >= max_retries - 1:
+                            print(
+                                f"[LLMService] Max retries reached. Final error: {str(e)}"
+                            )
+                        raise  # Re-raise to be caught by outer try/except
+
+            # Parse the structured result
+            result = completion.choices[0].message.parsed
+
+            # Extract usage information
+            usage = completion.usage
+            prompt_tokens = usage.prompt_tokens if usage else None
+            completion_tokens = usage.completion_tokens if usage else None
+
+            # Build references list
+            references = [{"text": ref.text} for ref in result.references]
+
+            return {
+                "success": True,
+                "content": result.answer,  # Keep for backward compatibility
+                "answer": result.answer,  # New structured field
+                "references": references,  # New references field
+                "raw": completion.model_dump(),
+                "meta": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "deployment": used_deployment,
+                    "duration": duration,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+            }
 
         except Exception as e:
-            print(f"[LLMService] Request failed with exception: {e}")
-            return {"success": False, "error": f"Request failed: {str(e)}"}
+            print(f"[LLMService] Structured output request failed: {e}")
+            # Fallback to regular API call if structured outputs fail
+            print(f"[LLMService] Falling back to regular API call...")
 
-        try:
-            raw = resp.json()
-        except Exception:
-            return {"success": False, "error": f"Non-JSON response: {resp.text}"}
+            system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
+            user_message = f"""<markdown study>
+{markdown}
+</markdown study>
 
-        if not resp.ok:
-            err = raw.get("error") if isinstance(raw, dict) else resp.text
-            return {"success": False, "error": err, "raw": raw}
+Prompt:
+{extraction_prompt}
+"""
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message},
+            ]
 
-        try:
-            content = raw.get("choices", [])[0].get("message", {}).get("content", "")
-        except Exception:
-            content = json.dumps(raw)
+            url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
 
-        usage = raw.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens")
-        completion_tokens = usage.get("completion_tokens")
+            payload = {
+                "messages": messages,
+                "max_completion_tokens": max_tokens,
+                "n": 1,
+                "stop": None,
+            }
 
-        return {
-            "success": True,
-            "content": content,
-            "raw": raw,
-            "meta": {
-                "timestamp": datetime.utcnow().isoformat(),
-                "deployment": used_deployment,
-                "duration": duration,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            },
-        }
+            headers = {"Content-Type": "application/json", "api-key": used_api_key}
+
+            # Retry configuration
+            max_retries = 5
+            base_delay = 1.0  # Start with 1 second
+            max_delay = 30.0  # Cap at 30 seconds
+            retryable_status_codes = [
+                429,
+                500,
+                503,
+                504,
+            ]  # Rate limit and server errors
+
+            last_error = None
+            resp = None
+            raw = None
+            duration = None
+
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        # Calculate exponential backoff with jitter
+                        delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                        jitter = random.uniform(0, 1)
+                        total_delay = delay + jitter
+                        print(
+                            f"[LLMService] Retry attempt {attempt + 1}/{max_retries} after {total_delay:.2f}s delay..."
+                        )
+                        await asyncio.sleep(total_delay)
+                    else:
+                        redacted_key = used_api_key
+                        if isinstance(redacted_key, str) and len(redacted_key) > 8:
+                            redacted_key = redacted_key[:4] + "..." + redacted_key[-4:]
+                        redacted_headers = {
+                            "Content-Type": headers.get("Content-Type"),
+                            "api-key": redacted_key,
+                        }
+                        print(f"[LLMService] Request URL: {url}")
+                        print(f"[LLMService] Headers: {redacted_headers}")
+                        try:
+                            msg_count = len(messages)
+                        except Exception:
+                            msg_count = "unknown"
+                        print(
+                            f"[LLMService] Payload messages: {msg_count}, max_tokens={max_tokens}"
+                        )
+
+                    start_time = time.time()
+                    resp = await asyncio.to_thread(
+                        lambda: requests.post(
+                            url, headers=headers, json=payload, timeout=120
+                        )
+                    )
+                    duration = time.time() - start_time
+                    print(
+                        f"[LLMService] HTTP status: {getattr(resp, 'status_code', 'no-status')}"
+                    )
+                    print(f"[LLMService] Request duration: {duration:.2f}s")
+
+                    try:
+                        raw = resp.json()
+                    except Exception:
+                        if not resp.ok:
+                            return {
+                                "success": False,
+                                "error": f"Non-JSON response: {resp.text}",
+                            }
+
+                    # Check for retryable errors
+                    if resp.status_code in retryable_status_codes:
+                        error_msg = (
+                            raw.get("error", {}).get("message", "")
+                            if isinstance(raw, dict)
+                            else str(raw)
+                        )
+                        status_text = {
+                            429: "RESOURCE_EXHAUSTED (rate limit)",
+                            500: "INTERNAL (server error)",
+                            503: "UNAVAILABLE (service overloaded)",
+                            504: "DEADLINE_EXCEEDED (timeout)",
+                        }.get(resp.status_code, f"HTTP {resp.status_code}")
+
+                        if attempt < max_retries - 1:
+                            print(
+                                f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
+                            )
+                            last_error = error_msg
+                            continue  # Retry
+                        else:
+                            # Last attempt failed
+                            print(
+                                f"[LLMService] Max retries reached. Final error: {status_text}"
+                            )
+                            err = (
+                                raw.get("error") if isinstance(raw, dict) else resp.text
+                            )
+                            return {"success": False, "error": err, "raw": raw}
+
+                    # Non-retryable error or success
+                    if not resp.ok:
+                        err = raw.get("error") if isinstance(raw, dict) else resp.text
+                        return {"success": False, "error": err, "raw": raw}
+
+                    # Success - break out of retry loop
+                    break
+
+                except requests.exceptions.Timeout as e:
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Request timeout, will retry. Error: {str(e)}"
+                        )
+                        last_error = str(e)
+                        continue
+                    else:
+                        print(f"[LLMService] Max retries reached after timeout")
+                        return {
+                            "success": False,
+                            "error": f"Request timeout after {max_retries} attempts: {str(e)}",
+                        }
+
+                except requests.exceptions.RequestException as e:
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Request exception, will retry. Error: {str(e)}"
+                        )
+                        last_error = str(e)
+                        continue
+                    else:
+                        print(
+                            f"[LLMService] Max retries reached after request exception"
+                        )
+                        return {
+                            "success": False,
+                            "error": f"Request failed after {max_retries} attempts: {str(e)}",
+                        }
+
+                except Exception as req_e:
+                    print(f"[LLMService] Request failed with exception: {req_e}")
+                    return {"success": False, "error": f"Request failed: {str(req_e)}"}
+
+            # Extract content safely (we should have a successful response at this point)
+            if not resp or not raw:
+                return {
+                    "success": False,
+                    "error": "Failed to get valid response after retries",
+                }
+
+            try:
+                content = (
+                    raw.get("choices", [])[0].get("message", {}).get("content", "")
+                )
+            except Exception:
+                content = json.dumps(raw)
+
+            usage = raw.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+
+            return {
+                "success": True,
+                "content": content,
+                "answer": content,  # For backward compatibility
+                "references": [],  # Empty references if fallback used
+                "raw": raw,
+                "meta": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "deployment": used_deployment,
+                    "duration": duration,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+            }
