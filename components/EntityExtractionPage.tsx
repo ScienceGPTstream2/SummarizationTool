@@ -543,10 +543,17 @@ export function EntityExtractionPage({
                 <SelectTrigger>
                   <SelectValue placeholder="Select study type" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[60vh] sm:max-h-[400px] overflow-y-auto">
                   {studyTypes.map((type) => (
-                    <SelectItem key={type.id} value={type.id}>
-                      {type.name}
+                    <SelectItem key={type.id} value={type.id} className="py-3">
+                      <span data-select-trigger-text={type.name} />
+                      <div className="flex flex-col gap-1.5 w-full">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">
+                            {type.name}
+                          </span>
+                        </div>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -577,19 +584,35 @@ export function EntityExtractionPage({
                         ? "Loading models from backend..."
                         : "Select AI model"
                     }
-                  />
+                  >
+                    {selectedModel ? (
+                      <span className="font-semibold">
+                        {
+                          availableModels.find((m) => m.id === selectedModel)
+                            ?.name
+                        }
+                      </span>
+                    ) : null}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-[60vh] sm:max-h-[400px] overflow-y-auto">
                   {availableModels.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      <div>
+                    <SelectItem
+                      key={model.id}
+                      value={model.id}
+                      className="py-3"
+                    >
+                      <span data-select-trigger-text={model.name} />
+                      <div className="flex flex-col gap-1.5 w-full">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">{model.name}</span>
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                          <span className="font-semibold text-sm">
+                            {model.name}
+                          </span>
+                          <span className="text-xs font-medium bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800">
                             {model.provider}
                           </span>
                         </div>
-                        <div className="text-sm text-muted-foreground">
+                        <div className="text-xs text-muted-foreground font-medium">
                           {model.description}
                         </div>
                       </div>

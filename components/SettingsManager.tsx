@@ -229,7 +229,9 @@ export class SettingsManager {
             ? "azure"
             : m.provider?.toLowerCase().includes("google")
               ? "google"
-              : "other",
+              : m.provider?.toLowerCase().includes("anthropic")
+                ? "anthropic"
+                : "other",
           deployment: m.deployment,
           api_version: m.api_version,
           project_id: m.project_id,

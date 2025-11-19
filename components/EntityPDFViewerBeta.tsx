@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
+import { Checkbox } from "./ui/checkbox";
 import {
   ZoomIn,
   ZoomOut,
@@ -9,6 +10,9 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist";
+// @ts-ignore - Vite handles ?url imports
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 const pdfBlobCache = new Map<string, Blob>();
 const analysisCache = new Map<string, any>();
@@ -62,6 +66,7 @@ export function EntityPDFViewerBeta({
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const scrollStartRef = useRef({ left: 0, top: 0 });
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
 
   const canPan = zoomRatio > 1.02;
 
@@ -190,34 +195,9 @@ export function EntityPDFViewerBeta({
     }
   }, [pendingFocusRefIdx, currentPage, scale, scrollReferenceIntoView]);
 
-  // Load PDF.js dynamically
+  // Configure PDF.js worker
   useEffect(() => {
-    const loadPDFJS = async () => {
-      try {
-        // @ts-ignore
-        if (!window.pdfjsLib) {
-          const script = document.createElement("script");
-          script.src =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          script.async = true;
-          document.body.appendChild(script);
-
-          await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = reject;
-          });
-
-          // @ts-ignore
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        }
-      } catch (err) {
-        console.error("Failed to load PDF.js:", err);
-        setError("Failed to load PDF viewer library");
-      }
-    };
-
-    loadPDFJS();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
   // Fetch PDF file
@@ -330,26 +310,10 @@ export function EntityPDFViewerBeta({
     }
 
     const loadPDF = async () => {
-      // Wait for PDF.js to be available
-      // @ts-ignore
-      if (!window.pdfjsLib) {
-        console.log("[EntityPDFViewerBeta] PDF.js not loaded yet, waiting...");
-        // Check every 100ms for PDF.js
-        const checkInterval = setInterval(() => {
-          // @ts-ignore
-          if (window.pdfjsLib && pdfUrl) {
-            clearInterval(checkInterval);
-            loadPDF();
-          }
-        }, 100);
-        return () => clearInterval(checkInterval);
-      }
-
       try {
         setLoading(true);
         console.log("[EntityPDFViewerBeta] Loading PDF document...");
-        // @ts-ignore
-        const loadingTask = window.pdfjsLib.getDocument(pdfUrl);
+        const loadingTask = pdfjsLib.getDocument(pdfUrl);
         const pdf = await loadingTask.promise;
         console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
         setPdfDocument(pdf);
@@ -428,35 +392,50 @@ export function EntityPDFViewerBeta({
           renderTask.cancel();
         }
 
+        // Use device pixel ratio for crisp rendering on high-DPI displays
         const devicePixelRatio = window.devicePixelRatio || 1;
-        const transform =
-          devicePixelRatio !== 1
-            ? [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0]
-            : null;
 
+        // Scale the viewport by device pixel ratio for high-DPI rendering
+        const scaledViewport = page.getViewport({
+          scale: scale * devicePixelRatio,
+        });
+
+        // Set CSS display size (logical pixels)
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
         setCurrentViewportHeight(viewport.height);
 
-        canvas.width = viewport.width * devicePixelRatio;
-        canvas.height = viewport.height * devicePixelRatio;
+        // Set actual canvas size in memory (physical pixels)
+        canvas.width = scaledViewport.width;
+        canvas.height = scaledViewport.height;
 
+        // Enable high-quality image smoothing for better rendering
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+
+        // Reset transform and scale context to match scaled viewport
         context.setTransform(1, 0, 0, 1, 0, 0);
 
         const renderContext = {
           canvasContext: context,
-          viewport: viewport,
-          transform: transform || undefined,
+          viewport: scaledViewport,
         };
 
         renderTask = page.render(renderContext);
         await renderTask.promise;
 
-        // Draw bounding boxes AFTER PDF is fully rendered
+        // Draw bounding boxes AFTER PDF is fully rendered (only if enabled)
         // Small delay ensures canvas is ready
-        requestAnimationFrame(() => {
-          drawReferenceBoundingBoxes(context, currentPage, viewport.height);
-        });
+        if (showBoundingBoxes) {
+          requestAnimationFrame(() => {
+            drawReferenceBoundingBoxes(
+              context,
+              currentPage,
+              viewport.height,
+              devicePixelRatio
+            );
+          });
+        }
       } catch (err: any) {
         if (err?.name !== "RenderingCancelledException") {
           console.error("Error rendering page:", err);
@@ -471,37 +450,77 @@ export function EntityPDFViewerBeta({
         renderTask.cancel();
       }
     };
-  }, [pdfDocument, currentPage, scale, references, analysisResult]);
+  }, [
+    pdfDocument,
+    currentPage,
+    scale,
+    references,
+    analysisResult,
+    showBoundingBoxes,
+  ]);
 
   const drawReferenceBoundingBoxes = (
     context: CanvasRenderingContext2D,
     pageNum: number,
-    pageHeight: number
+    viewportHeight: number,
+    devicePixelRatio: number = 1
   ) => {
     // Get processor type to determine coordinate system
     const processor = analysisResult?.processor || "azure_doc_intelligence";
     const needsYFlip = processor === "docling";
 
+    // Get actual page height in points from analysis result (for docling Y flip)
+    // Fallback to viewport height / scale if page info not available
+    const pageInfo = analysisResult?.pages?.find(
+      (p: any) => p.page_number === pageNum
+    );
+    const pageHeightInPoints = pageInfo?.height || viewportHeight / scale;
+
     // Helper function to convert polygon to canvas coordinates
-    // Azure Document Intelligence returns coordinates in INCHES
-    // PDF.js uses POINTS (1 inch = 72 points)
+    // Note: Entity extraction uses raw_analysis (inches for Azure DI), while
+    // normalized analysis uses points. We need to detect and convert accordingly.
+    // Coordinate system differences:
+    // - Azure DI: Top-left origin (matches canvas) - NO flip needed
+    // - Docling: Bottom-left origin (PDF standard) - flip Y coordinates
     const polygonToRect = (polygon: number[]) => {
       if (!polygon || polygon.length < 8) return null;
 
-      // Convert from inches to points (multiply by 72)
-      // Then apply the current scale
-      const INCHES_TO_POINTS = 72;
+      // Detect if coordinates are in inches (from raw_analysis) vs points (normalized)
+      // Entity extraction uses raw_analysis (inches), while normalized analysis uses points
+      // Check page dimensions: if page width < 20, it's likely inches; if > 200, it's points
+      const pageWidth = pageInfo?.width || analysisResult?.pages?.[0]?.width;
+      const isNormalized =
+        pageInfo?.unit === "pt" ||
+        analysisResult?.pages?.[0]?.unit === "pt" ||
+        (pageWidth && pageWidth > 200); // Normalized pages are ~600pt wide
 
+      // Also check coordinate values as fallback
+      const maxCoord = Math.max(...polygon);
+      const coordsLookLikeInches = maxCoord < 20;
+
+      // Convert inches to points if needed (entity extraction uses raw_analysis)
+      const needsInchConversion =
+        processor === "azure_doc_intelligence" &&
+        (!isNormalized || coordsLookLikeInches);
+      const INCHES_TO_POINTS = 72;
+      const conversionFactor = needsInchConversion ? INCHES_TO_POINTS : 1;
+
+      // Scale coordinates by both scale and devicePixelRatio to match scaled viewport
       const xCoords = polygon
         .filter((_, i) => i % 2 === 0)
-        .map((x) => x * INCHES_TO_POINTS * scale);
+        .map((x) => x * conversionFactor * scale * devicePixelRatio);
       const yCoords = polygon
         .filter((_, i) => i % 2 === 1)
         .map((y) => {
-          const yInPoints = y * INCHES_TO_POINTS;
-          // For Azure Document Intelligence, Y is from top-left, same as PDF.js
-          // So we don't need to flip Y for azure_doc_intelligence
-          return (needsYFlip ? pageHeight - yInPoints : yInPoints) * scale;
+          const yInPoints = y * conversionFactor;
+          if (needsYFlip) {
+            // For Docling: Y is from bottom-left (PDF standard)
+            // Flip: pageHeightInPoints - yInPoints, then scale
+            return (pageHeightInPoints - yInPoints) * scale * devicePixelRatio;
+          } else {
+            // For Azure: Y is from top-left, same as PDF.js canvas
+            return yInPoints * scale * devicePixelRatio;
+          }
         });
 
       const x = Math.min(...xCoords);
@@ -512,18 +531,15 @@ export function EntityPDFViewerBeta({
       return { x, y, width, height };
     };
 
-    const pixelRatio = window.devicePixelRatio || 1;
+    // No need for transform since coordinates are already scaled by devicePixelRatio
     context.save();
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.setTransform(1, 0, 0, 1, 0, 0);
 
     const labelStackMap = new Map<string, number>();
     const canvasElement = canvasRef.current;
-    const canvasWidth = canvasElement
-      ? canvasElement.width / pixelRatio
-      : undefined;
-    const canvasHeight = canvasElement
-      ? canvasElement.height / pixelRatio
-      : undefined;
+    // Use actual canvas dimensions since coordinates are in scaled space
+    const canvasWidth = canvasElement ? canvasElement.width : undefined;
+    const canvasHeight = canvasElement ? canvasElement.height : undefined;
 
     references.forEach((ref, refIdx) => {
       if (!ref.best_match) return;
@@ -816,6 +832,21 @@ export function EntityPDFViewerBeta({
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 border rounded-md bg-white whitespace-nowrap">
+            <Checkbox
+              id="show-bboxes"
+              checked={showBoundingBoxes}
+              onCheckedChange={(checked) =>
+                setShowBoundingBoxes(checked === true)
+              }
+            />
+            <label
+              htmlFor="show-bboxes"
+              className="text-sm font-medium cursor-pointer select-none"
+            >
+              Show Bounding Boxes
+            </label>
+          </div>
           <Button
             variant="outline"
             size="sm"
