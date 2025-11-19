@@ -13,6 +13,9 @@ import {
   Layers,
   AlertCircle,
 } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist";
+// @ts-ignore - Vite handles ?url imports
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 interface PDFBoundingBoxViewerProps {
   fileId: string;
@@ -176,34 +179,9 @@ export function PDFBoundingBoxViewer({
     }
   }, [isPanning]);
 
-  // Load PDF.js dynamically
+  // Configure PDF.js worker
   useEffect(() => {
-    const loadPDFJS = async () => {
-      try {
-        // @ts-ignore
-        if (!window.pdfjsLib) {
-          const script = document.createElement("script");
-          script.src =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          script.async = true;
-          document.body.appendChild(script);
-
-          await new Promise((resolve, reject) => {
-            script.onload = resolve;
-            script.onerror = reject;
-          });
-
-          // @ts-ignore
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        }
-      } catch (err) {
-        console.error("Failed to load PDF.js:", err);
-        setError("Failed to load PDF viewer library");
-      }
-    };
-
-    loadPDFJS();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
   // Fetch PDF file
@@ -330,12 +308,10 @@ export function PDFBoundingBoxViewer({
   // Load and render PDF
   useEffect(() => {
     const loadPDF = async () => {
-      // @ts-ignore
-      if (!pdfUrl || !window.pdfjsLib) return;
+      if (!pdfUrl) return;
 
       try {
-        // @ts-ignore
-        const loadingTask = window.pdfjsLib.getDocument(pdfUrl);
+        const loadingTask = pdfjsLib.getDocument(pdfUrl);
         const pdf = await loadingTask.promise;
         setPdfDocument(pdf);
         setTotalPages(pdf.numPages);

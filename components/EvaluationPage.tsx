@@ -32,6 +32,13 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Checkbox } from "./ui/checkbox";
 import { Progress } from "./ui/progress";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "./ui/accordion";
+import { Badge } from "./ui/badge";
+import {
   ArrowLeft,
   Play,
   AlertTriangle,
@@ -44,6 +51,8 @@ import {
   Plus,
   Trash2,
   RotateCcw,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { DocumentData } from "../App";
 
@@ -60,6 +69,8 @@ interface EvalProvider {
   model: string;
   description: string;
   available: boolean;
+  deployment?: string; // Azure deployment name
+  provider?: string; // Backend provider type
 }
 
 // Available metrics
@@ -70,20 +81,15 @@ interface MetricOption {
   requiresGroundTruth: boolean;
 }
 
-const EVAL_PROVIDERS: EvalProvider[] = [
-  {
-    id: "azure_openai",
-    name: "Azure OpenAI",
-    model: "gpt-5-mini",
-    description: "GPT-5 Mini for fast, accurate evaluation",
-    available: true,
-  },
+// Static providers (Vertex AI and Anthropic)
+const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
   {
     id: "vertex_ai_pro",
     name: "Gemini 2.5 Pro",
     model: "gemini-2.5-pro",
     description: "More powerful, slower - comprehensive analysis",
     available: true,
+    provider: "vertex_ai",
   },
   {
     id: "vertex_ai_lite",
@@ -91,6 +97,7 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     model: "gemini-2.5-flash-lite",
     description: "Faster, lightweight - quick evaluation",
     available: true,
+    provider: "vertex_ai",
   },
   {
     id: "anthropic_sonnet_4_5",
@@ -99,6 +106,7 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     description:
       "Latest Sonnet - balanced performance (supports structured outputs)",
     available: true,
+    provider: "anthropic",
   },
   {
     id: "anthropic_opus_4_1",
@@ -107,6 +115,7 @@ const EVAL_PROVIDERS: EvalProvider[] = [
     description:
       "Most capable - highest quality evaluation (supports structured outputs)",
     available: true,
+    provider: "anthropic",
   },
 ];
 
@@ -207,11 +216,71 @@ export function EvaluationPage({
     ]
   );
 
+  // Azure models from backend
+  const [azureModels, setAzureModels] = useState<EvalProvider[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(true);
+
+  // Combined providers list (static + dynamic Azure models)
+  const allProviders = [...STATIC_EVAL_PROVIDERS, ...azureModels];
+
   // Selected providers - restore from documentData or use all by default
   const [selectedProviders, setSelectedProviders] = useState<string[]>(
-    documentData.evaluationConfig?.selectedProviders ||
-      EVAL_PROVIDERS.map((p) => p.id)
+    documentData.evaluationConfig?.selectedProviders || []
   );
+
+  // Fetch Azure models from backend on mount
+  useEffect(() => {
+    const fetchAzureModels = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          setIsLoadingModels(false);
+          return;
+        }
+
+        const response = await fetch("/api/models", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (response.ok) {
+          const backendModels = await response.json();
+          // Filter for Azure models only
+          const azureProviders: EvalProvider[] = backendModels
+            .filter((m: any) => m.provider?.toLowerCase().includes("azure"))
+            .map((m: any) => ({
+              id: m.id, // e.g., "azure-gpt-4o"
+              name: m.name,
+              model: m.name,
+              description: m.description || `${m.name} for evaluation`,
+              available: true,
+              deployment: m.deployment,
+              provider: "azure_openai",
+            }));
+
+          setAzureModels(azureProviders);
+
+          // If no selected providers yet (from documentData), select only gpt-4o by default
+          setSelectedProviders((prev) => {
+            if (prev.length === 0) {
+              // Find gpt-4o model ID
+              const gpt4oId = azureProviders.find(
+                (p) => p.deployment === "gpt-4o" || p.model === "gpt-4o"
+              )?.id;
+              // Return only gpt-4o if found, otherwise empty array
+              return gpt4oId ? [gpt4oId] : [];
+            }
+            return prev;
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch Azure models:", error);
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    fetchAzureModels();
+  }, []); // Only run on mount
 
   // Custom evaluation steps - restore from documentData or use defaults
   const [customEvaluationSteps, setCustomEvaluationSteps] = useState<
@@ -331,6 +400,32 @@ export function EvaluationPage({
         ? prev.filter((id) => id !== providerId)
         : [...prev, providerId]
     );
+  };
+
+  // Helper functions for select all/deselect all per category
+  const toggleCategory = (providerIds: string[], selectAll: boolean) => {
+    setSelectedProviders((prev) => {
+      if (selectAll) {
+        // Add all providers in category that aren't already selected
+        const newProviders = providerIds.filter((id) => !prev.includes(id));
+        return [...prev, ...newProviders];
+      } else {
+        // Remove all providers in category
+        return prev.filter((id) => !providerIds.includes(id));
+      }
+    });
+  };
+
+  const getCategorySelection = (providerIds: string[]) => {
+    const selected = providerIds.filter((id) =>
+      selectedProviders.includes(id)
+    ).length;
+    return {
+      selected,
+      total: providerIds.length,
+      allSelected: selected === providerIds.length,
+      someSelected: selected > 0 && selected < providerIds.length,
+    };
   };
 
   const updateEvaluationStep = (
@@ -455,7 +550,7 @@ export function EvaluationPage({
 
         // Evaluate all selected models for this entity in parallel
         const modelPromises = selectedProviders.map(async (providerId) => {
-          const provider = EVAL_PROVIDERS.find((p) => p.id === providerId);
+          const provider = allProviders.find((p) => p.id === providerId);
           if (!provider) return;
 
           try {
@@ -467,15 +562,17 @@ export function EvaluationPage({
               expected_output: entityGroundTruths[entity.name] || undefined,
               retrieval_context: documentData.extractedText || undefined,
               metrics: selectedMetrics,
-              provider: providerId,
               threshold: 0.7,
               custom_evaluation_steps: customEvaluationSteps,
             };
 
             // Add provider-specific config
-            if (providerId === "azure_openai") {
-              requestBody.azure_deployment = "gpt-5-mini";
-              requestBody.azure_model_name = "gpt-5-mini";
+            if (providerId.startsWith("azure-")) {
+              // Azure OpenAI models
+              requestBody.provider = "azure_openai";
+              requestBody.azure_deployment =
+                provider.deployment || provider.model;
+              requestBody.azure_model_name = provider.model;
             } else if (
               providerId === "vertex_ai_pro" ||
               providerId === "vertex_ai_lite"
@@ -746,110 +843,322 @@ export function EvaluationPage({
           {/* Provider Selection */}
           <Card>
             <CardHeader>
-              <CardTitle>Evaluation Models</CardTitle>
-              <CardDescription>
-                Select LLM judges for evaluation (all by default)
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Evaluation Models</CardTitle>
+                  <CardDescription>
+                    Select LLM judges for evaluation
+                  </CardDescription>
+                </div>
+                <Badge variant="secondary" className="text-sm">
+                  {selectedProviders.length} selected
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* OpenAI Models */}
-              <div>
-                <h3 className="font-semibold mb-3">OpenAI Models</h3>
-                <div className="space-y-3">
-                  {EVAL_PROVIDERS.filter((p) => p.id === "azure_openai").map(
-                    (provider) => (
-                      <div
-                        key={provider.id}
-                        className="flex items-start space-x-3 space-y-0"
-                      >
-                        <Checkbox
-                          id={provider.id}
-                          checked={selectedProviders.includes(provider.id)}
-                          onCheckedChange={() => toggleProvider(provider.id)}
-                          disabled={!provider.available}
-                        />
-                        <div className="space-y-1 leading-none">
-                          <Label
-                            htmlFor={provider.id}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                          >
-                            {provider.model}
-                          </Label>
-                          <p className="text-sm text-muted-foreground">
-                            {provider.description}
-                          </p>
+            <CardContent>
+              <Accordion type="multiple" defaultValue={[]} className="w-full">
+                {/* Azure OpenAI Models */}
+                <AccordionItem value="azure">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">Azure OpenAI</span>
+                        {(() => {
+                          const azureIds = azureModels.map((p) => p.id);
+                          const selection = getCategorySelection(azureIds);
+                          return (
+                            <Badge variant="outline" className="text-xs">
+                              {selection.selected}/{selection.total}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    {isLoadingModels ? (
+                      <p className="text-sm text-muted-foreground py-2">
+                        Loading models...
+                      </p>
+                    ) : azureModels.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2">
+                        No Azure OpenAI models configured
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                          <span className="text-sm text-muted-foreground">
+                            {azureModels.length} model
+                            {azureModels.length !== 1 ? "s" : ""} available
+                          </span>
+                          {(() => {
+                            const azureIds = azureModels.map((p) => p.id);
+                            const selection = getCategorySelection(azureIds);
+                            return (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() =>
+                                  toggleCategory(
+                                    azureIds,
+                                    !selection.allSelected
+                                  )
+                                }
+                              >
+                                {selection.allSelected ? (
+                                  <>
+                                    <CheckSquare className="h-3 w-3 mr-1" />
+                                    Deselect All
+                                  </>
+                                ) : (
+                                  <>
+                                    <Square className="h-3 w-3 mr-1" />
+                                    Select All
+                                  </>
+                                )}
+                              </Button>
+                            );
+                          })()}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {azureModels.map((provider) => (
+                            <div
+                              key={provider.id}
+                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                            >
+                              <Checkbox
+                                id={provider.id}
+                                checked={selectedProviders.includes(
+                                  provider.id
+                                )}
+                                onCheckedChange={() =>
+                                  toggleProvider(provider.id)
+                                }
+                                disabled={!provider.available}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                <Label
+                                  htmlFor={provider.id}
+                                  className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                >
+                                  {provider.model}
+                                </Label>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {provider.description}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    )
-                  )}
-                </div>
-              </div>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
 
-              {/* Google AI Models */}
-              <div>
-                <h3 className="font-semibold mb-3">Google AI Models</h3>
-                <div className="space-y-3">
-                  {EVAL_PROVIDERS.filter((p) =>
-                    p.id.startsWith("vertex_ai")
-                  ).map((provider) => (
-                    <div
-                      key={provider.id}
-                      className="flex items-start space-x-3 space-y-0"
-                    >
-                      <Checkbox
-                        id={provider.id}
-                        checked={selectedProviders.includes(provider.id)}
-                        onCheckedChange={() => toggleProvider(provider.id)}
-                        disabled={!provider.available}
-                      />
-                      <div className="space-y-1 leading-none">
-                        <Label
-                          htmlFor={provider.id}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                        >
-                          {provider.model}
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          {provider.description}
-                        </p>
+                {/* Google AI Models */}
+                <AccordionItem value="google">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">
+                          Google AI (Gemini)
+                        </span>
+                        {(() => {
+                          const googleIds = STATIC_EVAL_PROVIDERS.filter((p) =>
+                            p.id.startsWith("vertex_ai")
+                          ).map((p) => p.id);
+                          const selection = getCategorySelection(googleIds);
+                          return (
+                            <Badge variant="outline" className="text-xs">
+                              {selection.selected}/{selection.total}
+                            </Badge>
+                          );
+                        })()}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-3">
+                      {(() => {
+                        const googleProviders = STATIC_EVAL_PROVIDERS.filter(
+                          (p) => p.id.startsWith("vertex_ai")
+                        );
+                        const googleIds = googleProviders.map((p) => p.id);
+                        const selection = getCategorySelection(googleIds);
+                        return (
+                          <>
+                            <div className="flex items-center justify-between pb-2 border-b">
+                              <span className="text-sm text-muted-foreground">
+                                {googleProviders.length} model
+                                {googleProviders.length !== 1 ? "s" : ""}{" "}
+                                available
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() =>
+                                  toggleCategory(
+                                    googleIds,
+                                    !selection.allSelected
+                                  )
+                                }
+                              >
+                                {selection.allSelected ? (
+                                  <>
+                                    <CheckSquare className="h-3 w-3 mr-1" />
+                                    Deselect All
+                                  </>
+                                ) : (
+                                  <>
+                                    <Square className="h-3 w-3 mr-1" />
+                                    Select All
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {googleProviders.map((provider) => (
+                                <div
+                                  key={provider.id}
+                                  className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                >
+                                  <Checkbox
+                                    id={provider.id}
+                                    checked={selectedProviders.includes(
+                                      provider.id
+                                    )}
+                                    onCheckedChange={() =>
+                                      toggleProvider(provider.id)
+                                    }
+                                    disabled={!provider.available}
+                                    className="mt-1"
+                                  />
+                                  <div className="flex-1 space-y-1 min-w-0">
+                                    <Label
+                                      htmlFor={provider.id}
+                                      className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                    >
+                                      {provider.model}
+                                    </Label>
+                                    <p className="text-xs text-muted-foreground line-clamp-2">
+                                      {provider.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
 
-              {/* Anthropic Models */}
-              <div>
-                <h3 className="font-semibold mb-3">Anthropic Models</h3>
-                <div className="space-y-3">
-                  {EVAL_PROVIDERS.filter((p) =>
-                    p.id.startsWith("anthropic_")
-                  ).map((provider) => (
-                    <div
-                      key={provider.id}
-                      className="flex items-start space-x-3 space-y-0"
-                    >
-                      <Checkbox
-                        id={provider.id}
-                        checked={selectedProviders.includes(provider.id)}
-                        onCheckedChange={() => toggleProvider(provider.id)}
-                        disabled={!provider.available}
-                      />
-                      <div className="space-y-1 leading-none">
-                        <Label
-                          htmlFor={provider.id}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                        >
-                          {getDisplayModelName(provider.model)}
-                        </Label>
-                        <p className="text-sm text-muted-foreground">
-                          {provider.description}
-                        </p>
+                {/* Anthropic Models */}
+                <AccordionItem value="anthropic">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">
+                          Anthropic (Claude)
+                        </span>
+                        {(() => {
+                          const anthropicIds = STATIC_EVAL_PROVIDERS.filter(
+                            (p) => p.id.startsWith("anthropic_")
+                          ).map((p) => p.id);
+                          const selection = getCategorySelection(anthropicIds);
+                          return (
+                            <Badge variant="outline" className="text-xs">
+                              {selection.selected}/{selection.total}
+                            </Badge>
+                          );
+                        })()}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-3">
+                      {(() => {
+                        const anthropicProviders = STATIC_EVAL_PROVIDERS.filter(
+                          (p) => p.id.startsWith("anthropic_")
+                        );
+                        const anthropicIds = anthropicProviders.map(
+                          (p) => p.id
+                        );
+                        const selection = getCategorySelection(anthropicIds);
+                        return (
+                          <>
+                            <div className="flex items-center justify-between pb-2 border-b">
+                              <span className="text-sm text-muted-foreground">
+                                {anthropicProviders.length} model
+                                {anthropicProviders.length !== 1 ? "s" : ""}{" "}
+                                available
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() =>
+                                  toggleCategory(
+                                    anthropicIds,
+                                    !selection.allSelected
+                                  )
+                                }
+                              >
+                                {selection.allSelected ? (
+                                  <>
+                                    <CheckSquare className="h-3 w-3 mr-1" />
+                                    Deselect All
+                                  </>
+                                ) : (
+                                  <>
+                                    <Square className="h-3 w-3 mr-1" />
+                                    Select All
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {anthropicProviders.map((provider) => (
+                                <div
+                                  key={provider.id}
+                                  className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                >
+                                  <Checkbox
+                                    id={provider.id}
+                                    checked={selectedProviders.includes(
+                                      provider.id
+                                    )}
+                                    onCheckedChange={() =>
+                                      toggleProvider(provider.id)
+                                    }
+                                    disabled={!provider.available}
+                                    className="mt-1"
+                                  />
+                                  <div className="flex-1 space-y-1 min-w-0">
+                                    <Label
+                                      htmlFor={provider.id}
+                                      className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                    >
+                                      {getDisplayModelName(provider.model)}
+                                    </Label>
+                                    <p className="text-xs text-muted-foreground line-clamp-2">
+                                      {provider.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </CardContent>
           </Card>
         </div>
