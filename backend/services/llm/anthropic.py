@@ -3,30 +3,9 @@ import json
 import asyncio
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union, Type
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 from anthropic import AnthropicVertex
-from pydantic import BaseModel, Field
-
-
-# Pydantic models for structured output
-class MarkdownReference(BaseModel):
-    """A reference to a specific section of the markdown that was used"""
-
-    text: str = Field(
-        description="The exact text excerpt from the markdown that was referenced"
-    )
-
-
-class ExtractionResult(BaseModel):
-    """Structured result containing both the extracted answer and its references"""
-
-    answer: str = Field(
-        description="The extracted information or answer based on the prompt"
-    )
-    references: List[MarkdownReference] = Field(
-        description="List of specific text excerpts from the markdown that were used to generate this answer"
-    )
 
 
 class AnthropicLLMClient:
@@ -79,7 +58,7 @@ class AnthropicLLMClient:
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
-        response_json_schema: Optional[Union[Type[BaseModel], Dict[str, Any]]] = None,
+        response_json_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         # Use overrides if provided, otherwise fall back to instance variables
         used_project_id = project_id_override or self.project_id
@@ -121,134 +100,141 @@ class AnthropicLLMClient:
             use_structured_outputs = response_json_schema is not None
 
             if use_structured_outputs:
-                # Use beta API with structured outputs
-                print(f"[LLMService] Using structured outputs with beta API")
+                # Note: Vertex AI doesn't support structured outputs API feature yet
+                # Use prompt engineering to get structured JSON output instead
+                print(
+                    f"[LLMService] Using prompt-based structured outputs (Vertex AI doesn't support structured outputs API)"
+                )
                 try:
-                    # Use client.beta.messages.parse() if we have a Pydantic model class
-                    # Otherwise use client.beta.messages.create() with output_format
-                    if (
-                        isinstance(response_json_schema, type)
-                        and issubclass(response_json_schema, BaseModel)
-                        and response_json_schema is not BaseModel
-                    ):
-                        # Pydantic model - use parse() method
-                        response = await asyncio.to_thread(
-                            lambda: client.beta.messages.parse(
-                                model=model_id,
-                                max_tokens=max_tokens,
-                                betas=["structured-outputs-2025-11-13"],
-                                messages=messages,
-                                system=system,
-                                output_format=response_json_schema,
-                                temperature=temperature if temperature != 1.0 else None,
-                            )
-                        )
-                        # Parse the structured result
-                        parsed_result = response.parsed_output
-                        content = parsed_result.answer
-                        references = [
-                            {"text": ref.text} for ref in parsed_result.references
-                        ]
-
-                        duration = time.time() - start_time
-                        usage = response.usage
-                        input_tokens = usage.input_tokens if usage else None
-                        output_tokens = usage.output_tokens if usage else None
-
-                        print(
-                            f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
-                        )
-                        print(f"[LLMService] Extracted content length: {len(content)}")
-                        print(f"[LLMService] References count: {len(references)}")
-
-                        return {
-                            "success": True,
-                            "content": content,  # Keep for backward compatibility
-                            "answer": content,  # New structured field
-                            "references": references,  # New references field
-                            "raw": response.model_dump(),
-                            "meta": {
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "model": model_id,
-                                "duration": duration,
-                                "prompt_tokens": input_tokens,
-                                "completion_tokens": output_tokens,
-                            },
-                        }
+                    # Generate JSON schema description for the prompt
+                    if isinstance(response_json_schema, dict):
+                        schema_description = json.dumps(response_json_schema, indent=2)
                     else:
-                        # Dictionary schema - use create() with output_format
-                        request_params = {
-                            "max_tokens": max_tokens,
-                            "messages": messages,
-                            "model": model_id,
-                            "betas": ["structured-outputs-2025-11-13"],
-                            "output_format": response_json_schema,
-                        }
-
-                        if system:
-                            request_params["system"] = system
-
-                        if temperature != 1.0:
-                            request_params["temperature"] = temperature
-
-                        message = await asyncio.to_thread(
-                            lambda: client.beta.messages.create(**request_params)
+                        raise ValueError(
+                            f"response_json_schema must be a dict, got: {type(response_json_schema)}"
                         )
 
-                        duration = time.time() - start_time
+                    # Enhance system message with JSON format instructions
+                    json_format_instruction = f"""You must respond with valid JSON that matches this exact schema:
 
-                        # Parse JSON response
-                        content_text = ""
-                        if message.content and len(message.content) > 0:
-                            content_text = message.content[0].text
+{schema_description}
 
-                        # Parse the structured JSON
-                        try:
-                            parsed_json = json.loads(content_text)
-                            result = ExtractionResult.model_validate(parsed_json)
-                            content = result.answer
-                            references = [
-                                {"text": ref.text} for ref in result.references
-                            ]
+Important:
+- Return ONLY valid JSON, no markdown code blocks, no explanations
+- Ensure all required fields are present
+- Use the exact field names from the schema
+- For the "references" array, each item must have a "text" field with the exact excerpt from the markdown"""
 
-                            print(
-                                f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
-                            )
-                            print(
-                                f"[LLMService] Extracted content length: {len(content)}"
-                            )
-                            print(f"[LLMService] References count: {len(references)}")
-                        except (json.JSONDecodeError, Exception) as e:
-                            print(
-                                f"[LLMService] Failed to parse structured output: {e}"
-                            )
-                            print(
-                                f"[LLMService] Response text: {content_text[:500]}..."
-                            )
-                            return {
-                                "success": False,
-                                "error": f"Failed to parse structured output: {str(e)}",
-                                "raw": message.model_dump(),
+                    enhanced_system = (
+                        f"{system}\n\n{json_format_instruction}"
+                        if system
+                        else json_format_instruction
+                    )
+
+                    # Enhance user message to emphasize JSON output
+                    enhanced_messages = messages.copy()
+                    if enhanced_messages and len(enhanced_messages) > 0:
+                        enhanced_messages[-1][
+                            "content"
+                        ] = f"""{enhanced_messages[-1]["content"]}
+
+IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text."""
+                    else:
+                        enhanced_messages.append(
+                            {
+                                "role": "user",
+                                "content": "IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text.",
                             }
+                        )
 
-                        usage = message.usage
-                        input_tokens = usage.input_tokens if usage else None
-                        output_tokens = usage.output_tokens if usage else None
+                    # Build request parameters (regular API call, no beta features)
+                    request_params = {
+                        "model": model_id,
+                        "max_tokens": max_tokens,
+                        "messages": enhanced_messages,
+                    }
 
-                        return {
-                            "success": True,
-                            "content": content,  # Keep for backward compatibility
-                            "answer": content,  # New structured field
-                            "references": references,  # New references field
-                            "raw": message.model_dump(),
-                            "meta": {
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "model": model_id,
-                                "duration": duration,
-                                "prompt_tokens": input_tokens,
-                                "completion_tokens": output_tokens,
-                            },
-                        }
+                    if enhanced_system:
+                        request_params["system"] = enhanced_system
+
+                    if temperature != 1.0:
+                        request_params["temperature"] = temperature
+
+                    # Make the API call
+                    response = await asyncio.to_thread(
+                        lambda: client.messages.create(**request_params)
+                    )
+
+                    duration = time.time() - start_time
+
+                    # Extract and parse JSON from response
+                    content_text = (
+                        response.content[0].text
+                        if response.content and len(response.content) > 0
+                        else "{}"
+                    )
+
+                    # Try to extract JSON from markdown code blocks if present
+                    json_text = content_text.strip()
+                    if json_text.startswith("```"):
+                        # Remove markdown code block markers
+                        lines = json_text.split("\n")
+                        # Remove first line (```json or ```)
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        # Remove last line (```)
+                        if lines and lines[-1].strip() == "```":
+                            lines = lines[:-1]
+                        json_text = "\n".join(lines)
+
+                    # Parse JSON
+                    try:
+                        parsed_json = json.loads(json_text)
+                    except json.JSONDecodeError as e:
+                        print(f"[LLMService] JSON parsing failed: {e}")
+                        print(f"[LLMService] Response text: {json_text[:500]}")
+                        raise ValueError(f"Failed to parse JSON response: {e}")
+
+                    # Extract content and references from parsed JSON
+                    content = parsed_json.get("answer", "")
+                    references = parsed_json.get("references", [])
+                    # Ensure references is a list of dicts with "text" field
+                    if references and isinstance(references, list):
+                        references = [
+                            (
+                                {"text": ref["text"]}
+                                if isinstance(ref, dict) and "text" in ref
+                                else {"text": str(ref)}
+                            )
+                            for ref in references
+                        ]
+                    else:
+                        references = []
+
+                    print(
+                        f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
+                    )
+                    print(f"[LLMService] Extracted content length: {len(content)}")
+                    print(f"[LLMService] References count: {len(references)}")
+
+                    usage = response.usage
+                    input_tokens = usage.input_tokens if usage else None
+                    output_tokens = usage.output_tokens if usage else None
+
+                    return {
+                        "success": True,
+                        "content": content,
+                        "answer": content,
+                        "references": references,
+                        "raw": response.model_dump(),
+                        "meta": {
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "model": model_id,
+                            "duration": duration,
+                            "prompt_tokens": input_tokens,
+                            "completion_tokens": output_tokens,
+                        },
+                    }
                 except Exception as e:
                     print(f"[LLMService] Structured output request failed: {e}")
                     print(f"[LLMService] Exception type: {type(e).__name__}")
@@ -267,12 +253,10 @@ class AnthropicLLMClient:
                     "model": model_id,
                 }
 
-                # Add system message if provided
                 if system:
                     request_params["system"] = system
 
-                # Add temperature if not default
-                if temperature != 1.0:  # Anthropic default is 1.0
+                if temperature != 1.0:
                     request_params["temperature"] = temperature
 
                 # Make the API call
@@ -292,9 +276,7 @@ class AnthropicLLMClient:
                     content = message.content[0].text
 
                 print(f"[LLMService] Extracted content length: {len(content)}")
-                print(f"[LLMService] Content preview: {content[:200]}...")
 
-                # Extract usage information
                 usage = message.usage
                 input_tokens = usage.input_tokens if usage else None
                 output_tokens = usage.output_tokens if usage else None
@@ -302,8 +284,8 @@ class AnthropicLLMClient:
                 return {
                     "success": True,
                     "content": content,
-                    "answer": content,  # For backward compatibility
-                    "references": [],  # Empty references if not using structured outputs
+                    "answer": content,
+                    "references": [],
                     "raw": message.model_dump(),
                     "meta": {
                         "timestamp": datetime.utcnow().isoformat(),
@@ -361,9 +343,36 @@ Prompt:
         messages = [{"role": "user", "content": user_message}]
 
         # Use structured outputs only for supported models (Sonnet 4.5 and Opus 4.1)
-        # Use Pydantic model directly with parse() method
+        # Define JSON schema for structured output
         response_json_schema = (
-            ExtractionResult if used_model_id in supported_models else None
+            {
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "type": "string",
+                        "description": "The extracted information or answer based on the prompt",
+                    },
+                    "references": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "The exact text excerpt from the markdown that was referenced",
+                                }
+                            },
+                            "required": ["text"],
+                            "additionalProperties": False,
+                        },
+                        "description": "List of specific text excerpts from the markdown that were used to generate this answer",
+                    },
+                },
+                "required": ["answer", "references"],
+                "additionalProperties": False,
+            }
+            if used_model_id in supported_models
+            else None
         )
 
         return await self._call_anthropic_api(

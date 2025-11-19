@@ -47,7 +47,7 @@ const allParsers = [
     id: "docling",
     name: "Docling",
     description:
-      "AI-powered document parsing with advanced layout understanding (PDF viewer not supported, coming soon)",
+      "Open Source document parsing with advanced layout understanding",
     requiresApiKey: false,
   },
 ];

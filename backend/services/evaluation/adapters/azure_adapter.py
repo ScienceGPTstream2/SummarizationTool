@@ -4,7 +4,8 @@ This follows the official DeepEval documentation pattern
 """
 
 import os
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Dict, Any
 from deepeval.models.base_model import DeepEvalBaseLLM
 from langchain_openai import AzureChatOpenAI
 
@@ -13,7 +14,94 @@ class AzureOpenAIDeepEvalModel(DeepEvalBaseLLM):
     """
     Custom DeepEval model adapter for Azure OpenAI using LangChain
     Follows official DeepEval documentation pattern for Azure OpenAI
+    Always reads from backend/core/secrets.toml first, then falls back to environment variables
     """
+
+    @staticmethod
+    def _load_from_secrets_toml(
+        deployment: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Load Azure OpenAI configuration from backend/core/secrets.toml
+
+        Args:
+            deployment: Optional deployment name to find specific model
+
+        Returns:
+            Dict with deployment, endpoint, api_key, api_version, model_name or None
+        """
+        try:
+            import toml
+
+            # Find secrets.toml in backend/core/ directory
+            # Navigate from azure_adapter.py -> adapters/ -> evaluation/ -> services/ -> backend/ -> core/
+            current_file = Path(__file__).resolve()
+            # From file -> parent (adapters/) -> parent (evaluation/) -> parent (services/) -> parent (backend/)
+            backend_path = current_file.parent.parent.parent.parent
+            secrets_path = backend_path / "core" / "secrets.toml"
+
+            # If not found, try alternative path resolution
+            if not secrets_path.exists():
+                # Walk up the directory tree to find backend/
+                search_path = current_file.parent
+                while search_path.parent != search_path:
+                    if search_path.name == "backend":
+                        secrets_path = search_path / "core" / "secrets.toml"
+                        break
+                    search_path = search_path.parent
+
+            if not secrets_path.exists():
+                return None
+
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                cfg = toml.load(f)
+
+            azure_cfg = cfg.get("azure_openai", {}) or {}
+
+            # Support new format: [[azure_openai.models]] array
+            models = azure_cfg.get("models", [])
+            if models:
+                # If deployment specified, find that model
+                if deployment:
+                    for model in models:
+                        if model.get("deployment") == deployment:
+                            return {
+                                "deployment": model.get("deployment"),
+                                "endpoint": model.get("endpoint"),
+                                "api_key": model.get("api_key"),
+                                "api_version": model.get("api_version"),
+                                "model_name": model.get("model_name")
+                                or model.get("deployment"),
+                            }
+
+                # If no deployment specified or not found, use first model
+                if models:
+                    first_model = models[0]
+                    return {
+                        "deployment": first_model.get("deployment"),
+                        "endpoint": first_model.get("endpoint"),
+                        "api_key": first_model.get("api_key"),
+                        "api_version": first_model.get("api_version"),
+                        "model_name": first_model.get("model_name")
+                        or first_model.get("deployment"),
+                    }
+
+            # Fall back to old format: [azure_openai] section
+            if azure_cfg:
+                return {
+                    "deployment": azure_cfg.get("deployment")
+                    or azure_cfg.get("model_name"),
+                    "endpoint": azure_cfg.get("endpoint"),
+                    "api_key": azure_cfg.get("api_key"),
+                    "api_version": azure_cfg.get("api_version"),
+                    "model_name": azure_cfg.get("model_name"),
+                }
+
+        except Exception as e:
+            # Silently fail and fall back to environment variables
+            pass
+
+        return None
 
     def __init__(
         self,
@@ -28,6 +116,10 @@ class AzureOpenAIDeepEvalModel(DeepEvalBaseLLM):
         """
         Initialize Azure OpenAI adapter for DeepEval
 
+        Always reads from backend/core/secrets.toml first, then falls back to:
+        1. Provided parameters
+        2. Environment variables
+
         Args:
             deployment: Azure deployment name
             endpoint: Azure OpenAI endpoint
@@ -37,25 +129,49 @@ class AzureOpenAIDeepEvalModel(DeepEvalBaseLLM):
             temperature: Temperature for generation (None = use model default, typically 1.0 for GPT-5 Mini)
             max_tokens: Max tokens for generation (default 2048)
         """
+        # Load from secrets.toml first
+        secrets_config = self._load_from_secrets_toml(deployment=deployment)
+
+        # Use provided parameters, then secrets.toml, then environment variables
         self.deployment = (
             deployment
+            or (secrets_config.get("deployment") if secrets_config else None)
             or os.getenv("AZURE_OPENAI_DEPLOYMENT")
             or os.getenv("AZURE_OPENAI_MODEL_NAME")
         )
-        self.endpoint = endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
-        self.api_key = api_key or os.getenv("AZURE_OPENAI_KEY")
-        self.api_version = api_version or os.getenv(
-            "AZURE_OPENAI_API_VERSION", "2024-12-01-preview"
+
+        self.endpoint = (
+            endpoint
+            or (secrets_config.get("endpoint") if secrets_config else None)
+            or os.getenv("AZURE_OPENAI_ENDPOINT")
         )
-        self._model_name = model_name or os.getenv(
-            "AZURE_OPENAI_MODEL_NAME", "gpt-5-mini"
+
+        self.api_key = (
+            api_key
+            or (secrets_config.get("api_key") if secrets_config else None)
+            or os.getenv("AZURE_OPENAI_KEY")
         )
+
+        self.api_version = (
+            api_version
+            or (secrets_config.get("api_version") if secrets_config else None)
+            or os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        )
+
+        self._model_name = (
+            model_name
+            or (secrets_config.get("model_name") if secrets_config else None)
+            or os.getenv("AZURE_OPENAI_MODEL_NAME", "gpt-5-mini")
+        )
+
         self.temperature = temperature
         self.max_tokens = max_tokens
 
         if not self.endpoint or not self.api_key or not self.deployment:
             raise ValueError(
-                "Azure OpenAI endpoint, api_key, and deployment must be provided"
+                f"Azure OpenAI configuration incomplete. "
+                f"Missing: endpoint={bool(self.endpoint)}, api_key={bool(self.api_key)}, deployment={bool(self.deployment)}. "
+                f"Please check backend/core/secrets.toml or environment variables."
             )
 
         # Initialize LangChain Azure ChatOpenAI
