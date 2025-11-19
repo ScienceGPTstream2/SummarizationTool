@@ -9,7 +9,10 @@ from schemas.extractions import ExtractRequest, Entity
 from services.document.document_service import DocumentService
 from services.llm.llm_service import LLMService
 from services.document.processors.azure_doc_intelligence.bounding_box_matcher import (
-    match_references_to_bounding_boxes,
+    match_references_to_bounding_boxes as match_azure_references,
+)
+from services.document.processors.docling.bounding_box_matcher import (
+    match_references_to_bounding_boxes as match_docling_references,
 )
 
 router = APIRouter(prefix="/api", tags=["extractions"])
@@ -30,7 +33,8 @@ async def extract_entities(request: ExtractRequest):
         markdown = None
         raw_analysis = None
 
-        if request.processor_used == "azure_doc_intelligence":
+        # Fetch raw_analysis for processors that support bounding box matching
+        if request.processor_used in ["azure_doc_intelligence", "docling"]:
             raw_analysis = await document_service.get_raw_analysis_result(
                 request.conversion_id
             )
@@ -78,8 +82,8 @@ async def extract_entities(request: ExtractRequest):
                 if references:
                     response_data["references"] = references
 
-                    # Try to add bounding boxes if using Azure Document Intelligence
-                    if request.processor_used == "azure_doc_intelligence":
+                    # Try to add bounding boxes if processor supports it
+                    if request.processor_used in ["azure_doc_intelligence", "docling"]:
                         try:
                             # Use the raw_analysis we already fetched, or fetch it if not available
                             if not raw_analysis:
@@ -89,11 +93,20 @@ async def extract_entities(request: ExtractRequest):
                                     )
                                 )
                             if raw_analysis:
-                                # Match references to bounding boxes
-                                matched_references = match_references_to_bounding_boxes(
-                                    references=references,
-                                    raw_analysis=raw_analysis,
-                                )
+                                # Match references to bounding boxes based on processor
+                                if request.processor_used == "azure_doc_intelligence":
+                                    matched_references = match_azure_references(
+                                        references=references,
+                                        raw_analysis=raw_analysis,
+                                    )
+                                elif request.processor_used == "docling":
+                                    matched_references = match_docling_references(
+                                        references=references,
+                                        raw_analysis=raw_analysis,
+                                    )
+                                else:
+                                    matched_references = references
+
                                 response_data["references"] = matched_references
                         except Exception as e:
                             # If bounding box matching fails, still return references without bboxes

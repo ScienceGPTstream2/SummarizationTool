@@ -112,9 +112,9 @@ async def get_available_models():
                 if deployment and model_name:
                     # Map model names to their characteristics
                     model_descriptions = {
-                        "gpt-4o": "Balanced (fast + reasoning)",
+                        "gpt-4o": "Ultra-fast",
                         "gpt-5-mini": "Fast",
-                        "gpt-5-nano": "Ultra-fast",
+                        "gpt-5-nano": "Fast",
                         "o3-mini": "Reasoning",
                         "o4-mini": "Fast",
                         "o3": "Reasoning",
@@ -144,9 +144,9 @@ async def get_available_models():
         if deployment and model_name:
             # Map model names to their characteristics
             model_descriptions = {
-                "gpt-4o": "Balanced (fast + reasoning)",
+                "gpt-4o": "Ultra-fast",
                 "gpt-5-mini": "Fast",
-                "gpt-5-nano": "Ultra-fast",
+                "gpt-5-nano": "Fast",
                 "o3-mini": "Reasoning",
                 "o4-mini": "Fast",
                 "o3": "Reasoning",
