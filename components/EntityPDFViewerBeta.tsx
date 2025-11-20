@@ -323,7 +323,7 @@ export function EntityPDFViewerBeta({
         if (containerRef.current) {
           const page = await pdf.getPage(1);
           const viewport = page.getViewport({ scale: 1.0 });
-          const containerWidth = containerRef.current.clientWidth - 64; // Account for padding
+          const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
           const calculatedScale = containerWidth / viewport.width;
           setFitToWidthScale(calculatedScale);
           setZoomRatio(1); // fit-to-width baseline
@@ -352,7 +352,7 @@ export function EntityPDFViewerBeta({
       try {
         const page = await pdfDocument.getPage(currentPage);
         const viewport = page.getViewport({ scale: 1.0 });
-        const containerWidth = containerRef.current.clientWidth - 64; // Account for padding
+        const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
         const calculatedScale = containerWidth / viewport.width;
         setFitToWidthScale(calculatedScale);
       } catch (err) {
@@ -362,26 +362,36 @@ export function EntityPDFViewerBeta({
 
     updateFitToWidth();
 
-    // Also update on window resize
-    const handleResize = () => {
+    updateFitToWidth();
+
+    // Use ResizeObserver for more robust container resizing detection
+    const resizeObserver = new ResizeObserver(() => {
       updateFitToWidth();
-    };
-    window.addEventListener("resize", handleResize);
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
     };
   }, [pdfDocument, currentPage]);
 
   // Render current page with bounding boxes
   useEffect(() => {
     let renderTask: any = null;
+    let isCancelled = false;
 
     const renderPage = async () => {
       if (!pdfDocument || !canvasRef.current) return;
 
       try {
         const page = await pdfDocument.getPage(currentPage);
+
+        // Check if cancelled after async operation
+        if (isCancelled) return;
+
         const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
@@ -406,12 +416,16 @@ export function EntityPDFViewerBeta({
         setCurrentViewportHeight(viewport.height);
 
         // Set actual canvas size in memory (physical pixels)
+        // This normally clears the canvas, but we'll be explicit just in case
         canvas.width = scaledViewport.width;
         canvas.height = scaledViewport.height;
 
         // Enable high-quality image smoothing for better rendering
         context.imageSmoothingEnabled = true;
         context.imageSmoothingQuality = "high";
+
+        // Explicitly clear canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
 
         // Reset transform and scale context to match scaled viewport
         context.setTransform(1, 0, 0, 1, 0, 0);
@@ -426,18 +440,20 @@ export function EntityPDFViewerBeta({
 
         // Draw bounding boxes AFTER PDF is fully rendered (only if enabled)
         // Small delay ensures canvas is ready
-        if (showBoundingBoxes) {
+        if (showBoundingBoxes && !isCancelled) {
           requestAnimationFrame(() => {
-            drawReferenceBoundingBoxes(
-              context,
-              currentPage,
-              viewport.height,
-              devicePixelRatio
-            );
+            if (!isCancelled) {
+              drawReferenceBoundingBoxes(
+                context,
+                currentPage,
+                viewport.height,
+                devicePixelRatio
+              );
+            }
           });
         }
       } catch (err: any) {
-        if (err?.name !== "RenderingCancelledException") {
+        if (err?.name !== "RenderingCancelledException" && !isCancelled) {
           console.error("Error rendering page:", err);
         }
       }
@@ -446,6 +462,7 @@ export function EntityPDFViewerBeta({
     renderPage();
 
     return () => {
+      isCancelled = true;
       if (renderTask) {
         renderTask.cancel();
       }
