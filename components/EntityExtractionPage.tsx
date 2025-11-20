@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -45,6 +45,8 @@ import {
   MapPin,
   Hash,
   Timer,
+  StopCircle,
+  RefreshCw,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -124,6 +126,7 @@ export function EntityExtractionPage({
   const [completedEntities, setCompletedEntities] = useState<Set<string>>(
     new Set()
   );
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [showRerunDialog, setShowRerunDialog] = useState(false);
   const [currentEntityIndex, setCurrentEntityIndex] = useState(0);
   const [isGeneratingParagraph, setIsGeneratingParagraph] = useState(false);
@@ -217,22 +220,237 @@ export function EntityExtractionPage({
     setEntities(updated);
   };
 
-  const handleRunSummarizationClick = () => {
-    // Check if results already exist
-    if (showResults && entities.some((e) => e.extracted)) {
-      setShowRerunDialog(true);
-    } else {
-      handleRunSummarization();
+  const handleStopExtraction = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsExtracting(false);
+      setIsGeneratingParagraph(false);
+      setExtractingEntities(new Set());
     }
   };
 
-  const handleRunSummarization = async () => {
+  const extractSingleEntity = async (
+    entity: Entity,
+    index: number,
+    signal: AbortSignal,
+    conversionId: string,
+    modelConfig: {
+      modelType: string;
+      modelId?: string;
+      deployment?: string;
+      apiVersion?: string;
+    },
+    token: string
+  ) => {
+    try {
+      // Mark entity as extracting
+      setExtractingEntities((prev) => new Set(prev).add(entity.name));
+      console.log(`\n🔄 Extracting: ${entity.name}...`);
+
+      const resp = await fetch("/api/extract", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversion_id: conversionId,
+          model_type: modelConfig.modelType,
+          model_id: modelConfig.modelId,
+          deployment: modelConfig.deployment,
+          api_version: modelConfig.apiVersion,
+          entities: [entity], // Extract only this entity
+          max_tokens: 4096,
+          temperature: 0.0,
+          processor_used: documentData.processorUsed,
+        }),
+        signal,
+      });
+
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        const detail =
+          errBody.detail || errBody.error || "Extraction request failed";
+        throw new Error(detail);
+      }
+
+      const data = await resp.json();
+      const extractedEntities = data.extracted_entities || [];
+
+      // Update this specific entity
+      let updatedEntity = { ...entity };
+      if (extractedEntities.length > 0) {
+        const extracted = extractedEntities[0];
+        const meta = extracted.meta || {};
+        updatedEntity = {
+          ...entity,
+          extracted: extracted.extracted,
+          answer: extracted.answer || extracted.extracted,
+          references: extracted.references || [],
+          duration: meta.duration,
+          promptTokens: meta.prompt_tokens,
+          completionTokens: meta.completion_tokens,
+        };
+
+        console.log(
+          `✅ ${entity.name}: ${extracted.extracted.substring(0, 50)}...`
+        );
+      } else {
+        updatedEntity = {
+          ...entity,
+          extracted: "Error: Not found in response",
+        };
+      }
+
+      // Update UI immediately with this entity's result
+      setEntities((prev) => {
+        const newEntities = [...prev];
+        newEntities[index] = updatedEntity;
+        return newEntities;
+      });
+
+      // Mark entity as completed
+      setExtractingEntities((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(entity.name);
+        return newSet;
+      });
+      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+
+      return updatedEntity;
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.log(`Extraction aborted for ${entity.name}`);
+        throw err;
+      }
+      console.error(`Error extracting ${entity.name}:`, err);
+      const errorEntity = {
+        ...entity,
+        extracted: `Error: ${err.message}`,
+      };
+
+      // Update UI with error
+      setEntities((prev) => {
+        const newEntities = [...prev];
+        newEntities[index] = errorEntity;
+        return newEntities;
+      });
+
+      // Mark as completed (with error)
+      setExtractingEntities((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(entity.name);
+        return newSet;
+      });
+      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+      return errorEntity;
+    }
+  };
+
+  const handleRunSingleEntity = async (index: number) => {
+    if (isExtracting) return;
+
+    const entity = entities[index];
+    if (!entity.name || !entity.prompt) return;
+
+    setIsExtracting(true);
+    setShowResults(true); // Show results section immediately so user can see progress/continue
+    // Don't reset all completed entities, just this one if it was completed
+    setCompletedEntities((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(entity.name);
+      return newSet;
+    });
+
+    // Create new abort controller
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const conversionId = documentData.conversionId;
+      if (!conversionId) {
+        throw new Error(
+          "No conversion ID available. Please run document processing first."
+        );
+      }
+
+      const modelObj = availableModels.find((m) => m.id === selectedModel);
+      let modelTypeToUse = "azure";
+      if (modelObj?.category === "google") {
+        modelTypeToUse = "gemini";
+      } else if (modelObj?.category === "anthropic") {
+        modelTypeToUse = "anthropic";
+      }
+
+      const token = localStorage.getItem("token") || "";
+
+      const updatedEntity = await extractSingleEntity(
+        entity,
+        index,
+        abortControllerRef.current.signal,
+        conversionId,
+        {
+          modelType: modelTypeToUse,
+          modelId: modelObj?.id,
+          deployment: modelObj?.deployment,
+          apiVersion: modelObj?.api_version,
+        },
+        token
+      );
+
+      // Update parent state with the new entity
+      setDocumentData({
+        ...documentData,
+        entities: entities.map((e, i) => (i === index ? updatedEntity : e)),
+      });
+    } catch (err: any) {
+      if (err.name !== "AbortError") {
+        alert(`Extraction failed: ${err.message}`);
+      }
+    } finally {
+      setIsExtracting(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleRunSummarizationClick = () => {
+    // Check if all entities are already extracted
+    const allExtracted = entities.every(
+      (e) => e.extracted && !e.extracted.startsWith("Error:")
+    );
+
+    if (allExtracted && showResults) {
+      setShowRerunDialog(true);
+    } else {
+      // Run only missing entities (or all if none extracted)
+      handleRunSummarization(false);
+    }
+  };
+
+  const handleRunSummarization = async (rerunAll = true) => {
     setShowRerunDialog(false); // Close dialog if it was open
     setIsExtracting(true);
     setShowResults(true); // Show results section immediately
-    setExtractingEntities(new Set());
-    setCompletedEntities(new Set());
-    setCurrentEntityIndex(0);
+
+    if (rerunAll) {
+      setExtractingEntities(new Set());
+      setCompletedEntities(new Set());
+      setCurrentEntityIndex(0);
+    } else {
+      // If not rerunning all, mark existing successful extractions as completed
+      const completed = new Set(
+        entities
+          .filter((e) => e.extracted && !e.extracted.startsWith("Error:"))
+          .map((e) => e.name)
+      );
+      setCompletedEntities(completed);
+    }
+
+    // Create new abort controller
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
+    const updatedEntities = [...entities];
 
     try {
       // Ensure we have a conversion id (markdown stored) or fallback to existing extractedText
@@ -242,8 +460,6 @@ export function EntityExtractionPage({
           "No conversion ID available. Please run document processing first so the markdown is available."
         );
       }
-
-      const updatedEntities = [...entities];
 
       const modelObj = availableModels.find((m) => m.id === selectedModel);
       // Determine model_type based on category
@@ -257,89 +473,40 @@ export function EntityExtractionPage({
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
-      // All API keys and configuration are read from backend secrets.toml
-      // No need to send API keys from frontend
-
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || "";
 
       // Process entities one by one (sequentially) for real-time feedback
       for (let i = 0; i < updatedEntities.length; i++) {
+        if (signal.aborted) break;
+
         const entity = updatedEntities[i];
 
-        // Update progress
+        // Skip if not rerunning all AND already extracted successfully
+        if (
+          !rerunAll &&
+          entity.extracted &&
+          !entity.extracted.startsWith("Error:")
+        ) {
+          continue;
+        }
+
         setCurrentEntityIndex(i + 1);
 
-        // Mark entity as extracting
-        setExtractingEntities((prev) => new Set(prev).add(entity.name));
-
-        console.log(`\n🔄 Extracting: ${entity.name}...`);
-
         try {
-          // Extract single entity
-          const resp = await fetch("/api/extract", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              conversion_id: conversionId,
-              model_type: modelTypeToUse,
-              model_id: modelIdToUse,
+          const updatedEntity = await extractSingleEntity(
+            entity,
+            i,
+            signal,
+            conversionId,
+            {
+              modelType: modelTypeToUse,
+              modelId: modelIdToUse,
               deployment: deploymentToUse,
-              api_version: apiVersionToUse,
-              entities: [entity], // Extract only this entity
-              max_tokens: 4096,
-              temperature: 0.0,
-              processor_used: documentData.processorUsed,
-              // All API keys and configuration are read from backend secrets.toml
-            }),
-          });
-
-          if (!resp.ok) {
-            const errBody = await resp.json().catch(() => ({}));
-            const detail =
-              errBody.detail || errBody.error || "Extraction request failed";
-            throw new Error(detail);
-          }
-
-          const data = await resp.json();
-          const extractedEntities = data.extracted_entities || [];
-
-          // Update this specific entity
-          if (extractedEntities.length > 0) {
-            const extracted = extractedEntities[0];
-            const meta = extracted.meta || {};
-            updatedEntities[i] = {
-              ...entity,
-              extracted: extracted.extracted,
-              answer: extracted.answer || extracted.extracted,
-              references: extracted.references || [],
-              duration: meta.duration,
-              promptTokens: meta.prompt_tokens,
-              completionTokens: meta.completion_tokens,
-            };
-
-            console.log(
-              `✅ ${entity.name}: ${extracted.extracted.substring(0, 50)}...`
-            );
-          } else {
-            updatedEntities[i] = {
-              ...entity,
-              extracted: "Error: Not found in response",
-            };
-          }
-
-          // Update UI immediately with this entity's result
-          setEntities([...updatedEntities]);
-
-          // Mark entity as completed
-          setExtractingEntities((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(entity.name);
-            return newSet;
-          });
-          setCompletedEntities((prev) => new Set(prev).add(entity.name));
+              apiVersion: apiVersionToUse,
+            },
+            token
+          );
+          updatedEntities[i] = updatedEntity;
 
           // Auto-scroll to the completed entity card
           setTimeout(() => {
@@ -352,24 +519,12 @@ export function EntityExtractionPage({
             }
           }, 100);
         } catch (err: any) {
-          console.error(`Error extracting ${entity.name}:`, err);
-          updatedEntities[i] = {
-            ...entity,
-            extracted: `Error: ${err.message}`,
-          };
-
-          // Update UI with error
-          setEntities([...updatedEntities]);
-
-          // Mark as completed (with error)
-          setExtractingEntities((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(entity.name);
-            return newSet;
-          });
-          setCompletedEntities((prev) => new Set(prev).add(entity.name));
+          if (err.name === "AbortError") throw err;
+          // Continue to next entity if one fails (unless aborted)
         }
       }
+
+      if (signal.aborted) return;
 
       console.log(
         "\n✅ All entities extracted! Generating paragraph summary...\n"
@@ -395,8 +550,8 @@ export function EntityExtractionPage({
           model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
-          // All API keys and configuration are read from backend secrets.toml
         }),
+        signal,
       });
 
       if (!summaryResp.ok) {
@@ -423,11 +578,32 @@ export function EntityExtractionPage({
 
       setEntities(updatedEntities);
     } catch (err: any) {
-      console.error("Extraction error:", err);
-      alert(`Extraction failed: ${err.message}`);
+      if (err.name === "AbortError") {
+        console.log("Summarization aborted");
+        // Save partial results with all current state
+        setDocumentData({
+          ...documentData,
+          studyType: selectedStudyType,
+          selectedModel: selectedModel,
+          entities: updatedEntities,
+          summaryPrompt: summaryPrompt,
+        });
+      } else {
+        console.error("Extraction error:", err);
+        alert(`Extraction failed: ${err.message}`);
+        // Save partial results even on error
+        setDocumentData({
+          ...documentData,
+          studyType: selectedStudyType,
+          selectedModel: selectedModel,
+          entities: updatedEntities,
+          summaryPrompt: summaryPrompt,
+        });
+      }
     } finally {
       setIsExtracting(false);
       setIsGeneratingParagraph(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -494,7 +670,7 @@ export function EntityExtractionPage({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleRunSummarization}
+              onClick={() => handleRunSummarization(true)}
               className="bg-orange-600 hover:bg-orange-700"
             >
               Yes, Re-run Summarization
@@ -697,10 +873,37 @@ export function EntityExtractionPage({
                             size="sm"
                             className="h-7 px-2 text-muted-foreground"
                             onClick={() => removeEntity(index)}
+                            disabled={isExtracting}
                           >
                             <X className="h-4 w-4" />
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                          onClick={() => handleRunSingleEntity(index)}
+                          disabled={
+                            isExtracting ||
+                            !entity.name ||
+                            !entity.prompt ||
+                            !selectedModel
+                          }
+                          title={
+                            entity.extracted
+                              ? "Re-run this entity"
+                              : "Run this entity"
+                          }
+                        >
+                          {isExtracting &&
+                          extractingEntities.has(entity.name) ? (
+                            <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                          ) : entity.extracted ? (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          ) : (
+                            <PlayCircle className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
                       </div>
                     </div>
 
@@ -962,57 +1165,73 @@ export function EntityExtractionPage({
                   </p>
                 </CardContent>
               </Card>
-              <Button
-                variant="outline"
-                onClick={handleRunSummarizationClick}
-                disabled={
-                  isExtracting ||
-                  entities.length === 0 ||
-                  entities.some((e) => !e.name || !e.prompt) ||
-                  !selectedModel ||
-                  availableModels.length === 0
-                }
-                className={`w-full transition-all duration-300 ${
-                  isExtracting ? "bg-blue-50 border-blue-300 shadow-lg" : ""
-                }`}
-                size="lg"
-              >
-                {isExtracting ? (
-                  isGeneratingParagraph ? (
-                    <>
-                      <div className="relative mr-2">
-                        <Sparkles className="h-5 w-5 animate-spin text-blue-600" />
-                        <div className="absolute inset-0 animate-ping opacity-40">
-                          <Sparkles className="h-5 w-5 text-blue-600" />
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={handleRunSummarizationClick}
+                  disabled={
+                    (isExtracting && !abortControllerRef.current) ||
+                    entities.length === 0 ||
+                    entities.some((e) => !e.name || !e.prompt) ||
+                    !selectedModel ||
+                    availableModels.length === 0
+                  }
+                  className={`flex-1 transition-all duration-300 ${
+                    isExtracting ? "bg-blue-50 border-blue-300 shadow-lg" : ""
+                  }`}
+                  size="lg"
+                >
+                  {isExtracting ? (
+                    isGeneratingParagraph ? (
+                      <>
+                        <div className="relative mr-2">
+                          <Sparkles className="h-5 w-5 animate-spin text-blue-600" />
+                          <div className="absolute inset-0 animate-ping opacity-40">
+                            <Sparkles className="h-5 w-5 text-blue-600" />
+                          </div>
                         </div>
-                      </div>
-                      <span className="font-medium">
-                        Generating Paragraph Summary...
-                      </span>
-                    </>
+                        <span className="font-medium">
+                          Generating Paragraph Summary...
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="relative mr-2">
+                          <Sparkles className="h-5 w-5 animate-spin text-blue-600" />
+                          <div className="absolute inset-0 animate-ping opacity-40">
+                            <Sparkles className="h-5 w-5 text-blue-600" />
+                          </div>
+                        </div>
+                        <span className="font-medium">
+                          Extracting Entity {currentEntityIndex} of{" "}
+                          {entities.length}...
+                        </span>
+                      </>
+                    )
                   ) : (
                     <>
-                      <div className="relative mr-2">
-                        <Sparkles className="h-5 w-5 animate-spin text-blue-600" />
-                        <div className="absolute inset-0 animate-ping opacity-40">
-                          <Sparkles className="h-5 w-5 text-blue-600" />
-                        </div>
-                      </div>
+                      <PlayCircle className="h-5 w-5 mr-2" />
                       <span className="font-medium">
-                        Extracting Entity {currentEntityIndex} of{" "}
-                        {entities.length}...
+                        Run Entity Extraction & Generate Paragraph
                       </span>
                     </>
-                  )
-                ) : (
-                  <>
-                    <PlayCircle className="h-5 w-5 mr-2" />
-                    <span className="font-medium">
-                      Run Entity Extraction & Generate Paragraph
-                    </span>
-                  </>
+                  )}
+                </Button>
+
+                {isExtracting && (
+                  <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                    <Button
+                      variant="destructive"
+                      size="lg"
+                      onClick={handleStopExtraction}
+                      className="px-8 py-6 rounded-full shadow-2xl text-lg font-semibold hover:scale-105 transition-transform ring-4 ring-white/20 backdrop-blur-sm"
+                    >
+                      <StopCircle className="h-6 w-6 mr-2 animate-pulse" />
+                      Stop Extraction
+                    </Button>
+                  </div>
                 )}
-              </Button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -1101,7 +1320,15 @@ export function EntityExtractionPage({
                 </CardHeader>
                 <CardContent>
                   <Button
-                    onClick={() => onComplete?.(documentData)}
+                    onClick={() =>
+                      onComplete?.({
+                        ...documentData,
+                        studyType: selectedStudyType,
+                        selectedModel: selectedModel,
+                        entities: entities,
+                        summaryPrompt: summaryPrompt,
+                      })
+                    }
                     variant="default"
                     className="w-full bg-green-600 hover:bg-green-700"
                   >
