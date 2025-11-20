@@ -332,7 +332,7 @@ export function PDFBoundingBoxViewer({
       try {
         const page = await pdfDocument.getPage(currentPage);
         const viewport = page.getViewport({ scale: 1.0 });
-        const containerWidth = containerRef.current.clientWidth - 64; // padding
+        const containerWidth = containerRef.current.clientWidth - 48; // padding (32px) + buffer
         const calculatedScale = containerWidth / viewport.width;
         setFitToWidthScale(calculatedScale);
         if (isFitWidth) {
@@ -345,13 +345,19 @@ export function PDFBoundingBoxViewer({
 
     calculateFitToWidth();
 
-    const handleResize = () => {
-      calculateFitToWidth();
-    };
+    calculateFitToWidth();
 
-    window.addEventListener("resize", handleResize);
+    // Use ResizeObserver for more robust container resizing detection
+    const resizeObserver = new ResizeObserver(() => {
+      calculateFitToWidth();
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
     };
   }, [pdfDocument, currentPage, isFitWidth]);
 
@@ -363,12 +369,17 @@ export function PDFBoundingBoxViewer({
   // Render current page with high quality
   useEffect(() => {
     let renderTask: any = null;
+    let isCancelled = false;
 
     const renderPage = async () => {
       if (!pdfDocument || !canvasRef.current) return;
 
       try {
         const page = await pdfDocument.getPage(currentPage);
+
+        // Check if cancelled after async operation
+        if (isCancelled) return;
+
         const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
@@ -392,8 +403,12 @@ export function PDFBoundingBoxViewer({
         canvas.style.height = `${viewport.height}px`;
 
         // Set actual size in memory (scaled for high-DPI)
+        // This normally clears the canvas, but we'll be explicit just in case
         canvas.width = viewport.width * devicePixelRatio;
         canvas.height = viewport.height * devicePixelRatio;
+
+        // Explicitly clear canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
 
         context.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -407,11 +422,11 @@ export function PDFBoundingBoxViewer({
         await renderTask.promise;
 
         // Draw bounding boxes if enabled and data is ready
-        if (showBoundingBoxes && analysisResult) {
+        if (showBoundingBoxes && analysisResult && !isCancelled) {
           drawBoundingBoxes(context, currentPage);
         }
       } catch (err: any) {
-        if (err?.name !== "RenderingCancelledException") {
+        if (err?.name !== "RenderingCancelledException" && !isCancelled) {
           console.error("Error rendering page:", err);
         }
       }
@@ -421,6 +436,7 @@ export function PDFBoundingBoxViewer({
 
     // Cleanup: cancel render on unmount or when dependencies change
     return () => {
+      isCancelled = true;
       if (renderTask) {
         renderTask.cancel();
       }

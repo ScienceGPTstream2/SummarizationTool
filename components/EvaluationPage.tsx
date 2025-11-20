@@ -1094,7 +1094,9 @@ export function EvaluationPage({
                             <div className="flex items-center justify-between pb-2 border-b">
                               <span className="text-sm text-muted-foreground">
                                 {anthropicProviders.length} model
-                                {anthropicProviders.length !== 1 ? "s" : ""}{" "}
+                                {anthropicProviders.length !== 1
+                                  ? "s"
+                                  : ""}{" "}
                                 available
                               </span>
                               <Button
