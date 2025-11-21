@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
+import hashlib
 
 
 class FileService:
@@ -25,17 +26,23 @@ class FileService:
         self.upload_dir.mkdir(exist_ok=True)
         self.metadata_dir.mkdir(exist_ok=True)
 
-    async def save_uploaded_file(self, filename: str, content: bytes) -> str:
+    async def save_uploaded_file(
+        self, filename: str, content: bytes, file_hash: Optional[str] = None
+    ) -> str:
         """
         Save an uploaded file to the local storage
 
         Args:
             filename: Original filename
             content: File content as bytes
+            file_hash: SHA-256 hash of the file content (optional, will be calculated if not provided)
 
         Returns:
             str: Path to the saved file
         """
+        if not file_hash:
+            file_hash = hashlib.sha256(content).hexdigest()
+
         file_id = str(uuid.uuid4())
 
         safe_filename = self._create_safe_filename(filename)
@@ -50,6 +57,7 @@ class FileService:
             "safe_filename": safe_filename,
             "file_path": str(file_path),
             "file_size": len(content),
+            "file_hash": file_hash,
             "upload_time": datetime.now().isoformat(),
             "mime_type": "application/pdf",
         }
@@ -57,6 +65,25 @@ class FileService:
         await self._save_metadata(file_id, metadata)
 
         return str(file_path)
+
+    async def get_file_by_hash(self, file_hash: str) -> Optional[Dict[str, Any]]:
+        """
+        Check if a file with the given hash already exists
+
+        Args:
+            file_hash: SHA-256 hash of the file
+
+        Returns:
+            Metadata dictionary of the existing file or None
+        """
+        # In a real database, this would be an indexed query.
+        # For file-based storage, we iterate through metadata files.
+        # This is acceptable for the expected scale of this demo/tool.
+        files = await self.list_files()
+        for file_data in files:
+            if file_data.get("file_hash") == file_hash:
+                return file_data
+        return None
 
     async def get_file_info(self, file_path: str) -> Dict[str, Any]:
         """

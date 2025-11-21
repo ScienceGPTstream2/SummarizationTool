@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
-import { Code, AlertCircle } from "lucide-react";
+import { Code, AlertCircle, Download } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface RawOutputViewerProps {
   conversionId: string | null;
@@ -50,6 +51,19 @@ export function RawOutputViewer({
     fetchMarkdownContent();
   }, [conversionId]);
 
+  const handleDownload = () => {
+    if (!markdownContent) return;
+    const blob = new Blob([markdownContent], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${conversionId || "document"}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   if (error) {
     return (
       <Card className="border-gray-200">
@@ -71,15 +85,23 @@ export function RawOutputViewer({
   return (
     <Card className="border-gray-200 shadow-sm">
       <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Code className="h-5 w-5 text-purple-600" />
-          <span className="font-bold">Markdown Output</span>
-          {processorUsed && (
-            <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200">
-              {processorUsed}
-            </span>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Code className="h-5 w-5 text-purple-600" />
+            <span className="font-bold">Markdown Output</span>
+            {processorUsed && (
+              <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200">
+                {processorUsed}
+              </span>
+            )}
+          </CardTitle>
+          {markdownContent && (
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="h-4 w-4 mr-2" />
+              Download MD
+            </Button>
           )}
-        </CardTitle>
+        </div>
       </CardHeader>
       <CardContent className="pt-6">
         {!markdownContent && !loading && (
