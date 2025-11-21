@@ -10,6 +10,7 @@ import { Settings, ArrowLeft } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { getValidToken } from "./utils/authUtils";
+import { Toaster } from "./components/ui/sonner";
 
 export type Step =
   | "login"
@@ -75,6 +76,23 @@ export interface DocumentData {
     selectedProviders?: string[];
     customEvaluationSteps?: Record<string, string[]>;
   };
+  uploadedFiles?: Array<{
+    file: File;
+    fileId: string;
+    uploadResult: any;
+    status?: "pending" | "processing" | "completed" | "error";
+    processingResult?: {
+      conversionId?: string;
+      markdownPath?: string;
+      processorUsed?: string;
+      figures?: any[];
+      figuresCount?: number;
+      tablesCount?: number;
+      extractedText?: string;
+    };
+    selectedParser?: string;
+    error?: string;
+  }>;
 }
 
 export default function App() {
@@ -91,6 +109,7 @@ export default function App() {
     selectedModel: "",
     entities: [],
     finalSummary: "",
+    uploadedFiles: [],
   });
 
   const handleLogin = async (jwt: string) => {
@@ -183,8 +202,8 @@ export default function App() {
   return (
     <ThemeProvider>
       <div className="min-h-screen bg-background text-foreground">
-        <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-4">
+        <header className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">
+          <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-medium text-foreground">
                 AI Document Summarization Tool
@@ -252,6 +271,7 @@ export default function App() {
         <main className="container mx-auto px-4 py-8 bg-background">
           {renderStep()}
         </main>
+        <Toaster />
       </div>
     </ThemeProvider>
   );

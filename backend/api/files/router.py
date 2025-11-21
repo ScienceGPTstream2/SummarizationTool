@@ -1,6 +1,7 @@
 """File management API endpoints"""
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Request
+import hashlib
 from fastapi.responses import JSONResponse, FileResponse
 
 from core.dependencies import get_current_user
@@ -67,11 +68,19 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
         # Validate file size (20MB limit)
 
+        # Validate file size (20MB limit)
         if file_size > 20 * 1024 * 1024:  # 20MB in bytes
             raise HTTPException(status_code=400, detail="File size exceeds 20MB limit")
 
+        # Check for duplicate file - REMOVED per user request
+        # We only check for duplicates in the current session (frontend side).
+        # Historical duplicates on the server are allowed (treated as new uploads).
+        file_hash = hashlib.sha256(content).hexdigest()
+
         # Save file using file service
-        file_path = await file_service.save_uploaded_file(file.filename, content)
+        file_path = await file_service.save_uploaded_file(
+            file.filename, content, file_hash=file_hash
+        )
         file_info = await file_service.get_file_info(file_path)
 
         print(f"[UPLOAD] ✅ PDF validated and saved: {file_info['file_id']}")

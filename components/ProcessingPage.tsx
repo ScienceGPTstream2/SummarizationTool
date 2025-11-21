@@ -1,26 +1,27 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Alert, AlertDescription } from "./ui/alert";
-import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { DocumentData } from "../App";
-import { settingsManager } from "./SettingsManager";
+import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
 import { FigureGallery } from "./FigureGallery";
 import { TablesGallery } from "./TablesGallery";
-import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
+
+import { settingsManager } from "./SettingsManager";
+import {
+  Loader2,
+  FileText,
+  CheckCircle,
+  XCircle,
+  ArrowLeft,
+  AlertTriangle,
+} from "lucide-react";
+import { Alert, AlertDescription } from "./ui/alert";
 import { RawOutputViewer } from "./RawOutputViewer";
 
 interface ProcessingPageProps {
@@ -30,12 +31,6 @@ interface ProcessingPageProps {
 }
 
 const allParsers = [
-  {
-    id: "auto",
-    name: "Auto-Select",
-    description: "Automatically choose the best processor for your document",
-    requiresApiKey: false,
-  },
   {
     id: "azure_doc_intelligence",
     name: "Azure Document Intelligence",
@@ -52,15 +47,22 @@ const allParsers = [
   },
 ];
 
-interface FigureMetadata {
-  id: string;
-  page: number | null;
-  caption: string | null;
-  image_path?: string;
-  bounding_regions?: Array<{
-    page_number: number;
-    polygon: number[];
-  }>;
+interface FileStatus {
+  file: File;
+  fileId: string;
+  uploadResult: any;
+  status: "pending" | "processing" | "completed" | "error";
+  processingResult?: {
+    conversionId?: string;
+    markdownPath?: string;
+    processorUsed?: string;
+    figures?: any[];
+    figuresCount?: number;
+    tablesCount?: number;
+    extractedText?: string;
+  };
+  selectedParser?: string;
+  error?: string;
 }
 
 export function ProcessingPage({
@@ -68,66 +70,47 @@ export function ProcessingPage({
   onBack,
   documentData,
 }: ProcessingPageProps) {
-  const [selectedParser, setSelectedParser] = useState(
-    documentData.parser || ""
-  );
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showResults, setShowResults] = useState(
-    documentData.showResults ?? !!documentData.extractedText
-  );
-  const [conversionId, setConversionId] = useState<string | null>(
-    documentData.conversionId || null
-  );
-  const [markdownPath, setMarkdownPath] = useState<string | null>(
-    documentData.markdownPath || null
-  );
-  const [processorUsed, setProcessorUsed] = useState<string | null>(
-    documentData.processorUsed || null
-  );
-  const [processError, setProcessError] = useState<string | null>(null);
-  const [extractedTextLocal, setExtractedTextLocal] = useState<string>(
-    documentData.extractedText || ""
-  );
-  const [figures, setFigures] = useState<FigureMetadata[]>(
-    documentData.figures || []
-  );
-  const [figuresCount, setFiguresCount] = useState<number>(
-    documentData.figuresCount || 0
-  );
-  const [tablesCount, setTablesCount] = useState<number>(
-    documentData.tablesCount || 0
-  );
-  const [elapsedTime, setElapsedTime] = useState<number>(0);
+  // Initialize files from documentData
+  const [files] = useState<FileStatus[]>(() => {
+    if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
+      return documentData.uploadedFiles.map((f) => ({
+        ...f,
+        status: f.status || "pending",
+        selectedParser: f.selectedParser || "azure_doc_intelligence",
+      }));
+    } else if (documentData.file && documentData.fileId) {
+      // Backward compatibility for single file
+      return [
+        {
+          file: documentData.file,
+          fileId: documentData.fileId,
+          uploadResult: documentData.uploadResult,
+          status: "pending",
+          selectedParser: "azure_doc_intelligence",
+        },
+      ];
+    }
+    return [];
+  });
 
-  function formatTime(seconds: number): string {
-    const mins = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const secs = (seconds % 60).toString().padStart(2, "0");
-    return `${mins}:${secs}`;
-  }
-
-  const [serverConfigLoaded, setServerConfigLoaded] = useState(false);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(
+    files.length > 0 ? files[0].fileId : null
+  );
+  const [globalParser, setGlobalParser] = useState<string>(
+    "azure_doc_intelligence"
+  );
 
   useEffect(() => {
-    // Refresh server config when component mounts to get latest configuration status
     const loadServerConfig = async () => {
       await settingsManager.refreshServerConfig();
-      setServerConfigLoaded(true);
     };
     loadServerConfig();
+  }, []);
 
-    let timer: NodeJS.Timeout;
-    if (isProcessing) {
-      setElapsedTime(0);
-      timer = setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
-      }, 1000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isProcessing]);
+  // Ensure page starts at top
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   // Filter parsers based on API key availability
   const getAvailableParsers = () => {
@@ -135,377 +118,204 @@ export function ProcessingPage({
       if (parser.id === "azure_doc_intelligence") {
         return settingsManager.isAzureDocumentIntelligenceAvailable();
       }
-      return true; // All other parsers are always available
+      return true;
     });
   };
 
   const availableParsers = getAvailableParsers();
-  const isAzureDocumentIntelligenceConfigured =
-    settingsManager.isAzureDocumentIntelligenceAvailable();
 
-  const handleProcessPDF = async () => {
-    setIsProcessing(true);
-    setProcessError(null);
-
-    try {
-      // Ensure we have an uploaded file id
-      if (!documentData.fileId) {
-        throw new Error(
-          "No uploaded file ID found. Please upload a PDF first."
-        );
-      }
-
-      // Ensure a processor is selected
-      if (!selectedParser) {
-        throw new Error("Please select a document processor.");
-      }
-
-      // Trigger backend conversion for an uploaded file
-      const token = localStorage.getItem("token");
-      const resp = await fetch(
-        `/api/documents/process/file/${documentData.fileId}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ processor: selectedParser }),
-        }
-      );
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || "Conversion request failed");
-      }
-
-      const data = await resp.json();
-      setConversionId(data.conversion_id || null);
-      setMarkdownPath(data.markdown_path || null);
-      setProcessorUsed(data.processor_used || null);
-
-      // Check if figures were extracted
-      if (data.figures_found !== undefined) {
-        setFiguresCount(data.figures_found);
-        setFigures(data.figures || []);
-      }
-
-      // Check if tables were extracted
-      if (data.tables_found !== undefined) {
-        setTablesCount(data.tables_found);
-      }
-
-      // Fetch the markdown content with processor info for efficiency
-      const processorParam = data.processor_used
-        ? `?processor_used=${encodeURIComponent(data.processor_used)}`
-        : "";
-      const mdResp = await fetch(
-        `/api/documents/${data.conversion_id}/content${processorParam}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (!mdResp.ok) {
-        const err = await mdResp.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to fetch markdown content");
-      }
-
-      const markdownData = await mdResp.json();
-      const markdownContent = markdownData.markdown_content || "";
-      setExtractedTextLocal(markdownContent);
-
-      // If figures weren't in the initial response, try fetching them separately
-      if (
-        data.figures_found === undefined &&
-        data.processor_used === "azure_doc_intelligence"
-      ) {
-        try {
-          const figuresResp = await fetch(
-            `/api/documents/${data.conversion_id}/figures`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
-          if (figuresResp.ok) {
-            const figuresData = await figuresResp.json();
-            setFiguresCount(figuresData.figures_count || 0);
-            setFigures(figuresData.figures || []);
-          }
-        } catch (err) {
-          console.warn("Could not fetch figures:", err);
-        }
-      }
-
-      // Persist extracted text in parent state (do not proceed to next step automatically)
-      // Parent will be updated when the user clicks "Proceed to Entity Extraction"
-
-      setShowResults(true);
-    } catch (err: any) {
-      setProcessError(err?.message || String(err));
-    } finally {
-      setIsProcessing(false);
+  // Ensure globalParser is valid - set to first available if current is unavailable
+  useEffect(() => {
+    if (
+      availableParsers.length > 0 &&
+      !availableParsers.find((p) => p.id === globalParser)
+    ) {
+      setGlobalParser(availableParsers[0].id);
     }
-  };
+  }, [availableParsers, globalParser]);
 
   const handleProceed = () => {
+    // Filter completed files
+    const completedFiles = files.filter((f) => f.status === "completed");
+
+    if (completedFiles.length === 0) {
+      return; // Should be disabled anyway
+    }
+
+    // For backward compatibility, update the main documentData with the first completed file
+    // But also pass the full list of uploadedFiles with their results
+    const firstFile = completedFiles[0];
+
     onComplete({
-      parser: selectedParser,
-      extractedText: extractedTextLocal,
-      annotatedOutput: "", // annotatedOutput can be populated by future parser logic
-      conversionId: conversionId ?? undefined,
-      markdownPath: markdownPath ?? undefined,
-      processorUsed: processorUsed ?? undefined,
-      figures: figures,
-      figuresCount: figuresCount,
-      tablesCount: tablesCount,
-      showResults: showResults,
+      // Legacy fields for first file
+      parser: firstFile.processingResult?.processorUsed,
+      extractedText: firstFile.processingResult?.extractedText,
+      annotatedOutput: "",
+      conversionId: firstFile.processingResult?.conversionId,
+      markdownPath: firstFile.processingResult?.markdownPath,
+      processorUsed: firstFile.processingResult?.processorUsed,
+      figures: firstFile.processingResult?.figures,
+      figuresCount: firstFile.processingResult?.figuresCount,
+      tablesCount: firstFile.processingResult?.tablesCount,
+      showResults: true,
+
+      // New field
+      uploadedFiles: files,
     });
   };
 
-  const handleReprocess = () => {
-    setShowResults(false);
-    handleProcessPDF();
-  };
-
-  const handleDownloadMarkdown = async () => {
-    if (!conversionId) return;
-    try {
-      const resp = await fetch(`/api/documents/${conversionId}/content`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to fetch markdown for download");
-      }
-      const data = await resp.json();
-      const content = data.markdown_content || "";
-      const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${conversionId}.md`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setProcessError(err?.message || String(err));
-    }
-  };
+  const selectedFile = files.find((f) => f.fileId === selectedFileId);
+  const completedCount = files.filter((f) => f.status === "completed").length;
+  const totalCount = files.length;
 
   return (
-    <div>
-      <div className="flex items-center gap-4 mb-6">
-        <Button variant="outline" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <h2 className="text-xl">Document Processing</h2>
-          <p className="text-muted-foreground">
-            Select a parser and process your document
-          </p>
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <h2 className="text-xl font-semibold">Processed Documents</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          {completedCount > 0 && (
+            <Button onClick={handleProceed}>
+              Proceed to Entity Extraction ({completedCount}/{totalCount})
+            </Button>
+          )}
         </div>
       </div>
 
-      <div className="grid gap-6">
-        {serverConfigLoaded && !isAzureDocumentIntelligenceConfigured && (
-          <Alert>
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              Azure Document Intelligence parser is not available. Please
-              configure Azure Document Intelligence endpoint and API key in the
-              backend secrets.toml file.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <Card className="border-gray-200">
-          <CardHeader>
-            <CardTitle>Parser Selection</CardTitle>
-            <CardDescription>
-              Choose the appropriate parser for your document type
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-center">
-              <div className="max-w-md w-full relative">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <Select
-                      value={selectedParser}
-                      onValueChange={setSelectedParser}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a parser" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableParsers.map((parser) => (
-                          <SelectItem key={parser.id} value={parser.id}>
-                            <div>
-                              <div className="font-medium">{parser.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {parser.description}
-                              </div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Loading indicator (visible while processing). Click to toggle logs popout */}
-                  <div>
-                    {isProcessing && (
-                      <div className="flex items-center space-x-2">
-                        <div
-                          className="w-8 h-8 rounded-full flex items-center justify-center bg-muted"
-                          title="Processing"
-                          aria-hidden="true"
-                        >
-                          <span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
-                        </div>
-                        <span className="text-sm font-mono">
-                          {formatTime(elapsedTime)}
-                        </span>
-                      </div>
+      {/* File Selector Dropdown - Only show if multiple files */}
+      {files.length > 1 && (
+        <div className="mb-4">
+          <label className="text-sm font-medium block mb-2">
+            Select Document
+          </label>
+          <Select
+            value={selectedFileId || undefined}
+            onValueChange={setSelectedFileId}
+          >
+            <SelectTrigger className="w-full max-w-md">
+              <SelectValue placeholder="Select a document" />
+            </SelectTrigger>
+            <SelectContent>
+              {files.map((file) => (
+                <SelectItem key={file.fileId} value={file.fileId}>
+                  <div className="flex items-center gap-2">
+                    {file.status === "completed" && (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
                     )}
+                    {file.status === "processing" && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {file.status === "error" && (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span>{file.file.name}</span>
                   </div>
-                </div>
-              </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* Document Viewer Area */}
+      <div className="flex-1 overflow-y-auto">
+        {selectedFile ? (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between border-b pb-4">
+              {/* File info removed as per user request */}
             </div>
 
-            <div className="flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={showResults ? handleReprocess : handleProcessPDF}
-                disabled={!selectedParser || isProcessing}
-                className={`${!selectedParser || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
-                aria-disabled={!selectedParser || isProcessing}
-              >
-                {isProcessing
-                  ? "Processing..."
-                  : showResults
-                    ? "Reprocess Document"
-                    : "Process Document"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {showResults && (
-          <>
-            {/* Display Figures if available */}
-            {figures.length > 0 && conversionId && (
-              <FigureGallery conversionId={conversionId} figures={figures} />
+            {selectedFile.status === "error" && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  Processing failed: {selectedFile.error}
+                </AlertDescription>
+              </Alert>
             )}
 
-            {/* Display Tables if available */}
-            {tablesCount > 0 && conversionId && (
-              <TablesGallery
-                conversionId={conversionId}
-                tablesCount={tablesCount}
-              />
-            )}
+            {selectedFile.status === "completed" &&
+              selectedFile.processingResult && (
+                <>
+                  {/* Display Figures if available */}
+                  {Array.isArray(selectedFile.processingResult.figures) &&
+                    selectedFile.processingResult.figures.length > 0 &&
+                    selectedFile.processingResult.conversionId && (
+                      <FigureGallery
+                        conversionId={
+                          selectedFile.processingResult.conversionId
+                        }
+                        figures={selectedFile.processingResult.figures}
+                      />
+                    )}
 
-            {/* Two Column Layout: PDF Viewer and Raw Output */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              {/* Left Column: PDF Viewer with Bounding Boxes */}
-              <div>
-                {documentData.fileId && (
-                  <PDFBoundingBoxViewer
-                    fileId={documentData.fileId}
-                    conversionId={conversionId}
-                    fileName={documentData.file?.name}
-                  />
-                )}
-              </div>
-
-              {/* Right Column: Raw Output */}
-              <div>
-                <RawOutputViewer
-                  conversionId={conversionId}
-                  processorUsed={processorUsed}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {conversionId && (
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="text-sm text-muted-foreground">
-                        Conversion ID
-                      </div>
-                      <div className="font-mono text-sm break-all">
-                        {conversionId}
-                      </div>
-                      {markdownPath && (
-                        <>
-                          <div className="text-sm text-muted-foreground mt-2">
-                            Saved Markdown Path
-                          </div>
-                          <div className="font-mono text-sm break-all">
-                            {markdownPath}
-                          </div>
-                        </>
-                      )}
-                      {figuresCount > 0 && (
-                        <>
-                          <div className="text-sm text-muted-foreground mt-2">
-                            Figures Extracted
-                          </div>
-                          <div className="text-sm">
-                            <span className="font-medium text-green-600">
-                              {figuresCount}
-                            </span>{" "}
-                            figure{figuresCount !== 1 ? "s" : ""} detected and
-                            extracted
-                          </div>
-                        </>
-                      )}
-                      {tablesCount > 0 && (
-                        <>
-                          <div className="text-sm text-muted-foreground mt-2">
-                            Tables Extracted
-                          </div>
-                          <div className="text-sm">
-                            <span className="font-medium text-blue-600">
-                              {tablesCount}
-                            </span>{" "}
-                            table{tablesCount !== 1 ? "s" : ""} detected and
-                            extracted
-                          </div>
-                        </>
-                      )}
+                  {/* Display Tables if available */}
+                  {(selectedFile.processingResult.tablesCount || 0) > 0 &&
+                    selectedFile.processingResult.conversionId && (
+                      <TablesGallery
+                        conversionId={
+                          selectedFile.processingResult.conversionId
+                        }
+                        tablesCount={
+                          selectedFile.processingResult.tablesCount || 0
+                        }
+                      />
+                    )}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    <div>
+                      <PDFBoundingBoxViewer
+                        fileId={selectedFile.fileId}
+                        conversionId={
+                          selectedFile.processingResult.conversionId || ""
+                        }
+                        fileName={selectedFile.file.name}
+                      />
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDownloadMarkdown}
-                      >
-                        Download Markdown
-                      </Button>
+                    <div>
+                      <RawOutputViewer
+                        conversionId={
+                          selectedFile.processingResult.conversionId || ""
+                        }
+                        processorUsed={
+                          selectedFile.processingResult.processorUsed || ""
+                        }
+                      />
                     </div>
                   </div>
-                </div>
+                </>
               )}
 
-              {processError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-600">{processError}</p>
-                </div>
-              )}
-
-              <div className="flex justify-end">
-                <Button variant="outline" onClick={handleProceed}>
-                  Proceed to Entity Extraction
-                </Button>
+            {selectedFile.status === "pending" && (
+              <div className="flex flex-col items-center justify-center h-64 text-muted-foreground border-2 border-dashed rounded-lg">
+                <FileText className="h-12 w-12 mb-4 opacity-20" />
+                <p>Ready to process</p>
+                <p className="text-sm">Select a parser and click Process</p>
               </div>
-            </div>
-          </>
+            )}
+
+            {selectedFile.status === "processing" && (
+              <div className="h-80 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-200 bg-gray-50/30">
+                <div className="relative mb-4">
+                  <Loader2 className="h-12 w-12 animate-spin text-gray-400" />
+                </div>
+                <p className="text-lg font-medium text-gray-700">
+                  Processing document...
+                </p>
+                <p className="text-sm text-gray-500 mt-1">
+                  Analyzing content and extracting data
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <p>Select a file to view details</p>
+          </div>
         )}
       </div>
     </div>
