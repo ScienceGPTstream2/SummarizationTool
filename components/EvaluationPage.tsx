@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -59,7 +59,9 @@ import { DocumentData } from "../App";
 interface EvaluationPageProps {
   onBack: () => void;
   documentData: DocumentData;
-  setDocumentData: (data: DocumentData) => void;
+  setDocumentData: (
+    data: DocumentData | ((prev: DocumentData) => DocumentData)
+  ) => void;
 }
 
 // Available evaluation providers
@@ -128,7 +130,8 @@ const getDisplayModelName = (model: string): string => {
     return baseName
       .split("-")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
+      .join(" ")
+      .replace(/ (\d) (\d)/g, " $1.$2");
   }
   return model;
 };
@@ -305,6 +308,22 @@ export function EvaluationPage({
     new Set()
   );
 
+  // Abort controller for stopping evaluation
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Confirmation dialog state
+  const [confirmationDialog, setConfirmationDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    action: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    description: "",
+    action: () => {},
+  });
+
   // Validation dialog state
   const [showValidationDialog, setShowValidationDialog] = useState(false);
   const [validationMessage, setValidationMessage] = useState({
@@ -312,6 +331,11 @@ export function EvaluationPage({
     description: "",
     missingEntities: [] as string[],
   });
+
+  // Scroll to top on mount
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   // Persist evaluation configuration to documentData whenever it changes
   useEffect(() => {
@@ -465,6 +489,264 @@ export function EvaluationPage({
     }));
   };
 
+  const evaluateSingleEntity = async (
+    entity: any,
+    providers: string[],
+    token: string,
+    signal: AbortSignal
+  ) => {
+    const entityIndex = documentData.entities.findIndex(
+      (e) => e.name === entity.name
+    );
+    if (entityIndex === -1) return;
+
+    // Mark entity as evaluating
+    setEvaluatingEntities((prev) => new Set(prev).add(entity.name));
+
+    console.log(
+      `\n🔄 Evaluating entity: ${entity.name} with ${providers.length} models...`
+    );
+
+    // Evaluate all selected models for this entity in parallel
+    const modelPromises = providers.map(async (providerId) => {
+      if (signal.aborted) return;
+
+      const provider = allProviders.find((p) => p.id === providerId);
+      if (!provider) return;
+
+      try {
+        // Prepare evaluation request
+        const requestBody: any = {
+          entity_name: entity.name,
+          extraction_prompt: entity.prompt,
+          actual_output: entity.extracted,
+          expected_output: entityGroundTruths[entity.name] || undefined,
+          retrieval_context: documentData.extractedText || undefined,
+          metrics: selectedMetrics,
+          threshold: 0.7,
+          custom_evaluation_steps: customEvaluationSteps,
+        };
+
+        // Add provider-specific config
+        if (providerId.startsWith("azure-")) {
+          // Azure OpenAI models
+          requestBody.provider = "azure_openai";
+          requestBody.azure_deployment = provider.deployment || provider.model;
+          requestBody.azure_model_name = provider.model;
+        } else if (
+          providerId === "vertex_ai_pro" ||
+          providerId === "vertex_ai_lite"
+        ) {
+          requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
+          requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
+        } else if (providerId.startsWith("anthropic_")) {
+          requestBody.provider = "anthropic"; // Backend expects "anthropic"
+          requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
+        }
+
+        // Call evaluation API
+        const response = await fetch("/api/evaluations/evaluate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal, // Pass abort signal
+        });
+
+        if (!response.ok) {
+          const error = await response
+            .json()
+            .catch(() => ({ detail: "Unknown error" }));
+          console.error(
+            `[Evaluation Error] ${provider.name} - ${entity.name}:`,
+            error.detail || error
+          );
+          throw new Error(
+            error.detail || `Evaluation failed for ${entity.name}`
+          );
+        }
+
+        const result = await response.json();
+        console.log(
+          `✅ ${provider.model} - ${entity.name}: ${(result.aggregate_score * 100).toFixed(1)}%`
+        );
+
+        // Update document data with new result
+        setDocumentData((prevData) => {
+          const newEntities = [...prevData.entities];
+          const targetIndex = newEntities.findIndex(
+            (e) => e.name === entity.name
+          );
+
+          if (targetIndex !== -1) {
+            if (!newEntities[targetIndex].evaluationResults) {
+              newEntities[targetIndex].evaluationResults = [];
+            }
+
+            // Remove any existing result from this provider+model combination to avoid duplicates
+            const existingResults = newEntities[targetIndex].evaluationResults!;
+            const filteredResults = existingResults.filter(
+              (r) =>
+                !(r.provider === result.provider && r.model === result.model)
+            );
+
+            // Add the new result
+            newEntities[targetIndex].evaluationResults = [
+              ...filteredResults,
+              {
+                provider: result.provider,
+                model: result.model,
+                metrics: result.metrics,
+                aggregate_score: result.aggregate_score,
+                all_passed: result.all_passed,
+                evaluation_time: result.evaluation_time,
+              },
+            ];
+
+            // Update ground truth if provided
+            if (entityGroundTruths[entity.name]) {
+              newEntities[targetIndex].groundTruth =
+                entityGroundTruths[entity.name];
+            }
+          }
+
+          return {
+            ...prevData,
+            entities: newEntities,
+          };
+        });
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          console.log(`Evaluation aborted for ${entity.name}`);
+        } else {
+          console.error(
+            `[Evaluation Error] ${provider?.name} - ${entity.name}:`,
+            error.message || error
+          );
+        }
+      }
+    });
+
+    // Wait for all models to finish evaluating this entity
+    await Promise.all(modelPromises);
+
+    // Mark entity as completed and no longer evaluating
+    setEvaluatingEntities((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(entity.name);
+      return newSet;
+    });
+
+    if (!signal.aborted) {
+      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+
+      // Auto-scroll to the completed entity card
+      setTimeout(() => {
+        const entityCard = document.getElementById(
+          `entity-card-${entity.name}`
+        );
+        if (entityCard) {
+          entityCard.scrollIntoView({ behavior: "smooth", block: "center" });
+          // Add a brief highlight animation
+          entityCard.classList.add("highlight-flash");
+          setTimeout(
+            () => entityCard.classList.remove("highlight-flash"),
+            2000
+          );
+        }
+      }, 100);
+
+      console.log(`✅ Completed evaluation for: ${entity.name}\n`);
+    }
+  };
+
+  const handleStopEvaluation = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsEvaluating(false);
+      setEvaluatingEntities(new Set()); // Clear evaluating status
+    }
+  };
+
+  const handleRerunEntity = async (entityName: string) => {
+    // Validation: Check providers
+    if (selectedProviders.length === 0) {
+      setValidationMessage({
+        title: "No Evaluation Provider Selected",
+        description:
+          "Please select at least one LLM judge (Azure OpenAI or Vertex AI) to run evaluation.",
+        missingEntities: [],
+      });
+      setShowValidationDialog(true);
+      return;
+    }
+
+    // Validation: Check metrics
+    if (selectedMetrics.length === 0) {
+      setValidationMessage({
+        title: "No Metrics Selected",
+        description:
+          "Please select at least one evaluation metric (Correctness, Completeness, Relevance, or Safety).",
+        missingEntities: [],
+      });
+      setShowValidationDialog(true);
+      return;
+    }
+
+    const entity = documentData.entities.find((e) => e.name === entityName);
+    if (!entity) return;
+
+    // Check if entity already has results
+    if (entity.evaluationResults && entity.evaluationResults.length > 0) {
+      setConfirmationDialog({
+        isOpen: true,
+        title: "Rerun Evaluation?",
+        description: `This entity has already been evaluated. Rerunning it will overwrite the existing results for the selected models. Are you sure you want to proceed?`,
+        action: () => executeRerunEntity(entityName),
+      });
+      return;
+    }
+
+    await executeRerunEntity(entityName);
+  };
+
+  const executeRerunEntity = async (entityName: string) => {
+    const entity = documentData.entities.find((e) => e.name === entityName);
+    if (!entity) return;
+
+    // Start single entity evaluation
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    // We don't set global isEvaluating to true to avoid locking the whole UI,
+    // but we do set the entity as evaluating
+    setEvaluatingEntities((prev) => new Set(prev).add(entityName));
+
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found");
+
+      await evaluateSingleEntity(
+        entity,
+        selectedProviders,
+        token,
+        controller.signal
+      );
+    } catch (error: any) {
+      console.error("Rerun error:", error);
+    } finally {
+      abortControllerRef.current = null;
+      setEvaluatingEntities((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(entityName);
+        return newSet;
+      });
+    }
+  };
+
   const handleRunEvaluation = async () => {
     // Validation: Check providers
     if (selectedProviders.length === 0) {
@@ -511,13 +793,39 @@ export function EvaluationPage({
       }
     }
 
+    // Check if any entities already have results
+    const entitiesToEvaluate = documentData.entities.filter((e) => e.extracted);
+    const hasExistingResults = entitiesToEvaluate.some(
+      (e) => e.evaluationResults && e.evaluationResults.length > 0
+    );
+
+    if (hasExistingResults) {
+      setConfirmationDialog({
+        isOpen: true,
+        title: "Rerun Evaluation?",
+        description:
+          "Some entities have already been evaluated. Rerunning will overwrite existing results for the selected models. Are you sure you want to proceed?",
+        action: () => executeRunEvaluation(),
+      });
+      return;
+    }
+
+    await executeRunEvaluation();
+  };
+
+  const executeRunEvaluation = async () => {
     setIsEvaluating(true);
     setEvaluationProgress(0);
     setEvaluatingEntities(new Set());
     setCompletedEntities(new Set());
 
+    // Create new abort controller
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const token = localStorage.getItem("token");
+      if (!token) throw new Error("No token found");
 
       // Filter entities that have extractions
       const entitiesToEvaluate = documentData.entities.filter(
@@ -532,175 +840,39 @@ export function EvaluationPage({
         selectedProviders.length * entitiesToEvaluate.length;
       let completedEvaluations = 0;
 
-      const updatedEntities = [...documentData.entities];
-
       // Evaluate entity-by-entity (sequential entities, parallel models per entity)
       for (const entity of entitiesToEvaluate) {
-        const entityIndex = updatedEntities.findIndex(
-          (e) => e.name === entity.name
-        );
-        if (entityIndex === -1) continue;
+        if (controller.signal.aborted) break;
 
-        // Mark entity as evaluating
-        setEvaluatingEntities((prev) => new Set(prev).add(entity.name));
-
-        console.log(
-          `\n🔄 Evaluating entity: ${entity.name} with ${selectedProviders.length} models...`
+        await evaluateSingleEntity(
+          entity,
+          selectedProviders,
+          token,
+          controller.signal
         );
 
-        // Evaluate all selected models for this entity in parallel
-        const modelPromises = selectedProviders.map(async (providerId) => {
-          const provider = allProviders.find((p) => p.id === providerId);
-          if (!provider) return;
-
-          try {
-            // Prepare evaluation request
-            const requestBody: any = {
-              entity_name: entity.name,
-              extraction_prompt: entity.prompt,
-              actual_output: entity.extracted,
-              expected_output: entityGroundTruths[entity.name] || undefined,
-              retrieval_context: documentData.extractedText || undefined,
-              metrics: selectedMetrics,
-              threshold: 0.7,
-              custom_evaluation_steps: customEvaluationSteps,
-            };
-
-            // Add provider-specific config
-            if (providerId.startsWith("azure-")) {
-              // Azure OpenAI models
-              requestBody.provider = "azure_openai";
-              requestBody.azure_deployment =
-                provider.deployment || provider.model;
-              requestBody.azure_model_name = provider.model;
-            } else if (
-              providerId === "vertex_ai_pro" ||
-              providerId === "vertex_ai_lite"
-            ) {
-              requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
-              requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
-            } else if (providerId.startsWith("anthropic_")) {
-              requestBody.provider = "anthropic"; // Backend expects "anthropic"
-              requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
-            }
-
-            // Call evaluation API
-            const response = await fetch("/api/evaluations/evaluate", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify(requestBody),
-            });
-
-            if (!response.ok) {
-              const error = await response
-                .json()
-                .catch(() => ({ detail: "Unknown error" }));
-              console.error(
-                `[Evaluation Error] ${provider.name} - ${entity.name}:`,
-                error.detail || error
-              );
-              throw new Error(
-                error.detail || `Evaluation failed for ${entity.name}`
-              );
-            }
-
-            const result = await response.json();
-            console.log(
-              `✅ ${provider.model} - ${entity.name}: ${(result.aggregate_score * 100).toFixed(1)}%`
-            );
-
-            // Store results (replace existing result from same provider if exists)
-            if (!updatedEntities[entityIndex].evaluationResults) {
-              updatedEntities[entityIndex].evaluationResults = [];
-            }
-
-            // Remove any existing result from this provider+model combination to avoid duplicates
-            const existingResults =
-              updatedEntities[entityIndex].evaluationResults!;
-            const filteredResults = existingResults.filter(
-              (r) =>
-                !(r.provider === result.provider && r.model === result.model)
-            );
-
-            // Add the new result
-            updatedEntities[entityIndex].evaluationResults = [
-              ...filteredResults,
-              {
-                provider: result.provider,
-                model: result.model,
-                metrics: result.metrics,
-                aggregate_score: result.aggregate_score,
-                all_passed: result.all_passed,
-                evaluation_time: result.evaluation_time,
-              },
-            ];
-
-            // Update ground truth if provided
-            if (entityGroundTruths[entity.name]) {
-              updatedEntities[entityIndex].groundTruth =
-                entityGroundTruths[entity.name];
-            }
-          } catch (error: any) {
-            console.error(
-              `[Evaluation Error] ${provider?.name} - ${entity.name}:`,
-              error.message || error
-            );
-          } finally {
-            // Update progress
-            completedEvaluations++;
-            setEvaluationProgress(
-              Math.round((completedEvaluations / totalEvaluations) * 100)
-            );
-          }
-        });
-
-        // Wait for all models to finish evaluating this entity
-        await Promise.all(modelPromises);
-
-        // Mark entity as completed and no longer evaluating
-        setEvaluatingEntities((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(entity.name);
-          return newSet;
-        });
-        setCompletedEntities((prev) => new Set(prev).add(entity.name));
-
-        // Update state immediately after each entity completes (real-time feedback!)
-        setDocumentData({
-          ...documentData,
-          entities: [...updatedEntities],
-        });
-
-        // Auto-scroll to the completed entity card
-        setTimeout(() => {
-          const entityCard = document.getElementById(
-            `entity-card-${entity.name}`
+        // Update progress
+        if (!controller.signal.aborted) {
+          completedEvaluations += selectedProviders.length;
+          setEvaluationProgress(
+            Math.round((completedEvaluations / totalEvaluations) * 100)
           );
-          if (entityCard) {
-            entityCard.scrollIntoView({ behavior: "smooth", block: "center" });
-            // Add a brief highlight animation
-            entityCard.classList.add("highlight-flash");
-            setTimeout(
-              () => entityCard.classList.remove("highlight-flash"),
-              2000
-            );
-          }
-        }, 100);
-
-        console.log(`✅ Completed evaluation for: ${entity.name}\n`);
+        }
       }
 
-      // Show success message
-      setEvaluationComplete(true);
+      if (!controller.signal.aborted) {
+        // Show success message only if not aborted
+        setEvaluationComplete(true);
+      }
     } catch (error: any) {
-      console.error("Evaluation error:", error);
-      alert(`Evaluation failed: ${error.message}`);
+      if (error.name !== "AbortError") {
+        console.error("Evaluation error:", error);
+        alert(`Evaluation failed: ${error.message}`);
+      }
     } finally {
       setIsEvaluating(false);
       setEvaluationProgress(0);
+      abortControllerRef.current = null;
     }
   };
 
@@ -751,6 +923,43 @@ export function EvaluationPage({
             <AlertDialogAction onClick={() => setShowValidationDialog(false)}>
               OK, I'll fix this
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog
+        open={confirmationDialog.isOpen}
+        onOpenChange={(open) =>
+          setConfirmationDialog((prev) => ({ ...prev, isOpen: open }))
+        }
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmationDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmationDialog.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() =>
+                setConfirmationDialog((prev) => ({ ...prev, isOpen: false }))
+              }
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                confirmationDialog.action();
+                setConfirmationDialog((prev) => ({ ...prev, isOpen: false }));
+              }}
+            >
+              Confirm
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1312,11 +1521,26 @@ export function EvaluationPage({
                               Evaluating...
                             </span>
                           )}
-                          {isCompleted && !isEvaluating && (
-                            <span className="flex items-center gap-1 text-sm font-normal text-green-600 ml-auto">
-                              <CheckCircle2 className="h-4 w-4" />
-                              Completed
-                            </span>
+                          {!isEvaluating && (
+                            <div className="ml-auto flex items-center gap-2">
+                              {isCompleted && (
+                                <span className="flex items-center gap-1 text-sm font-normal text-green-600 mr-2">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  Completed
+                                </span>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                type="button"
+                                className="h-8 text-xs"
+                                onClick={() => handleRerunEntity(entity.name)}
+                                disabled={evaluatingEntities.has(entity.name)}
+                              >
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Run
+                              </Button>
+                            </div>
                           )}
                         </CardTitle>
                       </CardHeader>
@@ -1510,30 +1734,54 @@ export function EvaluationPage({
                                                             result.model
                                                           )}
                                                         </CardTitle>
-                                                        <CardDescription className="flex items-center justify-between">
-                                                          <span>
-                                                            Score:{" "}
-                                                            <span
-                                                              className={
-                                                                metric.success
-                                                                  ? "text-green-600 font-semibold"
-                                                                  : "text-red-600 font-semibold"
-                                                              }
-                                                            >
+                                                        <CardDescription className="flex flex-col gap-2">
+                                                          <div className="flex items-center gap-2">
+                                                            <Badge variant="outline">
+                                                              {getDisplayModelName(
+                                                                result.model
+                                                              )}
+                                                            </Badge>
+                                                            {result.all_passed ? (
+                                                              <Badge className="bg-green-500 hover:bg-green-600">
+                                                                Pass
+                                                              </Badge>
+                                                            ) : (
+                                                              <Badge variant="destructive">
+                                                                Fail
+                                                              </Badge>
+                                                            )}
+                                                            <span className="text-xs text-muted-foreground ml-auto">
+                                                              {result.evaluation_time.toFixed(
+                                                                2
+                                                              )}
+                                                              s
+                                                            </span>
+                                                          </div>
+                                                          <div className="flex items-center justify-between">
+                                                            <span>
+                                                              Score:{" "}
+                                                              <span
+                                                                className={
+                                                                  metric.success
+                                                                    ? "text-green-600 font-semibold"
+                                                                    : "text-red-600 font-semibold"
+                                                                }
+                                                              >
+                                                                {(
+                                                                  metric.score *
+                                                                  100
+                                                                ).toFixed(0)}
+                                                              </span>
+                                                              /100
+                                                            </span>
+                                                            <span className="text-muted-foreground">
+                                                              Threshold:{" "}
                                                               {(
-                                                                metric.score *
+                                                                metric.threshold *
                                                                 100
                                                               ).toFixed(0)}
                                                             </span>
-                                                            /100
-                                                          </span>
-                                                          <span className="text-muted-foreground">
-                                                            Threshold:{" "}
-                                                            {(
-                                                              metric.threshold *
-                                                              100
-                                                            ).toFixed(0)}
-                                                          </span>
+                                                          </div>
                                                         </CardDescription>
                                                       </CardHeader>
                                                       <CardContent>
@@ -1584,9 +1832,11 @@ export function EvaluationPage({
         <Card>
           <CardContent className="pt-6">
             <Button
+              type="button"
               onClick={handleRunEvaluation}
               disabled={
                 isEvaluating ||
+                evaluatingEntities.size > 0 ||
                 selectedMetrics.length === 0 ||
                 selectedProviders.length === 0
               }
@@ -1629,6 +1879,26 @@ export function EvaluationPage({
           </CardContent>
         </Card>
       </div>
+      {/* Floating Stop Button */}
+      {isEvaluating && (
+        <div className="fixed bottom-8 right-8 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <Button
+            variant="destructive"
+            size="lg"
+            type="button"
+            onClick={handleStopEvaluation}
+            className="shadow-lg hover:shadow-xl transition-all scale-100 hover:scale-105 rounded-full px-6 h-14 font-semibold text-base bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            <div className="flex items-center gap-2">
+              <div className="relative flex h-3 w-3 mr-1">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+              </div>
+              Stop Evaluation
+            </div>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
