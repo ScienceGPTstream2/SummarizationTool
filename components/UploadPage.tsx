@@ -19,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { settingsManager } from "./SettingsManager";
 
 interface UploadPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
@@ -72,11 +71,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   ];
 
   const getAvailableParsers = () => {
-    return allParsers.filter((parser) => {
-      // For now, make Azure always available for testing/UI purposes
-      // if (parser.id === "azure_doc_intelligence") {
-      //   return settingsManager.isAzureDocumentIntelligenceAvailable();
-      // }
+    return allParsers.filter(() => {
       return true;
     });
   };
@@ -461,6 +456,18 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                       </p>
                       <div className="flex items-center text-xs text-gray-500 mt-0.5">
                         <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                        {uploadResults[file.name] && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-medium flex items-center">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Uploaded
+                          </span>
+                        )}
+                        {uploadingFiles.has(file.name) && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium flex items-center">
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            Uploading...
+                          </span>
+                        )}
                         {fileParsers[file.name] && (
                           <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">
                             {availableParsers.find(
