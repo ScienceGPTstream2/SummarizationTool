@@ -699,6 +699,23 @@ export function EvaluationPage({
     const entity = documentData.entities.find((e) => e.name === entityName);
     if (!entity) return;
 
+    // Validation: Check ground truth for metrics that require it
+    const metricsRequiringGroundTruth = selectedMetrics.filter((m) =>
+      ["correctness", "completeness"].includes(m)
+    );
+
+    if (metricsRequiringGroundTruth.length > 0) {
+      if (!entityGroundTruths[entityName]?.trim()) {
+        setValidationMessage({
+          title: "Ground Truth Required",
+          description: `You selected ${metricsRequiringGroundTruth.map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(" and ")} metrics which require ground truth for comparison. Please provide ground truth for this entity below, or deselect these metrics to proceed.`,
+          missingEntities: [entityName],
+        });
+        setShowValidationDialog(true);
+        return;
+      }
+    }
+
     // Check if entity already has results
     if (entity.evaluationResults && entity.evaluationResults.length > 0) {
       setConfirmationDialog({
