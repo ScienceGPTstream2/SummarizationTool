@@ -53,8 +53,10 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
+  Download,
 } from "lucide-react";
 import { DocumentData } from "../App";
+import { downloadEvaluationReport } from "../utils/wordExport";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -1843,6 +1845,29 @@ export function EvaluationPage({
               any entity below to see the scores.
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Download Report Button */}
+        {documentData.entities.some(
+          (e) => e.evaluationResults && e.evaluationResults.length > 0
+        ) && (
+          <Card>
+            <CardContent className="pt-6">
+              <Button
+                onClick={() => downloadEvaluationReport(documentData)}
+                className="w-full"
+                size="lg"
+                variant="outline"
+              >
+                <Download className="h-5 w-5 mr-2" />
+                Download Evaluation Report (Word Document)
+              </Button>
+              <p className="text-sm text-muted-foreground text-center mt-3">
+                Export a comprehensive report with all evaluation results,
+                scores, and explanations
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         {/* Run Evaluation Button */}
