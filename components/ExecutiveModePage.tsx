@@ -18,6 +18,13 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Alert, AlertDescription } from "./ui/alert";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import {
   Upload,
   File,
   X,
@@ -28,6 +35,7 @@ import {
   Download,
   FileText,
   ArrowLeft,
+  Eye,
 } from "lucide-react";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
@@ -51,6 +59,8 @@ interface FileStatus {
   conversionId?: string;
   extractedData?: Partial<DocumentData>;
   progress?: number; // 0-100
+  ingestionTime?: number;
+  extractionTime?: number;
 }
 
 const INGESTION_METHODS = [
@@ -181,19 +191,28 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         uploadId: uploadData.file_id,
         progress: 30 
       });
+      const ingestionStart = Date.now();
       const ingestionData = await ingestDocument(uploadData.file_id);
+      const ingestionTime = (Date.now() - ingestionStart) / 1000;
 
       // 3. Extraction
       updateFileStatus(fileStatus.id, { 
         status: "extracting",
         conversionId: ingestionData.conversion_id,
-        progress: 60
+        progress: 60,
+        ingestionTime
       });
       
+      const extractionStart = Date.now();
       const extractionData = await extractEntities(ingestionData.conversion_id);
+      const extractionTime = (Date.now() - extractionStart) / 1000;
 
       // 4. Summarization
-      updateFileStatus(fileStatus.id, { status: "summarizing", progress: 80 });
+      updateFileStatus(fileStatus.id, { 
+        status: "summarizing", 
+        progress: 80,
+        extractionTime 
+      });
       const summaryData = await generateSummary(extractionData, ingestionData.conversion_id);
 
       // 5. Complete
@@ -550,19 +569,50 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                           />
                         </div>
                       )}
+                      <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                        {file.ingestionTime && (
+                          <span>Ingestion: {file.ingestionTime.toFixed(1)}s</span>
+                        )}
+                        {file.extractionTime && (
+                          <span>Extraction: {file.extractionTime.toFixed(1)}s</span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 ml-4">
                     {file.status === "completed" && (
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleDownload(file)}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Word
-                      </Button>
+                      <>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle>Summary: {file.file.name}</DialogTitle>
+                            </DialogHeader>
+                            <div className="mt-4 space-y-4">
+                              <div className="p-4 bg-muted rounded-lg">
+                                <h4 className="font-semibold mb-2 text-sm text-muted-foreground uppercase tracking-wider">Generated Paragraph</h4>
+                                <p className="whitespace-pre-wrap leading-relaxed">
+                                  {file.extractedData?.finalSummary || "No summary available."}
+                                </p>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleDownload(file)}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Word
+                        </Button>
+                      </>
                     )}
                     <Button
                       variant="ghost"
