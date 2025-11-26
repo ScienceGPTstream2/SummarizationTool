@@ -72,6 +72,34 @@ class AzureDocIntelligenceService:
             print(f"Failed to initialize Azure Document Intelligence client: {e}")
             return None
 
+    def _analyze_document_sync(
+        self, source: str, source_type: str, output_param: Optional[List[str]]
+    ):
+        """Synchronous wrapper for document analysis to run in thread pool"""
+        if source_type == "file":
+            with open(source, "rb") as f:
+                file_content = f.read()
+            # Use the correct API format
+            poller = self.client.begin_analyze_document(
+                model_id="prebuilt-layout",
+                body=file_content,
+                content_type="application/octet-stream",
+                output_content_format="markdown",
+                output=output_param,
+            )
+        else:  # URL
+            # For URL, use AnalyzeDocumentRequest
+            analyze_request = AnalyzeDocumentRequest(url_source=source)
+            poller = self.client.begin_analyze_document(
+                model_id="prebuilt-layout",
+                analyze_request=analyze_request,
+                output_content_format="markdown",
+                output=output_param,
+            )
+        
+        # Wait for completion (this is the blocking part)
+        return poller.result()
+
     async def convert_document_to_markdown(
         self, source: str, source_type: str = "file", extract_figures: bool = True
     ) -> Dict[str, Any]:
@@ -116,31 +144,18 @@ class AzureDocIntelligenceService:
             # Include 'figures' in output if extract_figures is True
             output_param = ["figures"] if extract_figures else None
 
-            if source_type == "file":
-                with open(source, "rb") as f:
-                    file_content = f.read()
-                # Use the correct API format
-                poller = self.client.begin_analyze_document(
-                    model_id="prebuilt-layout",
-                    body=file_content,
-                    content_type="application/octet-stream",
-                    output_content_format="markdown",
-                    output=output_param,
-                )
-            else:  # URL
-                # For URL, use AnalyzeDocumentRequest
-                analyze_request = AnalyzeDocumentRequest(url_source=source)
-                poller = self.client.begin_analyze_document(
-                    model_id="prebuilt-layout",
-                    analyze_request=analyze_request,
-                    output_content_format="markdown",
-                    output=output_param,
-                )
+            await self._log(log_path, "Document analysis started (in background thread)...")
 
-            await self._log(log_path, "Document analysis started...")
+            # Run the blocking analysis in a thread pool
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,  # Use default executor
+                self._analyze_document_sync,
+                source,
+                source_type,
+                output_param,
+            )
 
-            # Wait for completion
-            result = poller.result()
             await self._log(log_path, "Document analysis completed")
 
             # Convert full result to dictionary for JSON serialization (with ALL bounding boxes)

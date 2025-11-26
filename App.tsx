@@ -202,6 +202,17 @@ export default function App() {
                 </Button>
               ) : (
                 <div className="flex items-center">
+                  {currentStep !== "executive" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentStep("executive")}
+                      className="mr-2"
+                    >
+                      <Briefcase className="h-4 w-4 mr-2" />
+                      Executive Mode
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -217,18 +228,6 @@ export default function App() {
                 </div>
               )}
             </div>
-            {currentStep === "upload" && (
-              <div className="flex justify-end mb-4">
-                <Button
-                  variant="default"
-                  onClick={() => setCurrentStep("executive")}
-                  className="bg-slate-800 hover:bg-slate-700 text-white"
-                >
-                  <Briefcase className="mr-2 h-4 w-4" />
-                  Switch to Executive Mode
-                </Button>
-              </div>
-            )}
             {currentStep !== "settings" && currentStep !== "executive" && (
               <div className="flex items-center gap-4 mt-2">
                 <div
