@@ -199,7 +199,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[500px]">
+          <ScrollArea className="max-h-[500px]">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {figures.map((figure) => (
                 <div

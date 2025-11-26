@@ -76,15 +76,17 @@ class AzureDocIntelligenceService:
         self, source: str, source_type: str = "file", extract_figures: bool = True
     ) -> Dict[str, Any]:
         """
-        Convert document to markdown using Azure Document Intelligence
+        Convert document to markdown using Azure Document Intelligence (Non-blocking)
+        """
+        return await asyncio.to_thread(
+            self._convert_document_sync, source, source_type, extract_figures
+        )
 
-        Args:
-            source: File path or URL
-            source_type: "file" or "url"
-            extract_figures: Whether to extract and download figure images
-
-        Returns:
-            Dict with conversion results
+    def _convert_document_sync(
+        self, source: str, source_type: str = "file", extract_figures: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Synchronous implementation of document conversion
         """
         if not self.client:
             return {
@@ -108,7 +110,7 @@ class AzureDocIntelligenceService:
             metadata_path = conversion_dir / "metadata.json"
             figures_dir = conversion_dir / "figures"
 
-            await self._log(
+            self._log_sync(
                 log_path, f"Starting Azure Document Intelligence conversion: {source}"
             )
 
@@ -137,11 +139,11 @@ class AzureDocIntelligenceService:
                     output=output_param,
                 )
 
-            await self._log(log_path, "Document analysis started...")
+            self._log_sync(log_path, "Document analysis started...")
 
             # Wait for completion
             result = poller.result()
-            await self._log(log_path, "Document analysis completed")
+            self._log_sync(log_path, "Document analysis completed")
 
             # Convert full result to dictionary for JSON serialization (with ALL bounding boxes)
             result_dict = result.as_dict()
@@ -152,7 +154,7 @@ class AzureDocIntelligenceService:
             # Save the FULL raw JSON response
             with open(raw_json_path, "w", encoding="utf-8") as f:
                 json.dump(result_dict, f, indent=2, ensure_ascii=False)
-            await self._log(
+            self._log_sync(
                 log_path,
                 f"Saved full raw JSON with bounding boxes to raw_analysis.json",
             )
@@ -165,7 +167,7 @@ class AzureDocIntelligenceService:
                 f.write(markdown_content)
 
             # Extract and save tables as separate HTML files
-            await self._extract_and_save_tables(
+            self._extract_and_save_tables_sync(
                 result=result,
                 conversion_dir=conversion_dir,
                 markdown_content=markdown_content,
@@ -177,7 +179,7 @@ class AzureDocIntelligenceService:
 
             if extract_figures and result.figures:
                 figures_dir.mkdir(parents=True, exist_ok=True)
-                await self._log(
+                self._log_sync(
                     log_path, f"Found {len(result.figures)} figures to process"
                 )
 
@@ -206,18 +208,18 @@ class AzureDocIntelligenceService:
                                         result_id = operation_location.split("/")[
                                             -1
                                         ].split("?")[0]
-                                        await self._log(
+                                        self._log_sync(
                                             log_path,
                                             f"Extracted result_id: {result_id}",
                                         )
                                         break
                 except Exception as e:
-                    await self._log(
+                    self._log_sync(
                         log_path, f"Warning: Could not extract result_id: {str(e)}"
                     )
 
                 if not result_id:
-                    await self._log(
+                    self._log_sync(
                         log_path,
                         "⚠️ Could not extract result_id - figure images will not be downloaded",
                     )
@@ -265,7 +267,7 @@ class AzureDocIntelligenceService:
 
                     # Download the figure image if we have a result_id
                     if result_id:
-                        image_path = await self._download_figure(
+                        image_path = self._download_figure_sync(
                             result_id=result_id,
                             figure_id=figure_id,
                             figures_dir=figures_dir,
@@ -274,14 +276,14 @@ class AzureDocIntelligenceService:
                         if image_path:
                             figure_info["image_path"] = image_path
                     else:
-                        await self._log(
+                        self._log_sync(
                             log_path,
                             f"Skipping image download for figure {figure_id} (no result_id)",
                         )
 
                     figures_metadata.append(figure_info)
 
-                await self._log(log_path, f"Processed {len(figures_metadata)} figures")
+                self._log_sync(log_path, f"Processed {len(figures_metadata)} figures")
 
             # Create metadata
             end_time = datetime.now()
@@ -315,15 +317,15 @@ class AzureDocIntelligenceService:
             with open(metadata_path, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
 
-            await self._log(
+            self._log_sync(
                 log_path, f"Conversion completed successfully in {conversion_time:.2f}s"
             )
-            await self._log(log_path, f"Pages processed: {metadata['page_count']}")
-            await self._log(log_path, f"Tables found: {metadata['tables_found']}")
-            await self._log(
+            self._log_sync(log_path, f"Pages processed: {metadata['page_count']}")
+            self._log_sync(log_path, f"Tables found: {metadata['tables_found']}")
+            self._log_sync(
                 log_path, f"Key-value pairs found: {metadata['key_value_pairs_found']}"
             )
-            await self._log(log_path, f"Figures found: {metadata['figures_found']}")
+            self._log_sync(log_path, f"Figures found: {metadata['figures_found']}")
 
             return {
                 "success": True,
@@ -345,7 +347,7 @@ class AzureDocIntelligenceService:
 
             # Try to log error if log_path was created
             try:
-                await self._log(log_path, f"ERROR: {error_msg}")
+                self._log_sync(log_path, f"ERROR: {error_msg}")
             except:
                 pass
 
@@ -380,14 +382,18 @@ class AzureDocIntelligenceService:
             }
 
     async def _log(self, log_path: Path, message: str):
-        """Write log message"""
+        """Write log message (Async wrapper)"""
+        await asyncio.to_thread(self._log_sync, log_path, message)
+
+    def _log_sync(self, log_path: Path, message: str):
+        """Write log message (Synchronous)"""
         timestamp = datetime.now().isoformat()
         log_entry = f"[{timestamp}] {message}\n"
 
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(log_entry)
 
-    async def _extract_and_save_tables(
+    def _extract_and_save_tables_sync(
         self,
         result: Any,
         conversion_dir: Path,
@@ -406,14 +412,14 @@ class AzureDocIntelligenceService:
         import re
 
         if not result.tables or len(result.tables) == 0:
-            await self._log(log_path, "No tables found in document")
+            self._log_sync(log_path, "No tables found in document")
             return
 
         # Create tables directory
         tables_dir = conversion_dir / "tables"
         tables_dir.mkdir(parents=True, exist_ok=True)
 
-        await self._log(log_path, f"Found {len(result.tables)} tables to extract")
+        self._log_sync(log_path, f"Found {len(result.tables)} tables to extract")
 
         # Extract HTML tables from markdown content using regex
         # Match <table>...</table> blocks
@@ -426,17 +432,15 @@ class AzureDocIntelligenceService:
                 table_html_path = tables_dir / f"table-{idx}.html"
                 with open(table_html_path, "w", encoding="utf-8") as f:
                     f.write(html_table)
-                await self._log(
-                    log_path, f"Saved table {idx} to {table_html_path.name}"
-                )
+                self._log_sync(log_path, f"Saved table {idx} to {table_html_path.name}")
             except Exception as e:
-                await self._log(log_path, f"Failed to save table {idx}: {str(e)}")
+                self._log_sync(log_path, f"Failed to save table {idx}: {str(e)}")
 
-        await self._log(
+        self._log_sync(
             log_path, f"Extracted {len(html_tables)} tables to tables/ directory"
         )
 
-    async def _download_figure(
+    def _download_figure_sync(
         self, result_id: str, figure_id: str, figures_dir: Path, log_path: Path
     ) -> Optional[str]:
         """
@@ -465,15 +469,13 @@ class AzureDocIntelligenceService:
                 for chunk in figure_stream:
                     f.write(chunk)
 
-            await self._log(
+            self._log_sync(
                 log_path, f"Downloaded figure {figure_id} to {figure_filename}"
             )
             return f"figures/{figure_filename}"
 
         except Exception as e:
-            await self._log(
-                log_path, f"Failed to download figure {figure_id}: {str(e)}"
-            )
+            self._log_sync(log_path, f"Failed to download figure {figure_id}: {str(e)}")
             return None
 
     async def get_conversion_by_id(

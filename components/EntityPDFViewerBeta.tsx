@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Checkbox } from "./ui/checkbox";
@@ -14,8 +14,8 @@ import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore - Vite handles ?url imports
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-const pdfBlobCache = new Map<string, Blob>();
 const analysisCache = new Map<string, any>();
+const pdfDocumentCache = new Map<string, Promise<any>>();
 
 interface Reference {
   text: string;
@@ -39,20 +39,20 @@ interface EntityPDFViewerBetaProps {
   focusedReferenceIndex?: number | null;
 }
 
-export function EntityPDFViewerBeta({
+function EntityPDFViewerBetaComponent({
   fileId,
   conversionId,
   references,
   onPageChange,
   focusedReferenceIndex,
 }: EntityPDFViewerBetaProps) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1.0);
   const [fitToWidthScale, setFitToWidthScale] = useState(1.0);
   const [zoomRatio, setZoomRatio] = useState(1.0);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,7 +62,7 @@ export function EntityPDFViewerBeta({
   const [pendingFocusRefIdx, setPendingFocusRefIdx] = useState<number | null>(
     null
   );
-  const [currentViewportHeight, setCurrentViewportHeight] = useState(0);
+
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const scrollStartRef = useRef({ left: 0, top: 0 });
@@ -200,72 +200,6 @@ export function EntityPDFViewerBeta({
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
-  // Fetch PDF file
-  useEffect(() => {
-    if (!fileId) {
-      console.log("[EntityPDFViewerBeta] No fileId provided");
-      setError("No file ID provided");
-      setLoading(false);
-      return;
-    }
-
-    let isCancelled = false;
-    let objectUrl: string | null = null;
-
-    const applyBlob = (blob: Blob) => {
-      if (isCancelled) return;
-      objectUrl = URL.createObjectURL(blob);
-      setPdfUrl(objectUrl);
-      setLoading(false);
-    };
-
-    const fetchPDF = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const cachedBlob = pdfBlobCache.get(fileId);
-        if (cachedBlob) {
-          applyBlob(cachedBlob);
-          return;
-        }
-
-        console.log("[EntityPDFViewerBeta] Fetching PDF with fileId:", fileId);
-        const token = localStorage.getItem("token");
-        const response = await fetch(`/api/files/${fileId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch PDF file: ${response.status} ${response.statusText}`
-          );
-        }
-
-        const blob = await response.blob();
-        pdfBlobCache.set(fileId, blob);
-        console.log(
-          "[EntityPDFViewerBeta] PDF blob received, size:",
-          blob.size
-        );
-        applyBlob(blob);
-      } catch (err: any) {
-        if (isCancelled) return;
-        console.error("[EntityPDFViewerBeta] Error fetching PDF:", err);
-        setError(err.message || "Failed to load PDF");
-        setLoading(false);
-      }
-    };
-
-    fetchPDF();
-
-    return () => {
-      isCancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [fileId]);
-
   // Fetch analysis result for coordinate system
   useEffect(() => {
     const fetchAnalysis = async () => {
@@ -304,45 +238,104 @@ export function EntityPDFViewerBeta({
 
   // Load and render PDF
   useEffect(() => {
-    if (!pdfUrl) {
-      console.log("[EntityPDFViewerBeta] No pdfUrl, waiting...");
+    if (!fileId) {
+      console.log("[EntityPDFViewerBeta] No fileId, waiting...");
       return;
     }
+
+    let isCancelled = false;
 
     const loadPDF = async () => {
       try {
         setLoading(true);
         console.log("[EntityPDFViewerBeta] Loading PDF document...");
-        const loadingTask = pdfjsLib.getDocument(pdfUrl);
-        const pdf = await loadingTask.promise;
+
+        let loadingTaskPromise = pdfDocumentCache.get(fileId);
+
+        if (!loadingTaskPromise) {
+          const token = localStorage.getItem("token");
+          const loadingTask = pdfjsLib.getDocument({
+            url: `/api/files/${fileId}`,
+            httpHeaders: { Authorization: `Bearer ${token}` },
+            disableAutoFetch: false,
+            disableStream: false,
+            rangeChunkSize: 65536, // 64KB chunks for faster initial render
+          });
+
+          loadingTask.onProgress = (progressData: {
+            loaded: number;
+            total: number;
+          }) => {
+            if (progressData.total > 0) {
+              const percent = Math.round(
+                (progressData.loaded / progressData.total) * 100
+              );
+              setLoadingProgress(percent);
+            }
+          };
+
+          loadingTaskPromise = loadingTask.promise;
+          pdfDocumentCache.set(fileId, loadingTaskPromise);
+        }
+
+        // Add a timeout to prevent infinite loading
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("PDF loading timed out")), 15000)
+        );
+
+        // Race between loading and timeout
+        const pdf = (await Promise.race([
+          loadingTaskPromise,
+          timeoutPromise,
+        ])) as any;
+
+        if (isCancelled) return;
+
         console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
         setPdfDocument(pdf);
         setTotalPages(pdf.numPages);
 
         // Calculate fit-to-width scale for first page
         if (containerRef.current) {
-          const page = await pdf.getPage(1);
-          const viewport = page.getViewport({ scale: 1.0 });
-          const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
-          const calculatedScale = containerWidth / viewport.width;
-          setFitToWidthScale(calculatedScale);
-          setZoomRatio(1); // fit-to-width baseline
-          console.log(
-            "[EntityPDFViewerBeta] Fit-to-width scale:",
-            calculatedScale
-          );
+          try {
+            const page = await pdf.getPage(1);
+            if (isCancelled) return;
+
+            const viewport = page.getViewport({ scale: 1.0 });
+            const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
+            const calculatedScale = containerWidth / viewport.width;
+            setFitToWidthScale(calculatedScale);
+            setZoomRatio(1); // fit-to-width baseline
+            console.log(
+              "[EntityPDFViewerBeta] Fit-to-width scale:",
+              calculatedScale
+            );
+          } catch (e) {
+            console.error("Error calculating fit-to-width:", e);
+            // Non-fatal error, continue
+          }
         }
 
         setLoading(false);
-      } catch (err) {
+      } catch (err: any) {
+        if (isCancelled) return;
         console.error("[EntityPDFViewerBeta] Error loading PDF:", err);
-        setError("Failed to load PDF document");
+        setError(`Failed to load PDF document: ${err.message}`);
         setLoading(false);
+        // Remove from cache if failed so we can try again
+        pdfDocumentCache.delete(fileId);
       }
     };
 
     loadPDF();
-  }, [pdfUrl]);
+
+    return () => {
+      isCancelled = true;
+      if (pdfDocument) {
+        pdfDocument.cleanup();
+      }
+    };
+  }, [fileId]);
 
   // Update fit-to-width scale when page changes or container resizes
   useEffect(() => {
@@ -413,7 +406,6 @@ export function EntityPDFViewerBeta({
         // Set CSS display size (logical pixels)
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
-        setCurrentViewportHeight(viewport.height);
 
         // Set actual canvas size in memory (physical pixels)
         // This normally clears the canvas, but we'll be explicit just in case
@@ -779,145 +771,131 @@ export function EntityPDFViewerBeta({
     }
   }, [isPanning]);
 
-  const canvasContainerHeight =
-    currentViewportHeight > 0 ? currentViewportHeight + 80 : 480;
-
-  if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96 border rounded-lg bg-gray-50">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm font-medium text-gray-700">Loading PDF...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!pdfDocument && !loading && !error) {
-    return (
-      <div className="h-[500px] flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm font-medium text-gray-700">
-            Preparing PDF viewer...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-3">
-      {/* Page Navigation */}
-      <div className="flex items-center justify-between bg-white p-3 rounded-lg border">
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col h-full border rounded-md overflow-hidden bg-white">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between p-2 border-b bg-gray-50">
+        <div className="flex items-center space-x-2">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
+            onClick={() => navigateToPage(currentPage - 1)}
+            disabled={currentPage <= 1}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-medium px-3">
-            Page {currentPage} of {totalPages}
+          <span className="text-sm font-medium">
+            Page {currentPage} of {totalPages || "--"}
           </span>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() =>
-              setCurrentPage(Math.min(totalPages, currentPage + 1))
-            }
-            disabled={currentPage === totalPages}
+            onClick={() => navigateToPage(currentPage + 1)}
+            disabled={currentPage >= totalPages}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          {pagesArray.length > 0 && (
-            <div className="ml-4 text-xs text-gray-500">
-              Reference pages: {pagesArray.join(", ")}
-            </div>
-          )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 border rounded-md bg-white whitespace-nowrap">
-            <Checkbox
-              id="show-bboxes"
-              checked={showBoundingBoxes}
-              onCheckedChange={(checked) =>
-                setShowBoundingBoxes(checked === true)
-              }
-            />
-            <label
-              htmlFor="show-bboxes"
-              className="text-sm font-medium cursor-pointer select-none"
-            >
-              Show Bounding Boxes
-            </label>
-          </div>
+        <div className="flex items-center space-x-2">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => handleZoomChange(-0.2)}
-            disabled={zoomRatio <= 0.5}
+            onClick={() => handleZoomChange(-0.1)}
+            disabled={loading}
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
-          <span className="text-sm min-w-[60px] text-center">
+          <span className="text-sm w-12 text-center">
             {Math.round(zoomRatio * 100)}%
           </span>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => handleZoomChange(0.2)}
-            disabled={zoomRatio >= 3}
+            onClick={() => handleZoomChange(0.1)}
+            disabled={loading}
           >
             <ZoomIn className="h-4 w-4" />
           </Button>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={handleResetZoom}
-            title="Reset to fit width (100%)"
+            disabled={loading}
+            title="Reset Zoom"
           >
             <RotateCw className="h-4 w-4" />
           </Button>
+          <div className="h-4 w-px bg-gray-300 mx-2" />
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="show-bbx"
+              checked={showBoundingBoxes}
+              onCheckedChange={(checked) =>
+                setShowBoundingBoxes(checked as boolean)
+              }
+            />
+            <label
+              htmlFor="show-bbx"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              Show Boxes
+            </label>
+          </div>
         </div>
       </div>
 
-      {/* PDF Canvas */}
-      <div
-        className="border-2 rounded-lg bg-gray-50 overflow-auto"
-        ref={containerRef}
-        style={{ height: canvasContainerHeight }}
-      >
-        <div className={`p-4 ${canPan ? "" : "flex justify-center"}`}>
-          <div
-            className={`inline-block min-w-max ${
-              canPan
-                ? isPanning
-                  ? "cursor-grabbing"
-                  : "cursor-grab"
-                : "cursor-default"
-            }`}
-            onMouseDown={handleMouseDown}
-          >
-            <canvas
-              ref={canvasRef}
-              className="shadow-lg bg-white border border-gray-300 rounded"
-            />
+      {/* Content Area */}
+      <div className="flex-1 relative overflow-hidden bg-gray-100">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-50 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <div className="relative h-12 w-12">
+                <div className="absolute inset-0 rounded-full border-4 border-gray-200"></div>
+                <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
+              </div>
+              <div className="text-sm font-medium text-gray-600">
+                Loading PDF...{" "}
+                {loadingProgress > 0 ? `${loadingProgress}%` : ""}
+              </div>
+              {loadingProgress > 0 && (
+                <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 transition-all duration-300 ease-out"
+                    style={{ width: `${loadingProgress}%` }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
+        )}
+        {error && (
+          <div className="absolute top-4 left-4 right-4 z-20">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          </div>
+        )}
+
+        <div
+          className={`inline-block min-w-max ${
+            canPan
+              ? isPanning
+                ? "cursor-grabbing"
+                : "cursor-grab"
+              : "cursor-default"
+          }`}
+          onMouseDown={handleMouseDown}
+        >
+          <canvas
+            ref={canvasRef}
+            className="shadow-lg bg-white border border-gray-300 rounded"
+          />
         </div>
       </div>
     </div>
   );
 }
+
+export const EntityPDFViewerBeta = memo(EntityPDFViewerBetaComponent);

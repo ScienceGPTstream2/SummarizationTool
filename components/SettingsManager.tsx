@@ -301,10 +301,21 @@ export class SettingsManager {
   // This is the source of truth - all models come from backend secrets.toml
   async getAvailableModelsAsync(): Promise<ModelConfig[]> {
     // Fetch models from backend (these are the source of truth)
-    const backendModels = await this.fetchBackendModels();
+    let backendModels = await this.fetchBackendModels();
+    let isFallback = false;
+
+    // Fallback to local models if backend returns empty (e.g. dev mode or auth error)
+    if (backendModels.length === 0) {
+      console.warn("Backend models empty, falling back to local defaults");
+      backendModels = allModels;
+      isFallback = true;
+    }
 
     // Filter by server configuration availability
     return backendModels.filter((model) => {
+      // If we are using fallback models, assume they are available (dev/offline mode)
+      if (isFallback) return true;
+
       // For Azure provider, only check server config
       if (model.provider && model.provider.toLowerCase().includes("azure")) {
         return this.serverConfig.is_azure_openai_configured;

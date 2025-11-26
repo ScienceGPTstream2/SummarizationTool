@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { pLimit } from "../utils/concurrency";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import {
@@ -273,61 +274,66 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     );
     setProcessingFiles(new Set(filesToProcess.map((f) => f.name)));
 
-    // Process all files in parallel
+    // Limit concurrency to 5 to prevent browser freeze
+    const limit = pLimit(5);
+
+    // Process all files with concurrency limit
     await Promise.all(
-      filesToProcess.map(async (file) => {
-        const fileId = uploadResults[file.name]?.file_id;
-        if (!fileId) return;
+      filesToProcess.map((file) =>
+        limit(async () => {
+          const fileId = uploadResults[file.name]?.file_id;
+          if (!fileId) return;
 
-        // Get parser for this file (individual override or default)
-        const parser = fileParsers[file.name] || defaultParser;
+          // Get parser for this file (individual override or default)
+          const parser = fileParsers[file.name] || defaultParser;
 
-        try {
-          const token = localStorage.getItem("token");
-          const response = await fetch(
-            `/api/documents/process/file/${fileId}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ parser }),
+          try {
+            const token = localStorage.getItem("token");
+            const response = await fetch(
+              `/api/documents/process/file/${fileId}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ parser }),
+              }
+            );
+
+            if (!response.ok) {
+              throw new Error(`Processing failed: ${response.status}`);
             }
-          );
 
-          if (!response.ok) {
-            throw new Error(`Processing failed: ${response.status}`);
+            const result = await response.json();
+
+            // Store processing result with camelCase mapping
+            setProcessedFiles((prev) => ({
+              ...prev,
+              [file.name]: {
+                ...result,
+                conversionId: result.conversion_id,
+                markdownPath: result.markdown_path,
+                processorUsed: result.processor_used,
+                figuresCount: result.figures_found,
+                tablesCount: result.tables_found,
+                parser,
+              },
+            }));
+
+            toast.success(`${file.name} processed successfully`);
+          } catch (error) {
+            console.error(`Error processing ${file.name}:`, error);
+            toast.error(`Failed to process ${file.name}`);
+          } finally {
+            setProcessingFiles((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(file.name);
+              return newSet;
+            });
           }
-
-          const result = await response.json();
-
-          // Store processing result with camelCase mapping
-          setProcessedFiles((prev) => ({
-            ...prev,
-            [file.name]: {
-              ...result,
-              conversionId: result.conversion_id,
-              markdownPath: result.markdown_path,
-              processorUsed: result.processor_used,
-              figuresCount: result.figures_found,
-              tablesCount: result.tables_found,
-              parser,
-            },
-          }));
-
-          toast.success(`${file.name} processed successfully`);
-        } catch (error) {
-          console.error(`Error processing ${file.name}:`, error);
-          toast.error(`Failed to process ${file.name}`);
-        } finally {
-          setProcessingFiles((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(file.name);
-            return newSet;
-          });
-        }
-      })
+        })
+      )
     );
   };
 
@@ -588,17 +594,30 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           </div>
 
           {/* Process All Button */}
-          <Button
-            onClick={handleProcessAll}
-            disabled={processingFiles.size > 0}
-            className="w-full mb-6"
-            size="lg"
-          >
-            <Play className="h-4 w-4 mr-2" />
-            {processingFiles.size > 0
-              ? "Processing..."
-              : `Process All Files (${selectedFiles.length})`}
-          </Button>
+          {/* Process All / Proceed Button */}
+          {selectedFiles.length > 0 &&
+          Object.keys(processedFiles).length === selectedFiles.length ? (
+            <Button
+              onClick={handleProceed}
+              className="w-full mb-6 bg-green-600 hover:bg-green-700"
+              size="lg"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              View Processed Documents
+            </Button>
+          ) : (
+            <Button
+              onClick={handleProcessAll}
+              disabled={processingFiles.size > 0}
+              className="w-full mb-6"
+              size="lg"
+            >
+              <Play className="h-4 w-4 mr-2" />
+              {processingFiles.size > 0
+                ? "Processing..."
+                : `Process All Files (${selectedFiles.length})`}
+            </Button>
+          )}
 
           {/* Processing Status */}
           {(processingFiles.size > 0 ||
@@ -639,14 +658,6 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
       </div>
 
       {/* Proceed Button - Full Width Below */}
-      {selectedFiles.length > 0 &&
-        Object.keys(processedFiles).length === selectedFiles.length && (
-          <div className="mt-6 flex justify-center">
-            <Button onClick={handleProceed} size="lg" className="min-w-[300px]">
-              View Processed Documents
-            </Button>
-          </div>
-        )}
     </div>
   );
 }
