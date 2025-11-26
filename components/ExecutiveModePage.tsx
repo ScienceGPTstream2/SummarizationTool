@@ -43,7 +43,7 @@ import {
   loadStudyTypeTemplate,
   getAvailableStudyTypes,
 } from "./TemplateLoader";
-import { generateWordDocument } from "./ExportUtils";
+import { downloadExecutiveSummary } from "../utils/executiveSummaryExport";
 import { DocumentData } from "../App";
 
 interface ExecutiveModePageProps {
@@ -381,15 +381,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         summaryPrompt: loadStudyTypeTemplate(studyType).summaryPrompt // Re-fetch prompt
       };
 
-      const blob = await generateWordDocument(docData);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${fileStatus.file.name.replace(".pdf", "")}_summary.docx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      downloadExecutiveSummary(docData);
     } catch (error) {
       console.error("Download failed:", error);
       alert("Failed to generate download");
