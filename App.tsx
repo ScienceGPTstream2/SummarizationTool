@@ -3,6 +3,7 @@ import LoginPage from "./components/LoginPage";
 import { UploadPage } from "./components/UploadPage";
 import { ProcessingPage } from "./components/ProcessingPage";
 import { EntityExtractionPage } from "./components/EntityExtractionPage";
+import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { Button } from "./components/ui/button";
@@ -16,6 +17,7 @@ export type Step =
   | "login"
   | "upload"
   | "processing"
+  | "study_selection"
   | "extraction"
   | "evaluation"
   | "settings";
@@ -90,6 +92,24 @@ export interface DocumentData {
       tablesCount?: number;
       extractedText?: string;
     };
+    // Extraction configuration and results
+    studyType?: string;
+    selectedModel?: string;
+    entities?: Array<{
+      name: string;
+      prompt: string;
+      extracted?: string;
+      answer?: string;
+      references?: any[];
+      duration?: number;
+      promptTokens?: number;
+      completionTokens?: number;
+      groundTruth?: string;
+      evaluationResults?: any[];
+    }>;
+    summaryPrompt?: string;
+    finalSummary?: string;
+
     selectedParser?: string;
     error?: string;
   }>;
@@ -124,6 +144,8 @@ export default function App() {
     if (step === "upload") {
       setCurrentStep("processing");
     } else if (step === "processing") {
+      setCurrentStep("study_selection");
+    } else if (step === "study_selection") {
       setCurrentStep("extraction");
     } else if (step === "extraction") {
       setCurrentStep("evaluation");
@@ -138,8 +160,10 @@ export default function App() {
   const handleBack = () => {
     if (currentStep === "processing") {
       setCurrentStep("upload");
-    } else if (currentStep === "extraction") {
+    } else if (currentStep === "study_selection") {
       setCurrentStep("processing");
+    } else if (currentStep === "extraction") {
+      setCurrentStep("study_selection");
     } else if (currentStep === "evaluation") {
       setCurrentStep("extraction");
     } else if (currentStep === "settings") {
@@ -168,6 +192,14 @@ export default function App() {
           <ProcessingPage
             onComplete={(data) => handleStepComplete("processing", data)}
             onBack={handleBack}
+            documentData={documentData}
+          />
+        );
+      case "study_selection":
+        return (
+          <BatchStudySelectionPage
+            onBack={handleBack}
+            onComplete={(data) => handleStepComplete("study_selection", data)}
             documentData={documentData}
           />
         );
@@ -247,6 +279,14 @@ export default function App() {
                     className={`w-3 h-3 rounded-full ${currentStep === "processing" ? "bg-red-500" : "bg-muted"}`}
                   />
                   <span className="text-sm">Processing</span>
+                </div>
+                <div
+                  className={`flex items-center gap-2 ${currentStep === "study_selection" ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  <div
+                    className={`w-3 h-3 rounded-full ${currentStep === "study_selection" ? "bg-red-500" : "bg-muted"}`}
+                  />
+                  <span className="text-sm">Study Selection</span>
                 </div>
                 <div
                   className={`flex items-center gap-2 ${currentStep === "extraction" ? "text-foreground" : "text-muted-foreground"}`}
