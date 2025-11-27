@@ -42,6 +42,7 @@ import type { ModelConfig } from "./SettingsManager";
 import {
   loadStudyTypeTemplate,
   getAvailableStudyTypes,
+  getStudyTypeDisplayName,
 } from "./TemplateLoader";
 import { downloadExecutiveSummary } from "../utils/executiveSummaryExport";
 import { DocumentData } from "../App";
@@ -561,12 +562,34 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                           />
                         </div>
                       )}
-                      <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground">
                         {file.ingestionTime && (
                           <span>Ingestion: {file.ingestionTime.toFixed(1)}s</span>
                         )}
                         {file.extractionTime && (
                           <span>Extraction: {file.extractionTime.toFixed(1)}s</span>
+                        )}
+                        {file.extractedData?.parser && (
+                          <span>
+                            Method:{" "}
+                            {INGESTION_METHODS.find(
+                              (m) => m.id === file.extractedData?.parser
+                            )?.name || file.extractedData.parser}
+                          </span>
+                        )}
+                        {file.extractedData?.selectedModel && (
+                          <span>
+                            Model:{" "}
+                            {availableModels.find(
+                              (m) => m.id === file.extractedData?.selectedModel
+                            )?.name || file.extractedData.selectedModel}
+                          </span>
+                        )}
+                        {file.extractedData?.studyType && (
+                          <span>
+                            Template:{" "}
+                            {getStudyTypeDisplayName(file.extractedData.studyType)}
+                          </span>
                         )}
                       </div>
                     </div>
