@@ -100,7 +100,7 @@ class GeminiLLMClient:
         self,
         model_id: str,
         contents: Dict[str, Any],
-        max_tokens: int = 1024,
+        max_tokens: int = 8024,
         temperature: float = 0.0,
         system_instruction: Optional[str] = None,
         project_id_override: Optional[str] = None,
@@ -381,26 +381,28 @@ class GeminiLLMClient:
         markdown: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 2048,  # Increased default for structured outputs
+        max_tokens: int = 8048,  # Increased default for structured outputs
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
     ) -> Dict[str, Any]:
-        # Supported models for structured outputs (only 2.5 versions)
+        # Supported models for structured outputs
         gemini_models = [
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
+            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
         if model_id and not model_id.startswith("publishers/google/models/"):
-            # Map simple model names to full Vertex AI model IDs (only 2.5 versions)
+            # Map simple model names to full Vertex AI model IDs
             model_mapping = {
                 "gemini-2.5-pro": "publishers/google/models/gemini-2.5-pro",
                 "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
                 "gemini-2.5-flash-lite": "publishers/google/models/gemini-2.5-flash-lite",
+                "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
             }
             model_id = model_mapping.get(model_id, model_id)
 
@@ -447,26 +449,28 @@ Prompt:
         self,
         user_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 8048,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
     ) -> Dict[str, Any]:
-        # Supported models (only 2.5 versions)
+        # Supported models
         gemini_models = [
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
+            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
         if model_id and not model_id.startswith("publishers/google/models/"):
-            # Map simple model names to full Vertex AI model IDs (only 2.5 versions)
+            # Map simple model names to full Vertex AI model IDs
             model_mapping = {
                 "gemini-2.5-pro": "publishers/google/models/gemini-2.5-pro",
                 "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
                 "gemini-2.5-flash-lite": "publishers/google/models/gemini-2.5-flash-lite",
+                "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
             }
             model_id = model_mapping.get(model_id, model_id)
 
