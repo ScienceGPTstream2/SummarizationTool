@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
+import { AuroraText } from "./ui/aurora-text";
+import { SparklesCore } from "./ui/shadcn-io/sparkles";
 import {
   Card,
   CardContent,
@@ -24,6 +26,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
 import {
   Upload,
   File,
@@ -398,7 +408,9 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
           Back
         </Button>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Executive Mode</h2>
+          <h2 className="text-4xl font-bold tracking-tight">
+            <AuroraText>Executive Mode</AuroraText>
+          </h2>
           <p className="text-muted-foreground">
             Batch process multiple documents with high efficiency.
           </p>
@@ -406,7 +418,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
       </div>
 
       {/* Configuration Card */}
-      <Card>
+      <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Configuration</CardTitle>
           <CardDescription>
@@ -468,7 +480,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
       <div className="grid gap-6 md:grid-cols-4">
         <div className="md:col-span-3">
           <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer h-full flex flex-col items-center justify-center ${
+            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer h-full flex flex-col items-center justify-center shadow-sm ${
               dragActive
                 ? "border-primary bg-primary/5"
                 : "border-gray-300 hover:border-gray-400"
@@ -480,7 +492,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">Drop multiple PDF files here</p>
+            <p className="text-lg font-medium">Upload Scientific Studies here</p>
             <p className="text-sm text-muted-foreground mt-1">or click to browse</p>
             <input
               ref={fileInputRef}
@@ -495,22 +507,31 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         
         <div className="flex flex-col justify-center space-y-4">
           <Button 
-            size="lg" 
-            className="w-full h-24 text-lg shadow-lg"
+            className="w-full h-24 text-lg shadow-lg relative overflow-hidden"
             onClick={runPipeline}
             disabled={isRunning || files.length === 0 || !studyType || !selectedModel}
           >
-            {isRunning ? (
-              <>
-                <Loader2 className="mr-2 h-6 w-6 animate-spin" />
-                Running...
-              </>
-            ) : (
-              <>
-                <Play className="mr-2 h-6 w-6" />
-                Run Batch
-              </>
-            )}
+            <div className="relative z-10 flex items-center justify-center">
+              {isRunning ? (
+                <>
+                  <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-6 w-6" />
+                  Generate Scientific Summaries
+                </>
+              )}
+            </div>
+            <SparklesCore
+              background="transparent"
+              minSize={0.6}
+              maxSize={1.4}
+              particleDensity={300}
+              className="absolute inset-0 w-full h-full"
+              particleColor={["#FF00FF", "#00FFFF", "#FFFF00", "#FF0000", "#00FF00", "#0000FF"]}
+            />
           </Button>
           <div className="text-center text-sm text-muted-foreground">
             {files.length} file{files.length !== 1 ? "s" : ""} queued
@@ -520,7 +541,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
 
       {/* File List */}
       {files.length > 0 && (
-        <Card>
+        <Card className="shadow-md">
           <CardHeader>
             <CardTitle>Processing Queue</CardTitle>
           </CardHeader>
@@ -605,16 +626,50 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                               View
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                          <DialogContent className="sm:max-w-[98vw] w-[98vw] max-h-[95vh] h-[95vh] overflow-y-auto">
                             <DialogHeader>
                               <DialogTitle>Summary: {file.file.name}</DialogTitle>
                             </DialogHeader>
-                            <div className="mt-4 space-y-4">
-                              <div className="p-4 bg-muted rounded-lg">
-                                <h4 className="font-semibold mb-2 text-sm text-muted-foreground uppercase tracking-wider">Generated Paragraph</h4>
-                                <p className="whitespace-pre-wrap leading-relaxed">
-                                  {file.extractedData?.finalSummary || "No summary available."}
-                                </p>
+                            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+                              <div className="space-y-4 h-full">
+                                <div className="p-4 bg-muted rounded-lg h-[85vh] overflow-y-auto">
+                                  <h4 className="font-semibold mb-2 text-xs text-muted-foreground uppercase tracking-wider">Generated Paragraph</h4>
+                                  <p className="whitespace-pre-wrap leading-relaxed text-sm">
+                                    {file.extractedData?.finalSummary || "No summary available."}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="space-y-4 h-full">
+                                <div className="border rounded-lg h-[85vh] overflow-y-auto">
+                                  <h4 className="font-semibold p-4 pb-2 text-xs text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">Extracted Entities</h4>
+                                  <div className="p-4 pt-0">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead className="w-[200px] text-xs">Entity</TableHead>
+                                          <TableHead className="text-xs">Extracted Value</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {file.extractedData?.entities?.map((entity: any, idx: number) => (
+                                          <TableRow key={idx}>
+                                            <TableCell className="font-medium align-top text-xs">{entity.name}</TableCell>
+                                            <TableCell className="align-top whitespace-pre-wrap text-xs">
+                                              {entity.answer || entity.extracted || "-"}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                        {(!file.extractedData?.entities || file.extractedData.entities.length === 0) && (
+                                          <TableRow>
+                                            <TableCell colSpan={2} className="text-center text-muted-foreground">
+                                              No entities extracted
+                                            </TableCell>
+                                          </TableRow>
+                                        )}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </DialogContent>

@@ -104,13 +104,12 @@ const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
     provider: "vertex_ai",
   },
   {
-    id: "anthropic_sonnet_4_5",
-    name: "Claude Sonnet 4.5",
-    model: "claude-sonnet-4-5@20250929",
-    description:
-      "Latest Sonnet - balanced performance (supports structured outputs)",
+    id: "vertex_ai_3_pro",
+    name: "Gemini 3 Pro Preview",
+    model: "gemini-3-pro-preview",
+    description: "Latest generation - powerful reasoning for evaluation",
     available: true,
-    provider: "anthropic",
+    provider: "vertex_ai",
   },
   {
     id: "anthropic_opus_4_1",

@@ -57,7 +57,7 @@ class DoclingService:
         )
 
         # Thread pool for CPU-intensive tasks
-        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.executor = ThreadPoolExecutor(max_workers=50)
 
     async def convert_document_to_markdown(
         self, source: Union[str, Path], source_type: str = "file", **kwargs
