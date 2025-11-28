@@ -422,7 +422,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         </Button>
         <div>
           <h2 className="text-4xl font-bold tracking-tight">
-            <AuroraText>Executive Mode</AuroraText>
+            <AuroraText speed={2}>Executive Mode</AuroraText>
           </h2>
           <p className="text-muted-foreground">
             Batch process multiple documents with high efficiency.
