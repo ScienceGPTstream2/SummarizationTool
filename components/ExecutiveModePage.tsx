@@ -16,9 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Alert, AlertDescription } from "./ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -36,16 +34,13 @@ import {
 } from "./ui/table";
 import {
   Upload,
-  File,
   X,
   Loader2,
   Play,
-  CheckCircle,
-  AlertTriangle,
   Download,
-  FileText,
   ArrowLeft,
   Eye,
+  FileText,
 } from "lucide-react";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
@@ -65,7 +60,14 @@ interface FileStatus {
   id: string;
   file: File;
   uploadId?: string;
-  status: "queued" | "uploading" | "ingesting" | "extracting" | "summarizing" | "completed" | "error";
+  status:
+    | "queued"
+    | "uploading"
+    | "ingesting"
+    | "extracting"
+    | "summarizing"
+    | "completed"
+    | "error";
   error?: string;
   conversionId?: string;
   extractedData?: Partial<DocumentData>;
@@ -97,12 +99,12 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   const [ingestionMethod, setIngestionMethod] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
   const [studyType, setStudyType] = useState("");
-  
+
   // Data State
   const [files, setFiles] = useState<FileStatus[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
-  
+
   // UI State
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,14 +155,15 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
 
   const addFiles = (newFiles: File[]) => {
     const pdfFiles = newFiles.filter(
-      (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+      (f) =>
+        f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
     );
-    
+
     const newFileStatuses: FileStatus[] = pdfFiles.map((f) => ({
       id: Math.random().toString(36).substring(7),
       file: f,
       status: "queued",
-      progress: 0
+      progress: 0,
     }));
 
     setFiles((prev) => [...prev, ...newFileStatuses]);
@@ -178,16 +181,22 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
     }
 
     setIsRunning(true);
-    const filesToProcess = files.filter(f => f.status === "queued" || f.status === "error");
+    const filesToProcess = files.filter(
+      (f) => f.status === "queued" || f.status === "error"
+    );
 
     // Process all files in parallel
-    await Promise.all(filesToProcess.map(fileStatus => processFile(fileStatus)));
-    
+    await Promise.all(
+      filesToProcess.map((fileStatus) => processFile(fileStatus))
+    );
+
     setIsRunning(false);
   };
 
   const updateFileStatus = (id: string, updates: Partial<FileStatus>) => {
-    setFiles(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
+    setFiles((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+    );
   };
 
   const processFile = async (fileStatus: FileStatus) => {
@@ -195,40 +204,40 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
       // 1. Upload
       updateFileStatus(fileStatus.id, { status: "uploading", progress: 10 });
       const uploadData = await uploadFile(fileStatus.file);
-      
+
       // 2. Ingestion
-      updateFileStatus(fileStatus.id, { 
-        status: "ingesting", 
+      updateFileStatus(fileStatus.id, {
+        status: "ingesting",
         uploadId: uploadData.file_id,
-        progress: 30 
+        progress: 30,
       });
       const ingestionStart = Date.now();
       const ingestionData = await ingestDocument(uploadData.file_id);
       const ingestionTime = (Date.now() - ingestionStart) / 1000;
 
       // 3. Extraction
-      updateFileStatus(fileStatus.id, { 
+      updateFileStatus(fileStatus.id, {
         status: "extracting",
         conversionId: ingestionData.conversion_id,
         progress: 60,
-        ingestionTime
+        ingestionTime,
       });
-      
+
       const extractionStart = Date.now();
       const extractionData = await extractEntities(ingestionData.conversion_id);
       const extractionTime = (Date.now() - extractionStart) / 1000;
 
       // 4. Summarization
-      updateFileStatus(fileStatus.id, { 
-        status: "summarizing", 
+      updateFileStatus(fileStatus.id, {
+        status: "summarizing",
         progress: 80,
-        extractionTime 
+        extractionTime,
       });
-      const summaryData = await generateSummary(extractionData, ingestionData.conversion_id);
+      const summaryData = await generateSummary(extractionData);
 
       // 5. Complete
-      updateFileStatus(fileStatus.id, { 
-        status: "completed", 
+      updateFileStatus(fileStatus.id, {
+        status: "completed",
         progress: 100,
         extractedData: {
           ...extractionData,
@@ -238,15 +247,14 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
           conversionId: ingestionData.conversion_id,
           parser: ingestionMethod,
           selectedModel: selectedModel,
-          studyType: studyType
-        }
+          studyType: studyType,
+        },
       });
-
     } catch (error: any) {
       console.error(`Error processing file ${fileStatus.file.name}:`, error);
-      updateFileStatus(fileStatus.id, { 
-        status: "error", 
-        error: error.message || "Processing failed" 
+      updateFileStatus(fileStatus.id, {
+        status: "error",
+        error: error.message || "Processing failed",
       });
     }
   };
@@ -310,7 +318,8 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         deployment: modelObj.deployment,
         api_version: modelObj.api_version,
         entities: entities,
-        processor_used: ingestionMethod === "auto" ? undefined : ingestionMethod, // Let backend determine if auto
+        processor_used:
+          ingestionMethod === "auto" ? undefined : ingestionMethod, // Let backend determine if auto
       }),
     });
 
@@ -318,26 +327,30 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
       const err = await response.json();
       throw new Error(err.detail || "Extraction failed");
     }
-    
-    const data = await response.json();
-    
-    // Merge prompts back into the extracted entities as they are required for export
-    const entitiesWithPrompts = data.extracted_entities.map((extractedEntity: any) => {
-      const originalEntity = entities.find(e => e.name === extractedEntity.name);
-      return {
-        ...extractedEntity,
-        prompt: originalEntity?.prompt || ""
-      };
-    });
 
-    return { 
+    const data = await response.json();
+
+    // Merge prompts back into the extracted entities as they are required for export
+    const entitiesWithPrompts = data.extracted_entities.map(
+      (extractedEntity: any) => {
+        const originalEntity = entities.find(
+          (e) => e.name === extractedEntity.name
+        );
+        return {
+          ...extractedEntity,
+          prompt: originalEntity?.prompt || "",
+        };
+      }
+    );
+
+    return {
       entities: entitiesWithPrompts,
       studyType,
-      selectedModel 
+      selectedModel,
     };
   };
 
-  const generateSummary = async (extractionData: any, conversionId: string) => {
+  const generateSummary = async (extractionData: any) => {
     const token = localStorage.getItem("token");
     const { summaryPrompt } = loadStudyTypeTemplate(studyType);
     const modelObj = availableModels.find((m) => m.id === selectedModel);
@@ -389,7 +402,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         entities: fileStatus.extractedData.entities || [],
         finalSummary: fileStatus.extractedData.finalSummary || "",
         conversionId: fileStatus.conversionId,
-        summaryPrompt: loadStudyTypeTemplate(studyType).summaryPrompt // Re-fetch prompt
+        summaryPrompt: loadStudyTypeTemplate(studyType).summaryPrompt, // Re-fetch prompt
       };
 
       downloadExecutiveSummary(docData);
@@ -492,8 +505,12 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">Upload Scientific Studies here</p>
-            <p className="text-sm text-muted-foreground mt-1">or click to browse</p>
+            <p className="text-lg font-medium">
+              Upload Scientific Studies here
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              or click to browse
+            </p>
             <input
               ref={fileInputRef}
               type="file"
@@ -504,12 +521,14 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             />
           </div>
         </div>
-        
+
         <div className="flex flex-col justify-center space-y-4">
-          <Button 
+          <Button
             className="w-full h-24 text-lg shadow-lg relative overflow-hidden"
             onClick={runPipeline}
-            disabled={isRunning || files.length === 0 || !studyType || !selectedModel}
+            disabled={
+              isRunning || files.length === 0 || !studyType || !selectedModel
+            }
           >
             <div className="relative z-10 flex items-center justify-center">
               {isRunning ? (
@@ -530,7 +549,14 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
               maxSize={1.4}
               particleDensity={300}
               className="absolute inset-0 w-full h-full"
-              particleColor={["#FF00FF", "#00FFFF", "#FFFF00", "#FF0000", "#00FF00", "#0000FF"]}
+              particleColor={[
+                "#FF00FF",
+                "#00FFFF",
+                "#FFFF00",
+                "#FF0000",
+                "#00FF00",
+                "#0000FF",
+              ]}
             />
           </Button>
           <div className="text-center text-sm text-muted-foreground">
@@ -553,42 +579,59 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                   className="flex items-center justify-between p-4 border rounded-lg bg-card hover:bg-accent/50 transition-colors"
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className={`p-2 rounded-full ${
-                      file.status === "completed" ? "bg-green-100 text-green-600" :
-                      file.status === "error" ? "bg-red-100 text-red-600" :
-                      "bg-blue-100 text-blue-600"
-                    }`}>
+                    <div
+                      className={`p-2 rounded-full ${
+                        file.status === "completed"
+                          ? "bg-green-100 text-green-600"
+                          : file.status === "error"
+                            ? "bg-red-100 text-red-600"
+                            : "bg-blue-100 text-blue-600"
+                      }`}
+                    >
                       <FileText className="h-5 w-5" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium truncate">{file.file.name}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
-                          file.status === "completed" ? "bg-green-100 text-green-700" :
-                          file.status === "error" ? "bg-red-100 text-red-700" :
-                          file.status === "queued" ? "bg-gray-100 text-gray-700" :
-                          "bg-blue-100 text-blue-700"
-                        }`}>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                            file.status === "completed"
+                              ? "bg-green-100 text-green-700"
+                              : file.status === "error"
+                                ? "bg-red-100 text-red-700"
+                                : file.status === "queued"
+                                  ? "bg-gray-100 text-gray-700"
+                                  : "bg-blue-100 text-blue-700"
+                          }`}
+                        >
                           {file.status}
                         </span>
                       </div>
                       {file.error && (
-                        <p className="text-xs text-red-500 mt-1">{file.error}</p>
+                        <p className="text-xs text-red-500 mt-1">
+                          {file.error}
+                        </p>
                       )}
-                      {file.status !== "completed" && file.status !== "queued" && file.status !== "error" && (
-                        <div className="w-full h-1.5 bg-gray-100 rounded-full mt-2 overflow-hidden">
-                          <div 
-                            className="h-full bg-blue-500 transition-all duration-500"
-                            style={{ width: `${file.progress}%` }}
-                          />
-                        </div>
-                      )}
+                      {file.status !== "completed" &&
+                        file.status !== "queued" &&
+                        file.status !== "error" && (
+                          <div className="w-full h-1.5 bg-gray-100 rounded-full mt-2 overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 transition-all duration-500"
+                              style={{ width: `${file.progress}%` }}
+                            />
+                          </div>
+                        )}
                       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground">
                         {file.ingestionTime && (
-                          <span>Ingestion: {file.ingestionTime.toFixed(1)}s</span>
+                          <span>
+                            Ingestion: {file.ingestionTime.toFixed(1)}s
+                          </span>
                         )}
                         {file.extractionTime && (
-                          <span>Extraction: {file.extractionTime.toFixed(1)}s</span>
+                          <span>
+                            Extraction: {file.extractionTime.toFixed(1)}s
+                          </span>
                         )}
                         {file.extractedData?.parser && (
                           <span>
@@ -609,7 +652,9 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                         {file.extractedData?.studyType && (
                           <span>
                             Template:{" "}
-                            {getStudyTypeDisplayName(file.extractedData.studyType)}
+                            {getStudyTypeDisplayName(
+                              file.extractedData.studyType
+                            )}
                           </span>
                         )}
                       </div>
@@ -628,40 +673,62 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                           </DialogTrigger>
                           <DialogContent className="sm:max-w-[98vw] w-[98vw] max-h-[95vh] h-[95vh] overflow-y-auto">
                             <DialogHeader>
-                              <DialogTitle>Summary: {file.file.name}</DialogTitle>
+                              <DialogTitle>
+                                Summary: {file.file.name}
+                              </DialogTitle>
                             </DialogHeader>
                             <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
                               <div className="space-y-4 h-full">
                                 <div className="p-4 bg-muted rounded-lg h-[85vh] overflow-y-auto">
-                                  <h4 className="font-semibold mb-2 text-xs text-muted-foreground uppercase tracking-wider">Generated Paragraph</h4>
+                                  <h4 className="font-semibold mb-2 text-xs text-muted-foreground uppercase tracking-wider">
+                                    Generated Paragraph
+                                  </h4>
                                   <p className="whitespace-pre-wrap leading-relaxed text-sm">
-                                    {file.extractedData?.finalSummary || "No summary available."}
+                                    {file.extractedData?.finalSummary ||
+                                      "No summary available."}
                                   </p>
                                 </div>
                               </div>
                               <div className="space-y-4 h-full">
                                 <div className="border rounded-lg h-[85vh] overflow-y-auto">
-                                  <h4 className="font-semibold p-4 pb-2 text-xs text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">Extracted Entities</h4>
+                                  <h4 className="font-semibold p-4 pb-2 text-xs text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">
+                                    Extracted Entities
+                                  </h4>
                                   <div className="p-4 pt-0">
                                     <Table>
                                       <TableHeader>
                                         <TableRow>
-                                          <TableHead className="w-[200px] text-xs">Entity</TableHead>
-                                          <TableHead className="text-xs">Extracted Value</TableHead>
+                                          <TableHead className="w-[200px] text-xs">
+                                            Entity
+                                          </TableHead>
+                                          <TableHead className="text-xs">
+                                            Extracted Value
+                                          </TableHead>
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
-                                        {file.extractedData?.entities?.map((entity: any, idx: number) => (
-                                          <TableRow key={idx}>
-                                            <TableCell className="font-medium align-top text-xs">{entity.name}</TableCell>
-                                            <TableCell className="align-top whitespace-pre-wrap text-xs">
-                                              {entity.answer || entity.extracted || "-"}
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                        {(!file.extractedData?.entities || file.extractedData.entities.length === 0) && (
+                                        {file.extractedData?.entities?.map(
+                                          (entity: any, idx: number) => (
+                                            <TableRow key={idx}>
+                                              <TableCell className="font-medium align-top text-xs">
+                                                {entity.name}
+                                              </TableCell>
+                                              <TableCell className="align-top whitespace-pre-wrap text-xs">
+                                                {entity.answer ||
+                                                  entity.extracted ||
+                                                  "-"}
+                                              </TableCell>
+                                            </TableRow>
+                                          )
+                                        )}
+                                        {(!file.extractedData?.entities ||
+                                          file.extractedData.entities.length ===
+                                            0) && (
                                           <TableRow>
-                                            <TableCell colSpan={2} className="text-center text-muted-foreground">
+                                            <TableCell
+                                              colSpan={2}
+                                              className="text-center text-muted-foreground"
+                                            >
                                               No entities extracted
                                             </TableCell>
                                           </TableRow>
@@ -674,8 +741,8 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                             </div>
                           </DialogContent>
                         </Dialog>
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => handleDownload(file)}
                         >
@@ -688,7 +755,12 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                       variant="ghost"
                       size="sm"
                       onClick={() => removeFile(file.id)}
-                      disabled={isRunning && file.status !== "completed" && file.status !== "error" && file.status !== "queued"}
+                      disabled={
+                        isRunning &&
+                        file.status !== "completed" &&
+                        file.status !== "error" &&
+                        file.status !== "queued"
+                      }
                     >
                       <X className="h-4 w-4" />
                     </Button>
