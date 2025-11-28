@@ -72,6 +72,64 @@ class AzureDocIntelligenceService:
             print(f"Failed to initialize Azure Document Intelligence client: {e}")
             return None
 
+    def _analyze_document_sync(
+        self, source: str, source_type: str, output_param: Optional[List[str]]
+    ):
+        """Synchronous wrapper for document analysis to run in thread pool"""
+        if source_type == "file":
+            with open(source, "rb") as f:
+                file_content = f.read()
+            # Use the correct API format
+            poller = self.client.begin_analyze_document(
+                model_id="prebuilt-layout",
+                body=file_content,
+                content_type="application/octet-stream",
+                output_content_format="markdown",
+                output=output_param,
+            )
+        else:  # URL
+            # For URL, use AnalyzeDocumentRequest
+            analyze_request = AnalyzeDocumentRequest(url_source=source)
+            poller = self.client.begin_analyze_document(
+                model_id="prebuilt-layout",
+                analyze_request=analyze_request,
+                output_content_format="markdown",
+                output=output_param,
+            )
+
+        # Wait for completion (this is the blocking part)
+        result = poller.result()
+
+        # Extract result_id from the poller
+        result_id = None
+        try:
+            # Extract result_id from operation-location header in initial response
+            if hasattr(poller, "_polling_method") and hasattr(
+                poller._polling_method, "_initial_response"
+            ):
+                initial_resp = poller._polling_method._initial_response
+                if hasattr(initial_resp, "http_response") and hasattr(
+                    initial_resp.http_response, "headers"
+                ):
+                    headers = initial_resp.http_response.headers
+                    # Try different header names (Azure API uses 'operation-location')
+                    for header_name in [
+                        "operation-location",
+                        "Operation-Location",
+                    ]:
+                        if header_name in headers:
+                            operation_location = headers[header_name]
+                            # Extract result_id from URL: .../analyzeResults/{result_id}?api-version=...
+                            if "analyzeResults" in operation_location:
+                                result_id = operation_location.split("/")[-1].split(
+                                    "?"
+                                )[0]
+                                break
+        except Exception as e:
+            print(f"Warning: Could not extract result_id: {str(e)}")
+
+        return result, result_id
+
     async def convert_document_to_markdown(
         self, source: str, source_type: str = "file", extract_figures: bool = True
     ) -> Dict[str, Any]:
@@ -118,31 +176,17 @@ class AzureDocIntelligenceService:
             # Include 'figures' in output if extract_figures is True
             output_param = ["figures"] if extract_figures else None
 
-            if source_type == "file":
-                with open(source, "rb") as f:
-                    file_content = f.read()
-                # Use the correct API format
-                poller = self.client.begin_analyze_document(
-                    model_id="prebuilt-layout",
-                    body=file_content,
-                    content_type="application/octet-stream",
-                    output_content_format="markdown",
-                    output=output_param,
-                )
-            else:  # URL
-                # For URL, use AnalyzeDocumentRequest
-                analyze_request = AnalyzeDocumentRequest(url_source=source)
-                poller = self.client.begin_analyze_document(
-                    model_id="prebuilt-layout",
-                    analyze_request=analyze_request,
-                    output_content_format="markdown",
-                    output=output_param,
-                )
+            self._log_sync(
+                log_path, "Document analysis started (in background thread)..."
+            )
 
-            self._log_sync(log_path, "Document analysis started...")
+            # Run the blocking analysis directly since we are already in a thread
+            result, result_id = self._analyze_document_sync(
+                source,
+                source_type,
+                output_param,
+            )
 
-            # Wait for completion
-            result = poller.result()
             self._log_sync(log_path, "Document analysis completed")
 
             # Convert full result to dictionary for JSON serialization (with ALL bounding boxes)
@@ -183,42 +227,12 @@ class AzureDocIntelligenceService:
                     log_path, f"Found {len(result.figures)} figures to process"
                 )
 
-                # Get the result ID from Azure response for downloading figure images
-                result_id = None
-
-                try:
-                    # Extract result_id from operation-location header in initial response
-                    if hasattr(poller, "_polling_method") and hasattr(
-                        poller._polling_method, "_initial_response"
-                    ):
-                        initial_resp = poller._polling_method._initial_response
-                        if hasattr(initial_resp, "http_response") and hasattr(
-                            initial_resp.http_response, "headers"
-                        ):
-                            headers = initial_resp.http_response.headers
-                            # Try different header names (Azure API uses 'operation-location')
-                            for header_name in [
-                                "operation-location",
-                                "Operation-Location",
-                            ]:
-                                if header_name in headers:
-                                    operation_location = headers[header_name]
-                                    # Extract result_id from URL: .../analyzeResults/{result_id}?api-version=...
-                                    if "analyzeResults" in operation_location:
-                                        result_id = operation_location.split("/")[
-                                            -1
-                                        ].split("?")[0]
-                                        self._log_sync(
-                                            log_path,
-                                            f"Extracted result_id: {result_id}",
-                                        )
-                                        break
-                except Exception as e:
+                if result_id:
                     self._log_sync(
-                        log_path, f"Warning: Could not extract result_id: {str(e)}"
+                        log_path,
+                        f"Extracted result_id: {result_id}",
                     )
-
-                if not result_id:
+                else:
                     self._log_sync(
                         log_path,
                         "⚠️ Could not extract result_id - figure images will not be downloaded",

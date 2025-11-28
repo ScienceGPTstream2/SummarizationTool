@@ -6,7 +6,14 @@ import {
   CardHeader,
   CardTitle,
 } from "./ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "./ui/dialog";
+
 import { ScrollArea } from "./ui/scroll-area";
 import { Badge } from "./ui/badge";
 import { Image as ImageIcon, ZoomIn, FileImage, Loader2 } from "lucide-react";
@@ -24,7 +31,7 @@ function FigureImage({
   figureId: string;
   caption: string | null;
   getImageUrl: (path: string, id: string) => Promise<string>;
-  onError: () => void;
+  onError: (message?: string) => void;
   className?: string;
 }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -40,10 +47,10 @@ function FigureImage({
           setLoading(false);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (mounted) {
           setLoading(false);
-          onError();
+          onError(error.message);
         }
       });
 
@@ -69,7 +76,7 @@ function FigureImage({
       src={imageUrl}
       alt={caption || `Figure ${figureId}`}
       className={className}
-      onError={onError}
+      onError={() => onError("Failed to load image")}
     />
   );
 }
@@ -94,7 +101,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
   const [selectedFigure, setSelectedFigure] = useState<FigureMetadata | null>(
     null
   );
-  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+  const [imageErrors, setImageErrors] = useState<Map<string, string>>(
+    new Map()
+  );
   // Use a ref to store blob URLs so we don't cause re-renders
   const imageBlobUrlsRef = useRef<Map<string, string>>(new Map());
   // Use state to force re-render when images are loaded
@@ -126,6 +135,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     const filename = imagePath.split("/").pop();
     const apiBase = import.meta.env.VITE_API_BASE_URL || "";
     const token = localStorage.getItem("token");
+    if (!token) {
+      throw new Error("No authentication token found");
+    }
     const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
 
     console.log(`[FigureGallery] Fetching figure:`, {
@@ -154,7 +166,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
         const errorText = await response.text();
         console.error(`[FigureGallery] Error response:`, errorText);
         throw new Error(
-          `Failed to fetch image: ${response.status} ${errorText}`
+          `Error ${response.status}: ${response.statusText} (${url})`
         );
       }
 
@@ -182,8 +194,12 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     }
   };
 
-  const handleImageError = (figureId: string) => {
-    setImageErrors((prev) => new Set(prev).add(figureId));
+  const handleImageError = (figureId: string, errorMessage?: string) => {
+    setImageErrors((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(figureId, errorMessage || "Failed to load");
+      return newMap;
+    });
   };
 
   return (
@@ -199,7 +215,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="max-h-[500px]">
+          <ScrollArea className="h-[600px] w-full pr-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {figures.map((figure) => (
                 <div
@@ -215,12 +231,14 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                         figureId={figure.id}
                         caption={figure.caption}
                         getImageUrl={getImageUrl}
-                        onError={() => handleImageError(figure.id)}
+                        onError={(msg) => handleImageError(figure.id, msg)}
                       />
                     ) : (
-                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground p-2 text-center">
                         <ImageIcon className="h-8 w-8" />
-                        <span className="text-xs">No preview</span>
+                        <span className="text-xs text-red-500 font-medium">
+                          {imageErrors.get(figure.id) || "No preview"}
+                        </span>
                       </div>
                     )}
                     {figure.image_path && !imageErrors.has(figure.id) && (
@@ -268,6 +286,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                 <Badge variant="outline">Page {selectedFigure.page}</Badge>
               )}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Detailed view of the selected figure
+            </DialogDescription>
           </DialogHeader>
 
           {selectedFigure && (

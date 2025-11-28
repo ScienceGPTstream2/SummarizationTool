@@ -5,9 +5,11 @@ import { ProcessingPage } from "./components/ProcessingPage";
 import { EntityExtractionPage } from "./components/EntityExtractionPage";
 import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
+import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SettingsPage } from "./components/SettingsPage";
+import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
-import { Settings, ArrowLeft } from "lucide-react";
+import { Settings, ArrowLeft, Briefcase } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { getValidToken } from "./utils/authUtils";
@@ -20,7 +22,8 @@ export type Step =
   | "study_selection"
   | "extraction"
   | "evaluation"
-  | "settings";
+  | "settings"
+  | "executive";
 
 export interface DocumentData {
   file: File | null;
@@ -168,6 +171,8 @@ export default function App() {
       setCurrentStep("extraction");
     } else if (currentStep === "settings") {
       setCurrentStep(previousStep);
+    } else if (currentStep === "executive") {
+      setCurrentStep("upload");
     }
   };
 
@@ -180,6 +185,8 @@ export default function App() {
 
   const renderStep = () => {
     switch (currentStep) {
+      case "executive":
+        return <ExecutiveModePage onBack={handleBack} />;
       case "upload":
         return (
           <UploadPage
@@ -247,6 +254,16 @@ export default function App() {
                 </Button>
               ) : (
                 <div className="flex items-center">
+                  {currentStep !== "executive" && (
+                    <RainbowButton
+                      size="sm"
+                      onClick={() => setCurrentStep("executive")}
+                      className="mr-2 !rounded-md"
+                    >
+                      <Briefcase className="h-4 w-4 mr-2" />
+                      Executive Mode
+                    </RainbowButton>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -262,7 +279,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            {currentStep !== "settings" && (
+            {currentStep !== "settings" && currentStep !== "executive" && (
               <div className="flex items-center gap-4 mt-2">
                 <div
                   className={`flex items-center gap-2 ${currentStep === "upload" ? "text-foreground" : "text-muted-foreground"}`}

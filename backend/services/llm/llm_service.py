@@ -48,7 +48,7 @@ class LLMService:
         gemini_api_key_override: Optional[str] = None,  # for Gemini
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
-        max_tokens: int = 1024,
+        max_tokens: int = 8048,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
         """
@@ -104,7 +104,7 @@ class LLMService:
         gemini_api_key_override: Optional[str] = None,  # for Gemini
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
-        max_tokens: int = 2048,
+        max_tokens: int = 8048,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
         """
