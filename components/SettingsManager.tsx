@@ -78,16 +78,15 @@ export const allModels: ModelConfig[] = [
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
   },
-  // Anthropic Models (via Vertex AI)
   {
-    id: "claude-sonnet-4-5@20250929",
-    name: "Claude Sonnet 4.5",
-    provider: "Anthropic",
-    description: "Anthropic Claude Sonnet 4.5 model via Vertex AI",
-    requiredApiKey: "none", // Uses server-side service account
-    category: "anthropic",
+    id: "publishers/google/models/gemini-3-pro-preview",
+    name: "Gemini 3 Pro Preview",
+    provider: "Google Gemini",
+    description: "Google Gemini 3 Pro Preview model for entity extraction",
+    requiredApiKey: "", // No API key required - uses service account from secrets.toml
+    category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "global",
+    location: "us-central1",
   },
   {
     id: "claude-opus-4-1@20250805",

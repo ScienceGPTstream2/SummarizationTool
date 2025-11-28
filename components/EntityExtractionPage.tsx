@@ -347,6 +347,15 @@ export function EntityExtractionPage({
               : f
           ),
         }));
+
+        // Mark as completed immediately
+        setFileProcessingStatus((prev) => ({
+          ...prev,
+          [file.fileId]: {
+            ...prev[file.fileId],
+            status: "completed",
+          },
+        }));
       }
     } catch (err) {
       console.error(`Error generating summary for file ${file.fileId}:`, err);
@@ -358,16 +367,7 @@ export function EntityExtractionPage({
         },
       }));
     } finally {
-      // Mark as completed if successful
-      if (files.find((f) => f.fileId === file.fileId)?.finalSummary) {
-        setFileProcessingStatus((prev) => ({
-          ...prev,
-          [file.fileId]: {
-            ...prev[file.fileId],
-            status: "completed",
-          },
-        }));
-      }
+      // No cleanup needed here
     }
   };
 

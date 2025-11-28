@@ -53,8 +53,10 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
+  Download,
 } from "lucide-react";
 import { DocumentData } from "../App";
+import { downloadEvaluationReport } from "../utils/wordExport";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -102,13 +104,12 @@ const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
     provider: "vertex_ai",
   },
   {
-    id: "anthropic_sonnet_4_5",
-    name: "Claude Sonnet 4.5",
-    model: "claude-sonnet-4-5@20250929",
-    description:
-      "Latest Sonnet - balanced performance (supports structured outputs)",
+    id: "vertex_ai_3_pro",
+    name: "Gemini 3 Pro Preview",
+    model: "gemini-3-pro-preview",
+    description: "Latest generation - powerful reasoning for evaluation",
     available: true,
-    provider: "anthropic",
+    provider: "vertex_ai",
   },
   {
     id: "anthropic_opus_4_1",
@@ -1843,6 +1844,29 @@ export function EvaluationPage({
               any entity below to see the scores.
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Download Report Button */}
+        {documentData.entities.some(
+          (e) => e.evaluationResults && e.evaluationResults.length > 0
+        ) && (
+          <Card>
+            <CardContent className="pt-6">
+              <Button
+                onClick={() => downloadEvaluationReport(documentData)}
+                className="w-full"
+                size="lg"
+                variant="outline"
+              >
+                <Download className="h-5 w-5 mr-2" />
+                Download Evaluation Report (Word Document)
+              </Button>
+              <p className="text-sm text-muted-foreground text-center mt-3">
+                Export a comprehensive report with all evaluation results,
+                scores, and explanations
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         {/* Run Evaluation Button */}
