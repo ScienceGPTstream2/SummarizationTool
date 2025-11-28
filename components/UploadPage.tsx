@@ -54,6 +54,9 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     new Set()
   );
   const [processedFiles, setProcessedFiles] = useState<Record<string, any>>({});
+  const [processingErrors, setProcessingErrors] = useState<
+    Record<string, string>
+  >({});
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
 
   const MAX_FILES = 10;
@@ -268,11 +271,16 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   const handleProcessAll = async () => {
     if (selectedFiles.length === 0) return;
 
-    // Mark all as processing initially
+    // Mark all as processing initially and clear errors
     const filesToProcess = selectedFiles.filter(
       (f) => uploadResults[f.name]?.file_id
     );
     setProcessingFiles(new Set(filesToProcess.map((f) => f.name)));
+    setProcessingErrors((prev) => {
+      const newErrors = { ...prev };
+      filesToProcess.forEach((f) => delete newErrors[f.name]);
+      return newErrors;
+    });
 
     // Limit concurrency to 5 to prevent browser freeze
     const limit = pLimit(5);
@@ -324,6 +332,12 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
             toast.success(`${file.name} processed successfully`);
           } catch (error) {
             console.error(`Error processing ${file.name}:`, error);
+            const errorMsg =
+              error instanceof Error ? error.message : "Processing failed";
+            setProcessingErrors((prev) => ({
+              ...prev,
+              [file.name]: errorMsg,
+            }));
             toast.error(`Failed to process ${file.name}`);
           } finally {
             setProcessingFiles((prev) => {
@@ -646,9 +660,22 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                         Completed
                       </span>
                     )}
-                    {!isProcessing && !isProcessed && (
-                      <span className="text-gray-400">Pending</span>
-                    )}
+                    {!isProcessing &&
+                      !isProcessed &&
+                      processingErrors[file.name] && (
+                        <span
+                          className="flex items-center text-red-600"
+                          title={processingErrors[file.name]}
+                        >
+                          <XCircle className="h-3 w-3 mr-1" />
+                          Failed
+                        </span>
+                      )}
+                    {!isProcessing &&
+                      !isProcessed &&
+                      !processingErrors[file.name] && (
+                        <span className="text-gray-400">Pending</span>
+                      )}
                   </div>
                 );
               })}

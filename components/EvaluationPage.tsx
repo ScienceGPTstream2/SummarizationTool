@@ -8,6 +8,13 @@ import {
   CardTitle,
 } from "./ui/card";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -169,6 +176,35 @@ export function EvaluationPage({
   documentData,
   setDocumentData,
 }: EvaluationPageProps) {
+  // Initialize files from documentData
+  const [files, setFiles] = useState<any[]>(() => {
+    if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
+      return documentData.uploadedFiles;
+    }
+    // Backward compatibility
+    return [
+      {
+        fileId: documentData.fileId || "single",
+        file: documentData.file,
+        studyType: documentData.studyType,
+        selectedModel: documentData.selectedModel,
+        entities: documentData.entities,
+        summaryPrompt: documentData.summaryPrompt,
+        finalSummary: documentData.finalSummary,
+        processingResult: {
+          conversionId: documentData.conversionId,
+          processorUsed: documentData.processorUsed,
+        },
+      },
+    ];
+  });
+
+  const [selectedFileId, setSelectedFileId] = useState<string>(
+    files.length > 0 ? files[0].fileId : ""
+  );
+
+  const currentFile =
+    files.find((f) => f.fileId === selectedFileId) || files[0];
   // Default evaluation steps
   const DEFAULT_EVALUATION_STEPS = {
     correctness: [
@@ -200,15 +236,21 @@ export function EvaluationPage({
   };
 
   // Entity ground truths
+  // Entity ground truths - synced with current file
   const [entityGroundTruths, setEntityGroundTruths] = useState<
     Record<string, string>
-  >(() => {
-    const initial: Record<string, string> = {};
-    documentData.entities.forEach((entity) => {
-      initial[entity.name] = entity.groundTruth || "";
-    });
-    return initial;
-  });
+  >({});
+
+  // Sync ground truths when file changes
+  useEffect(() => {
+    if (currentFile) {
+      const initial: Record<string, string> = {};
+      (currentFile.entities || []).forEach((entity: any) => {
+        initial[entity.name] = entity.groundTruth || "";
+      });
+      setEntityGroundTruths(initial);
+    }
+  }, [selectedFileId, files]);
 
   // Selected metrics - restore from documentData or use defaults
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(
@@ -363,26 +405,51 @@ export function EvaluationPage({
   }, [selectedMetrics, selectedProviders, customEvaluationSteps]);
 
   // Persist ground truths to entities in documentData whenever they change
+  // Persist ground truths to entities in files state whenever they change
   useEffect(() => {
-    const hasGroundTruthChanges = documentData.entities.some(
-      (entity) => entity.groundTruth !== entityGroundTruths[entity.name]
+    if (!currentFile) return;
+
+    const hasGroundTruthChanges = (currentFile.entities || []).some(
+      (entity: any) => entity.groundTruth !== entityGroundTruths[entity.name]
     );
 
     if (hasGroundTruthChanges) {
-      const updatedEntities = documentData.entities.map((entity) => ({
-        ...entity,
-        groundTruth: entityGroundTruths[entity.name] || entity.groundTruth,
-      }));
-
-      setDocumentData({
-        ...documentData,
-        entities: updatedEntities,
-      });
+      setFiles((prev) =>
+        prev.map((f) => {
+          if (f.fileId === selectedFileId) {
+            return {
+              ...f,
+              entities: f.entities.map((entity: any) => ({
+                ...entity,
+                groundTruth:
+                  entityGroundTruths[entity.name] || entity.groundTruth,
+              })),
+            };
+          }
+          return f;
+        })
+      );
     }
   }, [entityGroundTruths]);
 
+  // Sync files back to documentData
+  useEffect(() => {
+    setDocumentData((prev) => ({
+      ...prev,
+      uploadedFiles: files,
+      // Also update legacy fields for backward compatibility if single file
+      ...(files.length === 1
+        ? {
+            entities: files[0].entities,
+          }
+        : {}),
+    }));
+  }, [files]);
+
   // Check for warnings when metrics change
   useEffect(() => {
+    if (!currentFile) return;
+
     const newWarnings: string[] = [];
     const metricsRequiringGroundTruth = selectedMetrics.filter((m) => {
       const metric = METRICS.find((met) => met.id === m);
@@ -390,8 +457,8 @@ export function EvaluationPage({
     });
 
     if (metricsRequiringGroundTruth.length > 0) {
-      const entitiesWithoutGroundTruth = documentData.entities.filter(
-        (entity) => !entityGroundTruths[entity.name]?.trim()
+      const entitiesWithoutGroundTruth = (currentFile.entities || []).filter(
+        (entity: any) => !entityGroundTruths[entity.name]?.trim()
       );
 
       if (entitiesWithoutGroundTruth.length > 0) {
@@ -402,7 +469,7 @@ export function EvaluationPage({
     }
 
     setWarnings(newWarnings);
-  }, [selectedMetrics, entityGroundTruths, documentData.entities]);
+  }, [selectedMetrics, entityGroundTruths, currentFile]);
 
   const updateGroundTruth = (entityName: string, value: string) => {
     setEntityGroundTruths((prev) => ({
@@ -496,8 +563,8 @@ export function EvaluationPage({
     token: string,
     signal: AbortSignal
   ) => {
-    const entityIndex = documentData.entities.findIndex(
-      (e) => e.name === entity.name
+    const entityIndex = (currentFile.entities || []).findIndex(
+      (e: any) => e.name === entity.name
     );
     if (entityIndex === -1) return;
 
@@ -574,49 +641,54 @@ export function EvaluationPage({
           `✅ ${provider.model} - ${entity.name}: ${(result.aggregate_score * 100).toFixed(1)}%`
         );
 
-        // Update document data with new result
-        setDocumentData((prevData) => {
-          const newEntities = [...prevData.entities];
-          const targetIndex = newEntities.findIndex(
-            (e) => e.name === entity.name
-          );
+        // Update files state with new result
+        setFiles((prevFiles) => {
+          return prevFiles.map((file) => {
+            if (file.fileId !== selectedFileId) return file;
 
-          if (targetIndex !== -1) {
-            if (!newEntities[targetIndex].evaluationResults) {
-              newEntities[targetIndex].evaluationResults = [];
-            }
-
-            // Remove any existing result from this provider+model combination to avoid duplicates
-            const existingResults = newEntities[targetIndex].evaluationResults!;
-            const filteredResults = existingResults.filter(
-              (r) =>
-                !(r.provider === result.provider && r.model === result.model)
+            const newEntities = [...file.entities];
+            const targetIndex = newEntities.findIndex(
+              (e: any) => e.name === entity.name
             );
 
-            // Add the new result
-            newEntities[targetIndex].evaluationResults = [
-              ...filteredResults,
-              {
-                provider: result.provider,
-                model: result.model,
-                metrics: result.metrics,
-                aggregate_score: result.aggregate_score,
-                all_passed: result.all_passed,
-                evaluation_time: result.evaluation_time,
-              },
-            ];
+            if (targetIndex !== -1) {
+              if (!newEntities[targetIndex].evaluationResults) {
+                newEntities[targetIndex].evaluationResults = [];
+              }
 
-            // Update ground truth if provided
-            if (entityGroundTruths[entity.name]) {
-              newEntities[targetIndex].groundTruth =
-                entityGroundTruths[entity.name];
+              // Remove any existing result from this provider+model combination to avoid duplicates
+              const existingResults =
+                newEntities[targetIndex].evaluationResults!;
+              const filteredResults = existingResults.filter(
+                (r: any) =>
+                  !(r.provider === result.provider && r.model === result.model)
+              );
+
+              // Add the new result
+              newEntities[targetIndex].evaluationResults = [
+                ...filteredResults,
+                {
+                  provider: result.provider,
+                  model: result.model,
+                  metrics: result.metrics,
+                  aggregate_score: result.aggregate_score,
+                  all_passed: result.all_passed,
+                  evaluation_time: result.evaluation_time,
+                },
+              ];
+
+              // Update ground truth if provided
+              if (entityGroundTruths[entity.name]) {
+                newEntities[targetIndex].groundTruth =
+                  entityGroundTruths[entity.name];
+              }
             }
-          }
 
-          return {
-            ...prevData,
-            entities: newEntities,
-          };
+            return {
+              ...file,
+              entities: newEntities,
+            };
+          });
         });
       } catch (error: any) {
         if (error.name === "AbortError") {
@@ -697,7 +769,9 @@ export function EvaluationPage({
       return;
     }
 
-    const entity = documentData.entities.find((e) => e.name === entityName);
+    const entity = (currentFile.entities || []).find(
+      (e: any) => e.name === entityName
+    );
     if (!entity) return;
 
     // Validation: Check ground truth for metrics that require it
@@ -732,7 +806,9 @@ export function EvaluationPage({
   };
 
   const executeRerunEntity = async (entityName: string) => {
-    const entity = documentData.entities.find((e) => e.name === entityName);
+    const entity = (currentFile.entities || []).find(
+      (e: any) => e.name === entityName
+    );
     if (!entity) return;
 
     // Start single entity evaluation
@@ -796,15 +872,15 @@ export function EvaluationPage({
     );
 
     if (metricsRequiringGroundTruth.length > 0) {
-      const entitiesWithoutGroundTruth = documentData.entities
-        .filter((e) => e.extracted)
-        .filter((entity) => !entityGroundTruths[entity.name]?.trim());
+      const entitiesWithoutGroundTruth = (currentFile.entities || [])
+        .filter((e: any) => e.extracted)
+        .filter((entity: any) => !entityGroundTruths[entity.name]?.trim());
 
       if (entitiesWithoutGroundTruth.length > 0) {
         setValidationMessage({
           title: "Ground Truth Required",
           description: `You selected ${metricsRequiringGroundTruth.map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(" and ")} metrics which require ground truth for comparison. Please provide ground truth for all entities below, or deselect these metrics to proceed.`,
-          missingEntities: entitiesWithoutGroundTruth.map((e) => e.name),
+          missingEntities: entitiesWithoutGroundTruth.map((e: any) => e.name),
         });
         setShowValidationDialog(true);
         return;
@@ -812,9 +888,11 @@ export function EvaluationPage({
     }
 
     // Check if any entities already have results
-    const entitiesToEvaluate = documentData.entities.filter((e) => e.extracted);
+    const entitiesToEvaluate = (currentFile.entities || []).filter(
+      (e: any) => e.extracted
+    );
     const hasExistingResults = entitiesToEvaluate.some(
-      (e) => e.evaluationResults && e.evaluationResults.length > 0
+      (e: any) => e.evaluationResults && e.evaluationResults.length > 0
     );
 
     if (hasExistingResults) {
@@ -846,8 +924,8 @@ export function EvaluationPage({
       if (!token) throw new Error("No token found");
 
       // Filter entities that have extractions
-      const entitiesToEvaluate = documentData.entities.filter(
-        (e) => e.extracted
+      const entitiesToEvaluate = (currentFile.entities || []).filter(
+        (e: any) => e.extracted
       );
 
       if (entitiesToEvaluate.length === 0) {
@@ -985,17 +1063,98 @@ export function EvaluationPage({
       <div className="flex items-center gap-4 mb-6">
         <Button variant="outline" size="sm" onClick={onBack}>
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Extraction
+          Back
         </Button>
         <div>
-          <h2 className="text-xl font-semibold">
-            Evaluation & Quality Assessment
-          </h2>
+          <h2 className="text-xl">Evaluation & Validation</h2>
           <p className="text-muted-foreground">
-            Evaluate extraction quality with multiple LLM judges
+            Evaluate extraction quality against ground truth using LLM judges
           </p>
         </div>
       </div>
+
+      {/* File Selector for Batch */}
+      {files.length > 0 && (
+        <div className="mb-6">
+          <Label className="mb-2 block">Select Document to Evaluate</Label>
+          <Select
+            value={selectedFileId}
+            onValueChange={setSelectedFileId}
+            disabled={isEvaluating}
+          >
+            <SelectTrigger className="w-full md:w-[400px] h-auto py-2">
+              <SelectValue placeholder="Select document">
+                {(() => {
+                  const file = files.find((f) => f.fileId === selectedFileId);
+                  if (!file) return "Select document";
+
+                  // Check evaluation status
+                  const hasResults = file.entities?.some(
+                    (e: any) =>
+                      e.evaluationResults && e.evaluationResults.length > 0
+                  );
+                  const allEvaluated = file.entities?.every(
+                    (e: any) =>
+                      e.evaluationResults && e.evaluationResults.length > 0
+                  );
+
+                  return (
+                    <div className="flex flex-col items-start text-left">
+                      <span className="font-medium truncate w-full">
+                        {file.file?.name || "Document"}
+                      </span>
+                      {allEvaluated ? (
+                        <span className="text-xs text-green-600">
+                          Evaluation Completed
+                        </span>
+                      ) : hasResults ? (
+                        <span className="text-xs text-blue-600">
+                          Partially Evaluated
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">
+                          Not Evaluated
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {files.map((file) => {
+                const hasResults = file.entities?.some(
+                  (e: any) =>
+                    e.evaluationResults && e.evaluationResults.length > 0
+                );
+                const allEvaluated = file.entities?.every(
+                  (e: any) =>
+                    e.evaluationResults && e.evaluationResults.length > 0
+                );
+
+                return (
+                  <SelectItem key={file.fileId} value={file.fileId}>
+                    <div className="flex items-center gap-2">
+                      {allEvaluated ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
+                      ) : hasResults ? (
+                        <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                      ) : (
+                        <div className="h-4 w-4 rounded-full border border-gray-300 flex-shrink-0" />
+                      )}
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate max-w-[300px] font-medium">
+                          {file.file?.name || "Document"}
+                        </span>
+                      </div>
+                    </div>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Warnings */}
       {warnings.length > 0 && (
@@ -1499,7 +1658,11 @@ export function EvaluationPage({
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">
               Entities (
-              {documentData.entities.filter((e) => e.extracted).length})
+              {
+                (currentFile.entities || []).filter((e: any) => e.extracted)
+                  .length
+              }
+              )
             </h3>
             <p className="text-sm text-muted-foreground">
               <Info className="h-4 w-4 inline mr-1" />
@@ -1509,9 +1672,9 @@ export function EvaluationPage({
 
           <ScrollArea className="h-[600px]">
             <div className="space-y-4 pr-4">
-              {documentData.entities
-                .filter((e) => e.extracted)
-                .map((entity, index) => {
+              {(currentFile.entities || [])
+                .filter((e: any) => e.extracted)
+                .map((entity: any, index: number) => {
                   const isEvaluating = evaluatingEntities.has(entity.name);
                   const isCompleted = completedEntities.has(entity.name);
 
@@ -1655,16 +1818,17 @@ export function EvaluationPage({
                                     // Get all unique metrics from all results
                                     const allMetrics = Array.from(
                                       new Set(
-                                        entity.evaluationResults!.flatMap((r) =>
-                                          r.metrics.map((m) =>
-                                            m.metric_name.replace(
-                                              "Entity Extraction ",
-                                              ""
+                                        entity.evaluationResults!.flatMap(
+                                          (r: any) =>
+                                            r.metrics.map((m: any) =>
+                                              m.metric_name.replace(
+                                                "Entity Extraction ",
+                                                ""
+                                              )
                                             )
-                                          )
                                         )
                                       )
-                                    );
+                                    ) as string[];
 
                                     // Metric definitions
                                     const metricDefinitions: Record<
@@ -1728,10 +1892,10 @@ export function EvaluationPage({
                                             {/* Evaluation Reasoning Cards */}
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                               {entity.evaluationResults!.map(
-                                                (result, idx) => {
+                                                (result: any, idx: number) => {
                                                   const metric =
                                                     result.metrics.find(
-                                                      (m) =>
+                                                      (m: any) =>
                                                         m.metric_name.replace(
                                                           "Entity Extraction ",
                                                           ""
@@ -1836,8 +2000,9 @@ export function EvaluationPage({
             <AlertDescription className="text-green-800 font-medium">
               ✅ Evaluation completed successfully! All{" "}
               {
-                documentData.entities.filter(
-                  (e) => e.evaluationResults && e.evaluationResults.length > 0
+                (currentFile.entities || []).filter(
+                  (e: any) =>
+                    e.evaluationResults && e.evaluationResults.length > 0
                 ).length
               }{" "}
               entities have been evaluated. Click "View Evaluation Results" on
@@ -1847,13 +2012,27 @@ export function EvaluationPage({
         )}
 
         {/* Download Report Button */}
-        {documentData.entities.some(
-          (e) => e.evaluationResults && e.evaluationResults.length > 0
+        {(currentFile.entities || []).some(
+          (e: any) => e.evaluationResults && e.evaluationResults.length > 0
         ) && (
           <Card>
             <CardContent className="pt-6">
               <Button
-                onClick={() => downloadEvaluationReport(documentData)}
+                onClick={() => {
+                  const reportData = {
+                    ...documentData,
+                    entities: currentFile.entities || [],
+                    file: currentFile.file,
+                    fileId: currentFile.fileId,
+                    studyType: currentFile.studyType || documentData.studyType,
+                    selectedModel:
+                      currentFile.selectedModel || documentData.selectedModel,
+                    processorUsed:
+                      currentFile.processingResult?.processorUsed ||
+                      documentData.processorUsed,
+                  };
+                  downloadEvaluationReport(reportData);
+                }}
                 className="w-full"
                 size="lg"
                 variant="outline"
@@ -1903,7 +2082,10 @@ export function EvaluationPage({
                 <Progress value={evaluationProgress} className="h-2" />
                 <p className="text-xs text-muted-foreground text-center">
                   {completedEntities.size} of{" "}
-                  {documentData.entities.filter((e) => e.extracted).length}{" "}
+                  {
+                    (currentFile.entities || []).filter((e: any) => e.extracted)
+                      .length
+                  }{" "}
                   entities completed
                 </p>
               </div>
@@ -1912,7 +2094,10 @@ export function EvaluationPage({
             {!isEvaluating && (
               <p className="text-sm text-muted-foreground text-center mt-3">
                 Evaluating{" "}
-                {documentData.entities.filter((e) => e.extracted).length}{" "}
+                {
+                  (currentFile.entities || []).filter((e: any) => e.extracted)
+                    .length
+                }{" "}
                 entities with {selectedMetrics.length} metrics across{" "}
                 {selectedProviders.length} provider(s)
               </p>

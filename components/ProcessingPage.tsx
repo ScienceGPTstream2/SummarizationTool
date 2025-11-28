@@ -203,17 +203,19 @@ export function ProcessingPage({
             <SelectContent>
               {files.map((file) => (
                 <SelectItem key={file.fileId} value={file.fileId}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     {file.status === "completed" && (
-                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
                     )}
                     {file.status === "processing" && (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
                     )}
                     {file.status === "error" && (
-                      <XCircle className="h-4 w-4 text-red-500" />
+                      <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
                     )}
-                    <span>{file.file.name}</span>
+                    <span className="truncate" title={file.file.name}>
+                      {file.file.name}
+                    </span>
                   </div>
                 </SelectItem>
               ))}
