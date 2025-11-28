@@ -6,6 +6,7 @@ import { EntityExtractionPage } from "./components/EntityExtractionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SettingsPage } from "./components/SettingsPage";
+import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
 import { Settings, ArrowLeft, Briefcase } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -203,15 +204,14 @@ export default function App() {
               ) : (
                 <div className="flex items-center">
                   {currentStep !== "executive" && (
-                    <Button
-                      variant="outline"
+                    <RainbowButton
                       size="sm"
                       onClick={() => setCurrentStep("executive")}
-                      className="mr-2"
+                      className="mr-2 !rounded-md"
                     >
                       <Briefcase className="h-4 w-4 mr-2" />
                       Executive Mode
-                    </Button>
+                    </RainbowButton>
                   )}
                   <Button
                     variant="outline"
