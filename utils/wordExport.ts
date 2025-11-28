@@ -84,10 +84,7 @@ export async function generateEvaluationReport(
   evaluatedEntities.forEach((entity) => {
     entity.evaluationResults?.forEach((result) => {
       result.metrics.forEach((metric) => {
-        const metricName = metric.metric_name.replace(
-          "Entity Extraction ",
-          ""
-        );
+        const metricName = metric.metric_name.replace("Entity Extraction ", "");
         allMetrics.add(metricName);
       });
     });
@@ -96,7 +93,7 @@ export async function generateEvaluationReport(
 
   // Build prompt template map - map prompt text to template name
   const promptTemplates = new Map<string, string>();
-  
+
   // Load templates for the study type to get correct names
   if (documentData.studyType) {
     const studyTemplate = loadStudyTypeTemplate(documentData.studyType);
@@ -357,10 +354,7 @@ export async function generateEvaluationReport(
     const entityMetrics = new Set<string>();
     entity.evaluationResults?.forEach((result) => {
       result.metrics.forEach((metric) => {
-        const metricName = metric.metric_name.replace(
-          "Entity Extraction ",
-          ""
-        );
+        const metricName = metric.metric_name.replace("Entity Extraction ", "");
         entityMetrics.add(metricName);
       });
     });
@@ -401,7 +395,9 @@ export async function generateEvaluationReport(
                 children: [
                   new TextRun({
                     text:
-                      documentData.processorUsed || documentData.parser || "N/A",
+                      documentData.processorUsed ||
+                      documentData.parser ||
+                      "N/A",
                     size: 16, // 8pt font
                   }),
                 ],
@@ -500,19 +496,15 @@ export async function generateEvaluationReport(
       // Add metric name and scores for each judge
       judges.forEach((judge) => {
         // Find the result for this judge
-        const result = entity.evaluationResults?.find(
-          (r) => r.model === judge
-        );
+        const result = entity.evaluationResults?.find((r) => r.model === judge);
 
         // Find the metric for this judge
         const metric = result?.metrics.find(
-          (m) =>
-            m.metric_name.replace("Entity Extraction ", "") === metricName
+          (m) => m.metric_name.replace("Entity Extraction ", "") === metricName
         );
 
         if (metric) {
           const scoreText = `${metricName}\n${(metric.score * 100).toFixed(0)}%`;
-          const passed = metric.success;
 
           rowCells.push(
             new TableCell({
@@ -591,11 +583,15 @@ export async function generateEvaluationReport(
   );
 
   // Group prompts by template for the reference section
-  const templateGroups = new Map<string, Array<{ name: string; prompt: string }>>();
+  const templateGroups = new Map<
+    string,
+    Array<{ name: string; prompt: string }>
+  >();
   const seenPrompts = new Set<string>();
 
   evaluatedEntities.forEach((entity) => {
-    const templateName = promptTemplates.get(entity.prompt) || "Unknown Template";
+    const templateName =
+      promptTemplates.get(entity.prompt) || "Unknown Template";
     const key = `${templateName}|${entity.prompt}`;
 
     if (!seenPrompts.has(key)) {
@@ -659,10 +655,7 @@ export async function generateEvaluationReport(
 
     entity.evaluationResults?.forEach((result) => {
       result.metrics.forEach((metric) => {
-        const metricName = metric.metric_name.replace(
-          "Entity Extraction ",
-          ""
-        );
+        const metricName = metric.metric_name.replace("Entity Extraction ", "");
         if (!metricMap.has(metricName)) {
           metricMap.set(metricName, []);
         }

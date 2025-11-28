@@ -48,7 +48,7 @@ export async function generateExecutiveSummary(
 
   // --- Common Citation Table (Level 1) ---
   // Citation: Study Author(s), Author Affiliations, Study Title, Publication Date, Journal
-  
+
   sections.push(
     new Paragraph({
       text: `Level 1 Structured Summary – ${
@@ -71,7 +71,10 @@ export async function generateExecutiveSummary(
   );
 
   const citationRows = [
-    createRow("Study Author(s)", getEntityValue(documentData, "Study Author(s)")),
+    createRow(
+      "Study Author(s)",
+      getEntityValue(documentData, "Study Author(s)")
+    ),
     createRow(
       "Author Affiliations",
       getEntityValue(documentData, "Author Affiliations")
@@ -361,7 +364,10 @@ export async function generateExecutiveSummary(
         children: [
           new TextRun({ text: "Study Author Noted Limitations: ", bold: true }),
           new TextRun({
-            text: getEntityValue(documentData, "Study Author Noted Limitations"),
+            text: getEntityValue(
+              documentData,
+              "Study Author Noted Limitations"
+            ),
           }),
         ],
       })
@@ -416,7 +422,9 @@ export function downloadExecutiveSummary(documentData: DocumentData) {
     const link = document.createElement("a");
     link.href = url;
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filePrefix = documentData.file ? documentData.file.name.replace(/\.[^/.]+$/, "") : "Executive_Summary";
+    const filePrefix = documentData.file
+      ? documentData.file.name.replace(/\.[^/.]+$/, "")
+      : "Executive_Summary";
     link.download = `${filePrefix}_Summary_${timestamp}.docx`;
     document.body.appendChild(link);
     link.click();

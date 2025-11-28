@@ -96,7 +96,7 @@ class AzureDocIntelligenceService:
                 output_content_format="markdown",
                 output=output_param,
             )
-        
+
         # Wait for completion (this is the blocking part)
         return poller.result()
 
@@ -144,7 +144,9 @@ class AzureDocIntelligenceService:
             # Include 'figures' in output if extract_figures is True
             output_param = ["figures"] if extract_figures else None
 
-            await self._log(log_path, "Document analysis started (in background thread)...")
+            await self._log(
+                log_path, "Document analysis started (in background thread)..."
+            )
 
             # Run the blocking analysis in a thread pool
             loop = asyncio.get_event_loop()
