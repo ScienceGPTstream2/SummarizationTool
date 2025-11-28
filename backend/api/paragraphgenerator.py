@@ -23,7 +23,7 @@ class ParagraphGenerationRequest(BaseModel):
     gemini_api_key: Optional[str] = None  # Gemini API key
     gemini_project_id: Optional[str] = None  # Gemini project ID
     gemini_location: Optional[str] = None  # Gemini location
-    max_tokens: int = 2048
+    max_tokens: int = 8048
     temperature: float = 0.0  # Added temperature
 
 

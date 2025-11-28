@@ -20,7 +20,7 @@ class ExtractRequest(BaseModel):
     gemini_api_key: Optional[str] = None  # Gemini API key
     gemini_project_id: Optional[str] = None  # Gemini project ID
     gemini_location: Optional[str] = None  # Gemini location
-    max_tokens: int = 1024
+    max_tokens: int = 8024
     temperature: float = 0.0
     model_type: Optional[str] = "azure"  # Renamed from provider
     model_id: Optional[str] = None  # For Gemini models
