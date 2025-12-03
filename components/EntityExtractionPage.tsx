@@ -65,6 +65,7 @@ import {
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
 import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 interface Reference {
   text: string;
@@ -215,10 +216,6 @@ export function EntityExtractionPage({
     // Import PDF.js dynamically
     // @ts-ignore
     const pdfjsLib = await import("pdfjs-dist");
-    // @ts-ignore - Vite handles ?url imports
-    const pdfjsWorker = (
-      await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
-    ).default;
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
     // Fetch all PDFs using PDF.js (they'll be cached in pdfDocumentCache)
