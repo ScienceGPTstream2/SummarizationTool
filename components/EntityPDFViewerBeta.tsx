@@ -15,7 +15,47 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 const analysisCache = new Map<string, any>();
-const pdfDocumentCache = new Map<string, Promise<any>>();
+// Cache for resolved PDF documents (not promises) - shared across all instances
+// Export so EntityExtractionPage can pre-populate it
+export const pdfDocumentCache = new Map<string, any>();
+// Cache for loading promises to prevent duplicate fetches
+const pdfLoadingPromiseCache = new Map<string, Promise<any>>();
+// Loading queue to stagger multiple simultaneous loads
+let activeLoads = 0;
+const MAX_CONCURRENT_LOADS = 2;
+const loadQueue: Array<() => void> = [];
+
+// Helper to manage loading queue
+const processLoadQueue = () => {
+  while (activeLoads < MAX_CONCURRENT_LOADS && loadQueue.length > 0) {
+    const nextLoad = loadQueue.shift();
+    if (nextLoad) {
+      activeLoads++;
+      nextLoad();
+    }
+  }
+};
+
+const queueLoad = (loadFn: () => Promise<void>): Promise<void> => {
+  return new Promise((resolve) => {
+    const wrappedLoad = async () => {
+      try {
+        await loadFn();
+      } finally {
+        activeLoads--;
+        processLoadQueue();
+        resolve();
+      }
+    };
+
+    if (activeLoads < MAX_CONCURRENT_LOADS) {
+      activeLoads++;
+      wrappedLoad();
+    } else {
+      loadQueue.push(wrappedLoad);
+    }
+  });
+};
 
 interface Reference {
   text: string;
@@ -67,6 +107,8 @@ function EntityPDFViewerBetaComponent({
   const panStartRef = useRef({ x: 0, y: 0 });
   const scrollStartRef = useRef({ left: 0, top: 0 });
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
 
   const canPan = zoomRatio > 1.02;
 
@@ -200,6 +242,33 @@ function EntityPDFViewerBetaComponent({
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
+  // Intersection Observer for lazy loading
+  useEffect(() => {
+    if (!viewerContainerRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            // Once visible, we can stop observing
+            observer.disconnect();
+          }
+        });
+      },
+      {
+        rootMargin: "100px", // Start loading slightly before visible
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(viewerContainerRef.current);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
   // Fetch analysis result for coordinate system
   useEffect(() => {
     const fetchAnalysis = async () => {
@@ -236,10 +305,14 @@ function EntityPDFViewerBetaComponent({
     setScale(fitToWidthScale * zoomRatio);
   }, [fitToWidthScale, zoomRatio]);
 
-  // Load and render PDF
+  // Load and render PDF (only when visible)
   useEffect(() => {
-    if (!fileId) {
-      console.log("[EntityPDFViewerBeta] No fileId, waiting...");
+    if (!fileId || !isVisible) {
+      if (!fileId) {
+        console.log("[EntityPDFViewerBeta] No fileId, waiting...");
+      } else if (!isVisible) {
+        console.log("[EntityPDFViewerBeta] Not visible yet, deferring load...");
+      }
       return;
     }
 
@@ -247,76 +320,125 @@ function EntityPDFViewerBetaComponent({
 
     const loadPDF = async () => {
       try {
-        setLoading(true);
-        console.log("[EntityPDFViewerBeta] Loading PDF document...");
+        // Check if we already have the resolved document in cache
+        const cachedDoc = pdfDocumentCache.get(fileId);
+        if (cachedDoc) {
+          console.log("[EntityPDFViewerBeta] Using cached PDF document");
+          if (!isCancelled) {
+            setPdfDocument(cachedDoc);
+            setTotalPages(cachedDoc.numPages);
+            setLoading(false);
 
-        let loadingTaskPromise = pdfDocumentCache.get(fileId);
+            // Calculate fit-to-width scale for first page
+            if (containerRef.current) {
+              try {
+                const page = await cachedDoc.getPage(1);
+                if (isCancelled) return;
 
-        if (!loadingTaskPromise) {
-          const token = localStorage.getItem("token");
-          const loadingTask = pdfjsLib.getDocument({
-            url: `/api/files/${fileId}`,
-            httpHeaders: { Authorization: `Bearer ${token}` },
-            disableAutoFetch: false,
-            disableStream: false,
-            rangeChunkSize: 65536, // 64KB chunks for faster initial render
-          });
-
-          loadingTask.onProgress = (progressData: {
-            loaded: number;
-            total: number;
-          }) => {
-            if (progressData.total > 0) {
-              const percent = Math.round(
-                (progressData.loaded / progressData.total) * 100
-              );
-              setLoadingProgress(percent);
+                const viewport = page.getViewport({ scale: 1.0 });
+                const containerWidth = containerRef.current.clientWidth - 48;
+                const calculatedScale = containerWidth / viewport.width;
+                setFitToWidthScale(calculatedScale);
+                setZoomRatio(1);
+              } catch (e) {
+                console.error("Error calculating fit-to-width:", e);
+              }
             }
-          };
-
-          loadingTaskPromise = loadingTask.promise;
-          pdfDocumentCache.set(fileId, loadingTaskPromise);
-        }
-
-        // Add a timeout to prevent infinite loading
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("PDF loading timed out")), 15000)
-        );
-
-        // Race between loading and timeout
-        const pdf = (await Promise.race([
-          loadingTaskPromise,
-          timeoutPromise,
-        ])) as any;
-
-        if (isCancelled) return;
-
-        console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
-        setPdfDocument(pdf);
-        setTotalPages(pdf.numPages);
-
-        // Calculate fit-to-width scale for first page
-        if (containerRef.current) {
-          try {
-            const page = await pdf.getPage(1);
-            if (isCancelled) return;
-
-            const viewport = page.getViewport({ scale: 1.0 });
-            const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
-            const calculatedScale = containerWidth / viewport.width;
-            setFitToWidthScale(calculatedScale);
-            setZoomRatio(1); // fit-to-width baseline
-            console.log(
-              "[EntityPDFViewerBeta] Fit-to-width scale:",
-              calculatedScale
-            );
-          } catch (e) {
-            console.error("Error calculating fit-to-width:", e);
-            // Non-fatal error, continue
           }
+          return;
         }
 
-        setLoading(false);
+        // If not in cache, queue the load to prevent thundering herd
+        await queueLoad(async () => {
+          // Double check cache in case another instance loaded it while we were queued
+          const recheck = pdfDocumentCache.get(fileId);
+          if (recheck) {
+            if (!isCancelled) {
+              setPdfDocument(recheck);
+              setTotalPages(recheck.numPages);
+              setLoading(false);
+            }
+            return;
+          }
+
+          setLoading(true);
+          console.log("[EntityPDFViewerBeta] Loading PDF document...");
+
+          // Check if there's already a loading promise
+          let loadingTaskPromise = pdfLoadingPromiseCache.get(fileId);
+
+          if (!loadingTaskPromise) {
+            const token = localStorage.getItem("token");
+            const loadingTask = pdfjsLib.getDocument({
+              url: `/api/files/${fileId}`,
+              httpHeaders: { Authorization: `Bearer ${token}` },
+              disableAutoFetch: false,
+              disableStream: false,
+              rangeChunkSize: 65536, // 64KB chunks for faster initial render
+            });
+
+            loadingTask.onProgress = (progressData: {
+              loaded: number;
+              total: number;
+            }) => {
+              if (progressData.total > 0) {
+                const percent = Math.round(
+                  (progressData.loaded / progressData.total) * 100
+                );
+                setLoadingProgress(percent);
+              }
+            };
+
+            loadingTaskPromise = loadingTask.promise;
+            pdfLoadingPromiseCache.set(fileId, loadingTaskPromise);
+          }
+
+          // Add a timeout to prevent infinite loading
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("PDF loading timed out")), 15000)
+          );
+
+          // Race between loading and timeout
+          const pdf = (await Promise.race([
+            loadingTaskPromise,
+            timeoutPromise,
+          ])) as any;
+
+          if (isCancelled) return;
+
+          console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
+
+          // Cache the resolved document
+          pdfDocumentCache.set(fileId, pdf);
+          // Clean up the promise cache
+          pdfLoadingPromiseCache.delete(fileId);
+
+          setPdfDocument(pdf);
+          setTotalPages(pdf.numPages);
+
+          // Calculate fit-to-width scale for first page
+          if (containerRef.current) {
+            try {
+              const page = await pdf.getPage(1);
+              if (isCancelled) return;
+
+              const viewport = page.getViewport({ scale: 1.0 });
+              const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
+              const calculatedScale = containerWidth / viewport.width;
+              setFitToWidthScale(calculatedScale);
+              setZoomRatio(1); // fit-to-width baseline
+              console.log(
+                "[EntityPDFViewerBeta] Fit-to-width scale:",
+                calculatedScale
+              );
+            } catch (e) {
+              console.error("Error calculating fit-to-width:", e);
+              // Non-fatal error, continue
+            }
+          }
+
+          setLoading(false);
+        });
       } catch (err: any) {
         if (isCancelled) return;
         console.error("[EntityPDFViewerBeta] Error loading PDF:", err);
@@ -324,6 +446,7 @@ function EntityPDFViewerBetaComponent({
         setLoading(false);
         // Remove from cache if failed so we can try again
         pdfDocumentCache.delete(fileId);
+        pdfLoadingPromiseCache.delete(fileId);
       }
     };
 
@@ -331,11 +454,9 @@ function EntityPDFViewerBetaComponent({
 
     return () => {
       isCancelled = true;
-      if (pdfDocument) {
-        pdfDocument.cleanup();
-      }
+      // Note: We don't cleanup the pdfDocument here as it's shared across instances
     };
-  }, [fileId]);
+  }, [fileId, isVisible]);
 
   // Update fit-to-width scale when page changes or container resizes
   useEffect(() => {
@@ -771,8 +892,25 @@ function EntityPDFViewerBetaComponent({
     }
   }, [isPanning]);
 
+  // Show placeholder loading until visible
+  if (!isVisible) {
+    return (
+      <div
+        ref={viewerContainerRef}
+        className="flex flex-col h-full border rounded-md overflow-hidden bg-white"
+      >
+        <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="text-sm text-gray-400">Loading PDF viewer...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full border rounded-md overflow-hidden bg-white">
+    <div
+      ref={viewerContainerRef}
+      className="flex flex-col h-full border rounded-md overflow-hidden bg-white"
+    >
       {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-gray-50">
         <div className="flex items-center space-x-2">

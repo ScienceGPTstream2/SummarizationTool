@@ -202,6 +202,66 @@ export function EntityExtractionPage({
     }
   }, [selectedFileId, files]);
 
+  // Pre-fetch PDFs to avoid backend bottleneck during entity extraction
+  // This loads PDFs through PDF.js and caches them, just like EntityPDFViewerBeta does
+  const preFetchPDFs = async (pendingFiles: any[]) => {
+    console.log(
+      "[Pre-fetch] Starting PDF pre-fetch for",
+      pendingFiles.length,
+      "files"
+    );
+    const token = localStorage.getItem("token");
+
+    // Import PDF.js dynamically
+    // @ts-ignore
+    const pdfjsLib = await import("pdfjs-dist");
+    // @ts-ignore - Vite handles ?url imports
+    const pdfjsWorker = (
+      await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
+    ).default;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+    // Fetch all PDFs using PDF.js (they'll be cached in pdfDocumentCache)
+    const fetchPromises = pendingFiles.map(async (file) => {
+      try {
+        // Check if already in cache (from EntityPDFViewerBeta)
+        const { pdfDocumentCache } = await import("./EntityPDFViewerBeta");
+        if (pdfDocumentCache.has(file.fileId)) {
+          console.log(
+            `[Pre-fetch] ✅ Already cached: ${file.file?.name || file.fileId}`
+          );
+          return;
+        }
+
+        // Load through PDF.js to match EntityPDFViewerBeta's caching
+        const loadingTask = pdfjsLib.getDocument({
+          url: `/api/files/${file.fileId}`,
+          httpHeaders: { Authorization: `Bearer ${token}` },
+          disableAutoFetch: false,
+          disableStream: false,
+        });
+
+        const pdfDoc = await loadingTask.promise;
+
+        // Cache the resolved document (same as EntityPDFViewerBeta)
+        pdfDocumentCache.set(file.fileId, pdfDoc);
+
+        console.log(
+          `[Pre-fetch] ✅ Cached PDF for ${file.file?.name || file.fileId}`
+        );
+      } catch (err) {
+        console.warn(
+          `[Pre-fetch] Failed to pre-fetch PDF for ${file.fileId}:`,
+          err
+        );
+        // Non-fatal, continue with other fetches
+      }
+    });
+
+    await Promise.all(fetchPromises);
+    console.log("[Pre-fetch] All PDFs pre-fetched and cached in PDF.js");
+  };
+
   // Parallel Batch Processing
   const startBatchProcessing = async () => {
     setIsBatchRunning(true);
@@ -218,6 +278,17 @@ export function EntityExtractionPage({
       };
     });
     setFileProcessingStatus((prev) => ({ ...prev, ...initialStatus }));
+
+    // Pre-fetch all PDFs BEFORE starting entity extraction
+    // This prevents backend bottleneck when switching files during processing
+    try {
+      await preFetchPDFs(pendingFiles);
+    } catch (err) {
+      console.error(
+        "[Pre-fetch] PDF pre-fetch failed, continuing anyway:",
+        err
+      );
+    }
 
     // Limit concurrency to 5 to prevent UI freeze
     const limit = pLimit(5);
@@ -781,6 +852,23 @@ export function EntityExtractionPage({
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
       const token = localStorage.getItem("token") || "";
+
+      // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
+      try {
+        console.log("[Pre-fetch] Caching PDF before entity extraction...");
+        const pdfResponse = await fetch(`/api/files/${currentFile.fileId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (pdfResponse.ok) {
+          await pdfResponse.blob(); // Force browser to cache
+          console.log("[Pre-fetch] ✅ PDF cached successfully");
+        }
+      } catch (err) {
+        console.warn(
+          "[Pre-fetch] Failed to pre-fetch PDF, continuing anyway:",
+          err
+        );
+      }
 
       // Set initial batch state immediately
       // This part of the code seems to be for a batch file processing scenario,
