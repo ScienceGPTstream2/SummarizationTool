@@ -3,6 +3,7 @@ import LoginPage from "./components/LoginPage";
 import { UploadPage } from "./components/UploadPage";
 import { ProcessingPage } from "./components/ProcessingPage";
 import { EntityExtractionPage } from "./components/EntityExtractionPage";
+import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SettingsPage } from "./components/SettingsPage";
@@ -12,11 +13,13 @@ import { Settings, ArrowLeft, Briefcase } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { getValidToken } from "./utils/authUtils";
+import { Toaster } from "./components/ui/sonner";
 
 export type Step =
   | "login"
   | "upload"
   | "processing"
+  | "study_selection"
   | "extraction"
   | "evaluation"
   | "settings"
@@ -78,6 +81,41 @@ export interface DocumentData {
     selectedProviders?: string[];
     customEvaluationSteps?: Record<string, string[]>;
   };
+  uploadedFiles?: Array<{
+    file: File;
+    fileId: string;
+    uploadResult: any;
+    status?: "pending" | "processing" | "completed" | "error";
+    processingResult?: {
+      conversionId?: string;
+      markdownPath?: string;
+      processorUsed?: string;
+      figures?: any[];
+      figuresCount?: number;
+      tablesCount?: number;
+      extractedText?: string;
+    };
+    // Extraction configuration and results
+    studyType?: string;
+    selectedModel?: string;
+    entities?: Array<{
+      name: string;
+      prompt: string;
+      extracted?: string;
+      answer?: string;
+      references?: any[];
+      duration?: number;
+      promptTokens?: number;
+      completionTokens?: number;
+      groundTruth?: string;
+      evaluationResults?: any[];
+    }>;
+    summaryPrompt?: string;
+    finalSummary?: string;
+
+    selectedParser?: string;
+    error?: string;
+  }>;
 }
 
 export default function App() {
@@ -94,6 +132,7 @@ export default function App() {
     selectedModel: "",
     entities: [],
     finalSummary: "",
+    uploadedFiles: [],
   });
 
   const handleLogin = async (jwt: string) => {
@@ -108,6 +147,8 @@ export default function App() {
     if (step === "upload") {
       setCurrentStep("processing");
     } else if (step === "processing") {
+      setCurrentStep("study_selection");
+    } else if (step === "study_selection") {
       setCurrentStep("extraction");
     } else if (step === "extraction") {
       setCurrentStep("evaluation");
@@ -122,8 +163,10 @@ export default function App() {
   const handleBack = () => {
     if (currentStep === "processing") {
       setCurrentStep("upload");
-    } else if (currentStep === "extraction") {
+    } else if (currentStep === "study_selection") {
       setCurrentStep("processing");
+    } else if (currentStep === "extraction") {
+      setCurrentStep("study_selection");
     } else if (currentStep === "evaluation") {
       setCurrentStep("extraction");
     } else if (currentStep === "settings") {
@@ -159,6 +202,14 @@ export default function App() {
             documentData={documentData}
           />
         );
+      case "study_selection":
+        return (
+          <BatchStudySelectionPage
+            onBack={handleBack}
+            onComplete={(data) => handleStepComplete("study_selection", data)}
+            documentData={documentData}
+          />
+        );
       case "extraction":
         return (
           <EntityExtractionPage
@@ -190,8 +241,8 @@ export default function App() {
   return (
     <ThemeProvider>
       <div className="min-h-screen bg-background text-foreground">
-        <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-4">
+        <header className="border-b border-border sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">
+          <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-medium text-foreground">
                 AI Document Summarization Tool
@@ -247,6 +298,14 @@ export default function App() {
                   <span className="text-sm">Processing</span>
                 </div>
                 <div
+                  className={`flex items-center gap-2 ${currentStep === "study_selection" ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  <div
+                    className={`w-3 h-3 rounded-full ${currentStep === "study_selection" ? "bg-red-500" : "bg-muted"}`}
+                  />
+                  <span className="text-sm">Study Selection</span>
+                </div>
+                <div
                   className={`flex items-center gap-2 ${currentStep === "extraction" ? "text-foreground" : "text-muted-foreground"}`}
                 >
                   <div
@@ -269,6 +328,7 @@ export default function App() {
         <main className="container mx-auto px-4 py-8 bg-background">
           {renderStep()}
         </main>
+        <Toaster />
       </div>
     </ThemeProvider>
   );

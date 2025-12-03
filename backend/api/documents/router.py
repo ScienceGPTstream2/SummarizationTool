@@ -287,7 +287,7 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
         figure_path = None
         for path in possible_paths:
-            print(f"[FIGURE] Checking path: {path}")
+            print(f"[FIGURE] Checking path: {path.absolute()}")
             if path.exists():
                 figure_path = path
                 print(f"[FIGURE] ✅ Found at: {path}")

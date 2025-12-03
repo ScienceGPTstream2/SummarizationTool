@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { ScrollArea } from "./ui/scroll-area";
+// import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
 import { Table as TableIcon, ZoomIn, Loader2 } from "lucide-react";
 
@@ -90,10 +90,10 @@ function TablePreview({
 
   return (
     <div
-      className={`overflow-auto max-h-32 ${className}`}
+      className={`relative overflow-hidden border rounded-md ${className}`}
       onClick={onTableClick}
       style={{
-        fontSize: "10px",
+        height: "160px", // Fixed height for consistency
         cursor: "pointer",
       }}
     >
@@ -101,29 +101,39 @@ function TablePreview({
         .table-preview-wrapper table {
           border-collapse: collapse;
           width: 100%;
-          font-size: 9px;
+          font-size: 10px;
           background-color: white;
+          table-layout: auto; /* Allow columns to expand */
         }
         .table-preview-wrapper th,
         .table-preview-wrapper td {
-          border: 1px solid #cbd5e1;
-          padding: 3px 6px;
+          border: 1px solid #e2e8f0;
+          padding: 4px 8px;
           text-align: left;
-          min-width: 30px;
+          /* overflow: hidden; Removed to allow scrolling */
+          /* text-overflow: ellipsis; Removed to allow scrolling */
+          white-space: nowrap;
         }
         .table-preview-wrapper th {
-          background-color: #f1f5f9;
+          background-color: #f8fafc;
           font-weight: 600;
-          color: #1e293b;
+          color: #475569;
+          position: sticky;
+          top: 0;
+          z-index: 10;
         }
         .table-preview-wrapper tr:nth-child(even) {
-          background-color: #f8fafc;
+          background-color: #fcfcfc;
         }
         .table-preview-wrapper tr:hover {
-          background-color: #e2e8f0;
+          background-color: #f1f5f9;
         }
       `}</style>
-      <div className="table-preview-wrapper">{parse(sanitizedHtml)}</div>
+      <div className="table-preview-wrapper overflow-auto h-full pb-12">
+        {parse(sanitizedHtml)}
+      </div>
+      {/* Gradient Fade Overlay */}
+      <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none" />
     </div>
   );
 }
@@ -281,7 +291,7 @@ export function TablesGallery({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[500px]">
+          <div className="max-h-[500px] overflow-y-auto pr-2">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tableNumbers.map((tableNum) => (
                 <div
@@ -317,7 +327,7 @@ export function TablesGallery({
                 </div>
               ))}
             </div>
-          </ScrollArea>
+          </div>
         </CardContent>
       </Card>
 
