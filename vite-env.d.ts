@@ -5,3 +5,9 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Type declaration for Vite's ?url import suffix
+declare module "*?url" {
+  const url: string;
+  export default url;
+}
