@@ -272,9 +272,17 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     if (selectedFiles.length === 0) return;
 
     // Mark all as processing initially and clear errors
+    // Only process files that have been uploaded but NOT yet processed
     const filesToProcess = selectedFiles.filter(
-      (f) => uploadResults[f.name]?.file_id
+      (f) => uploadResults[f.name]?.file_id && !processedFiles[f.name]
     );
+
+    // If all files are already processed, show message and return
+    if (filesToProcess.length === 0) {
+      toast.info("All files have already been processed");
+      return;
+    }
+
     setProcessingFiles(new Set(filesToProcess.map((f) => f.name)));
     setProcessingErrors((prev) => {
       const newErrors = { ...prev };
