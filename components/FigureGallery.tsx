@@ -14,7 +14,7 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 
-import { ScrollArea } from "./ui/scroll-area";
+// import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
 import { Image as ImageIcon, ZoomIn, FileImage, Loader2 } from "lucide-react";
 
@@ -215,7 +215,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[600px] w-full pr-4">
+          <div className="h-[600px] w-full overflow-y-auto pr-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {figures.map((figure) => (
                 <div
@@ -269,7 +269,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                 </div>
               ))}
             </div>
-          </ScrollArea>
+          </div>
         </CardContent>
       </Card>
 

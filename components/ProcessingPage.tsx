@@ -1,12 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select";
 import { DocumentData } from "../App";
 import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
 import { FigureGallery } from "./FigureGallery";
@@ -198,9 +192,22 @@ export function ProcessingPage({
             onValueChange={setSelectedFileId}
           >
             <SelectTrigger className="w-full max-w-md">
-              <SelectValue placeholder="Select a document" />
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                {selectedFile?.status === "completed" && (
+                  <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                )}
+                {selectedFile?.status === "processing" && (
+                  <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                )}
+                {selectedFile?.status === "error" && (
+                  <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                )}
+                <span className="truncate" title={selectedFile?.file.name}>
+                  {selectedFile ? selectedFile.file.name : "Select a document"}
+                </span>
+              </div>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="w-[var(--radix-select-trigger-width)]">
               {files.map((file) => (
                 <SelectItem key={file.fileId} value={file.fileId}>
                   <div className="flex items-center gap-2 min-w-0">
