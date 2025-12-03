@@ -474,7 +474,7 @@ export function BatchStudySelectionPage({
                             handleEntityChange(idx, "prompt", e.target.value)
                           }
                           placeholder="Extraction instructions for this entity..."
-                          className="text-sm min-h-[60px] focus-visible:ring-blue-500"
+                          className="text-sm min-h-[60px] focus-visible:ring-blue-500 resize-y"
                         />
                       </div>
                       <Button
@@ -504,7 +504,7 @@ export function BatchStudySelectionPage({
                       summaryPrompt: e.target.value,
                     })
                   }
-                  className="min-h-[120px] focus-visible:ring-blue-500"
+                  className="min-h-[120px] focus-visible:ring-blue-500 resize-y"
                   placeholder="Enter instructions for the final summary..."
                 />
               </div>

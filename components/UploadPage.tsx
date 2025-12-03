@@ -146,7 +146,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
       // Since we don't have a general error state, we'll just log it or maybe show it in the UI if we add a general error area.
       // For simplicity, let's just log it.
       console.warn(errorMsg);
-      alert(errorMsg); // Simple alert for limit reached
+      toast.warning(errorMsg); // Toast for limit reached
     }
   };
 
