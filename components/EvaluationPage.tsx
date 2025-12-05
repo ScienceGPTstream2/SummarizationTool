@@ -1792,6 +1792,21 @@ export function EvaluationPage({
                                       ? "s"
                                       : ""}
                                     )
+                                    {entity.evaluationResults.length > 1 && (
+                                      <span className="ml-2 text-sm font-semibold text-primary">
+                                        Avg:{" "}
+                                        {(
+                                          (entity.evaluationResults.reduce(
+                                            (sum: number, r: any) =>
+                                              sum + r.aggregate_score,
+                                            0
+                                          ) /
+                                            entity.evaluationResults.length) *
+                                          100
+                                        ).toFixed(1)}
+                                        %
+                                      </span>
+                                    )}
                                     {isCompleted && !isEvaluating && (
                                       <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -1809,8 +1824,30 @@ export function EvaluationPage({
                                       {entity.name} - Quality Evaluation
                                     </DialogTitle>
                                     <DialogDescription>
-                                      Compare how different LLM judges scored
-                                      each metric
+                                      {entity.evaluationResults.length > 1 ? (
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <span>
+                                            Compare how different LLM judges
+                                            scored each metric
+                                          </span>
+                                          <span className="text-primary font-semibold">
+                                            • Average Score:{" "}
+                                            {(
+                                              (entity.evaluationResults.reduce(
+                                                (sum: number, r: any) =>
+                                                  sum + r.aggregate_score,
+                                                0
+                                              ) /
+                                                entity.evaluationResults
+                                                  .length) *
+                                              100
+                                            ).toFixed(1)}
+                                            %
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        "Compare how different LLM judges scored each metric"
+                                      )}
                                     </DialogDescription>
                                   </DialogHeader>
 
@@ -1888,6 +1925,117 @@ export function EvaluationPage({
                                                 human-explainable reasoning.
                                               </p>
                                             </div>
+
+                                            {/* Average Score Card (only show if multiple models) */}
+                                            {entity.evaluationResults!.length >
+                                              1 &&
+                                              (() => {
+                                                // Calculate average score for this metric across all models
+                                                const metricScores = entity
+                                                  .evaluationResults!.map(
+                                                    (result: any) => {
+                                                      const metric =
+                                                        result.metrics.find(
+                                                          (m: any) =>
+                                                            m.metric_name.replace(
+                                                              "Entity Extraction ",
+                                                              ""
+                                                            ) === metricName
+                                                        );
+                                                      return metric
+                                                        ? metric.score
+                                                        : null;
+                                                    }
+                                                  )
+                                                  .filter(
+                                                    (score: number | null) =>
+                                                      score !== null
+                                                  );
+
+                                                if (metricScores.length === 0)
+                                                  return null;
+
+                                                const avgScore =
+                                                  metricScores.reduce(
+                                                    (sum: number, s: number) =>
+                                                      sum + s,
+                                                    0
+                                                  ) / metricScores.length;
+                                                const avgPercentage =
+                                                  avgScore * 100;
+
+                                                return (
+                                                  <div
+                                                    className={`border rounded-lg p-4 ${
+                                                      avgPercentage >= 70
+                                                        ? "bg-green-50 border-green-200"
+                                                        : avgPercentage >= 50
+                                                          ? "bg-yellow-50 border-yellow-200"
+                                                          : "bg-red-50 border-red-200"
+                                                    }`}
+                                                  >
+                                                    <div className="flex items-center justify-between">
+                                                      <div className="flex items-center gap-2">
+                                                        <BarChart3
+                                                          className={`h-5 w-5 ${
+                                                            avgPercentage >= 70
+                                                              ? "text-green-600"
+                                                              : avgPercentage >=
+                                                                  50
+                                                                ? "text-yellow-600"
+                                                                : "text-red-600"
+                                                          }`}
+                                                        />
+                                                        <span
+                                                          className={`font-semibold ${
+                                                            avgPercentage >= 70
+                                                              ? "text-green-900"
+                                                              : avgPercentage >=
+                                                                  50
+                                                                ? "text-yellow-900"
+                                                                : "text-red-900"
+                                                          }`}
+                                                        >
+                                                          Average {metricName}{" "}
+                                                          Score Across All
+                                                          Models
+                                                        </span>
+                                                      </div>
+                                                      <span
+                                                        className={`text-2xl font-bold ${
+                                                          avgPercentage >= 70
+                                                            ? "text-green-700"
+                                                            : avgPercentage >=
+                                                                50
+                                                              ? "text-yellow-700"
+                                                              : "text-red-700"
+                                                        }`}
+                                                      >
+                                                        {avgPercentage.toFixed(
+                                                          1
+                                                        )}
+                                                        %
+                                                      </span>
+                                                    </div>
+                                                    <p
+                                                      className={`text-xs mt-2 ${
+                                                        avgPercentage >= 70
+                                                          ? "text-green-700"
+                                                          : avgPercentage >= 50
+                                                            ? "text-yellow-700"
+                                                            : "text-red-700"
+                                                      }`}
+                                                    >
+                                                      Based on evaluations from{" "}
+                                                      {metricScores.length}{" "}
+                                                      model
+                                                      {metricScores.length > 1
+                                                        ? "s"
+                                                        : ""}
+                                                    </p>
+                                                  </div>
+                                                );
+                                              })()}
 
                                             {/* Evaluation Reasoning Cards */}
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
