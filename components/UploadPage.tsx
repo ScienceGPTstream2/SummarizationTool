@@ -313,7 +313,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ parser }),
+                body: JSON.stringify({ processor: parser }),
               }
             );
 
