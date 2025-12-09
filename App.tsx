@@ -34,7 +34,8 @@ export interface DocumentData {
   annotatedOutput: string;
   studyType: string;
   summaryPrompt?: string;
-  selectedModel: string;
+  selectedModel: string; // Legacy: kept for backward compatibility
+  selectedModels?: string[]; // New: array of selected model IDs
   entities: Array<{
     name: string;
     prompt: string;
