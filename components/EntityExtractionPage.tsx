@@ -31,6 +31,14 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import {
   ArrowLeft,
   Plus,
   X,
@@ -49,6 +57,7 @@ import {
   RefreshCw,
   Loader2,
   Clock,
+  Eye,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -93,6 +102,18 @@ interface Entity {
   duration?: number;
   promptTokens?: number;
   completionTokens?: number;
+  // NEW: Store extraction results for multiple models
+  extractionsByModel?: Record<
+    string,
+    {
+      extracted: string;
+      answer?: string;
+      references?: Reference[];
+      duration?: number;
+      promptTokens?: number;
+      completionTokens?: number;
+    }
+  >;
 }
 
 type FileStatus = {
@@ -153,9 +174,16 @@ export function EntityExtractionPage({
   const [selectedStudyType, setSelectedStudyType] = useState(
     currentFile?.studyType || ""
   );
-  const [selectedModel, setSelectedModel] = useState(
-    currentFile?.selectedModel || ""
-  );
+
+  // Initialize with first pre-selected model
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const preSelectedModels =
+      currentFile?.selectedModels || documentData.selectedModels || [];
+    return preSelectedModels.length > 0
+      ? preSelectedModels[0]
+      : currentFile?.selectedModel || "";
+  });
+
   const [entities, setEntities] = useState<Entity[]>(
     currentFile?.entities || []
   );
@@ -192,7 +220,16 @@ export function EntityExtractionPage({
     const file = files.find((f) => f.fileId === selectedFileId);
     if (file) {
       setSelectedStudyType(file.studyType || "");
-      setSelectedModel(file.selectedModel || "");
+
+      // Initialize with first pre-selected model
+      const preSelectedModels =
+        file.selectedModels || documentData.selectedModels || [];
+      if (preSelectedModels.length > 0) {
+        setSelectedModel(preSelectedModels[0]);
+      } else {
+        setSelectedModel(file.selectedModel || "");
+      }
+
       setEntities(file.entities || []);
       setSummaryPrompt(file.summaryPrompt || "");
       setShowResults(!!file.finalSummary);
@@ -202,6 +239,37 @@ export function EntityExtractionPage({
       setCurrentEntityIndex(0);
     }
   }, [selectedFileId, files]);
+
+  // CRITICAL: Update displayed entity results when user switches models
+  useEffect(() => {
+    if (!selectedModel || entities.length === 0) return;
+
+    console.log(`🔄 Switching to model: ${selectedModel}`);
+
+    // Update entities to show results from the selected model
+    setEntities((prevEntities) =>
+      prevEntities.map((entity) => {
+        // If entity has multi-model results, swap to selected model's results
+        if (
+          entity.extractionsByModel &&
+          entity.extractionsByModel[selectedModel]
+        ) {
+          const modelResult = entity.extractionsByModel[selectedModel];
+          return {
+            ...entity,
+            extracted: modelResult.extracted,
+            answer: modelResult.answer,
+            references: modelResult.references || [],
+            duration: modelResult.duration,
+            promptTokens: modelResult.promptTokens,
+            completionTokens: modelResult.completionTokens,
+          };
+        }
+        // Otherwise keep existing data
+        return entity;
+      })
+    );
+  }, [selectedModel]); // Run when model changes
 
   // Pre-fetch PDFs to avoid backend bottleneck during entity extraction
   // This loads PDFs through PDF.js and caches them, just like EntityPDFViewerBeta does
@@ -307,12 +375,29 @@ export function EntityExtractionPage({
       file.processingResult?.conversionId || documentData.conversionId;
     if (!conversionId) return;
 
-    const modelObj = availableModels.find(
-      (m) => m.id === (file.selectedModel || selectedModel)
+    // Determine models to use: prefer file-specific selection, fallback to global selection
+    const modelsToUse =
+      file.selectedModels && file.selectedModels.length > 0
+        ? file.selectedModels
+        : selectedModel
+          ? [selectedModel]
+          : [];
+
+    if (modelsToUse.length === 0) {
+      console.warn(`No models selected for file ${file.fileId}`);
+      return;
+    }
+
+    // For summary generation later, pick the first model as primary if needed,
+    // or we might need to update summary generation to be multi-model aware too.
+    // For now, we'll stick to the logic of using the first available model for summary
+    // or the one matching "selectedModel" if present.
+    const primaryModelId = modelsToUse.includes(selectedModel)
+      ? selectedModel
+      : modelsToUse[0];
+    const primaryModelObj = availableModels.find(
+      (m) => m.id === primaryModelId
     );
-    let modelTypeToUse = "azure";
-    if (modelObj?.category === "google") modelTypeToUse = "gemini";
-    else if (modelObj?.category === "anthropic") modelTypeToUse = "anthropic";
 
     const token = localStorage.getItem("token") || "";
     const updatedEntities = [...(file.entities || [])];
@@ -336,18 +421,30 @@ export function EntityExtractionPage({
         if (entity.extracted && !entity.extracted.startsWith("Error:"))
           continue;
 
-        const updatedEntity = await extractEntityFromApi(
-          entity,
-          conversionId,
-          {
-            modelType: modelTypeToUse,
-            modelId: modelObj?.id,
-            deployment: modelObj?.deployment,
-            apiVersion: modelObj?.api_version,
-          },
-          token,
-          file.processingResult?.processorUsed || documentData.processorUsed
-        );
+        // Use the shared internal extraction logic
+        const { results, extractionsByModel } =
+          await extractEntityWithModelsInternal(
+            entity,
+            conversionId,
+            modelsToUse,
+            token,
+            file.processingResult?.processorUsed || documentData.processorUsed
+          );
+
+        // Determine primary result for display/storage
+        const primaryResult =
+          extractionsByModel[primaryModelId] || results[0]?.result;
+
+        const updatedEntity = {
+          ...entity,
+          extractionsByModel,
+          extracted: primaryResult?.extracted || "No result",
+          answer: primaryResult?.answer,
+          references: primaryResult?.references || [],
+          duration: primaryResult?.duration,
+          promptTokens: primaryResult?.promptTokens,
+          completionTokens: primaryResult?.completionTokens,
+        };
 
         updatedEntities[i] = updatedEntity;
 
@@ -372,6 +469,12 @@ export function EntityExtractionPage({
     }));
 
     try {
+      // Determine model type for summary
+      let modelTypeToUse = "azure";
+      if (primaryModelObj?.category === "google") modelTypeToUse = "gemini";
+      else if (primaryModelObj?.category === "anthropic")
+        modelTypeToUse = "anthropic";
+
       const summaryResp = await fetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
@@ -382,9 +485,9 @@ export function EntityExtractionPage({
           entities: updatedEntities,
           summary_prompt: file.summaryPrompt,
           model_type: modelTypeToUse,
-          model_id: modelObj?.id,
-          deployment: modelObj?.deployment,
-          api_version: modelObj?.api_version,
+          model_id: primaryModelObj?.id,
+          deployment: primaryModelObj?.deployment,
+          api_version: primaryModelObj?.api_version,
         }),
       });
 
@@ -622,6 +725,182 @@ export function EntityExtractionPage({
     };
   };
 
+  // Internal helper to run extraction with multiple models
+  const extractEntityWithModelsInternal = async (
+    entity: Entity,
+    conversionId: string,
+    selectedModelIds: string[],
+    token: string,
+    processorUsed?: string,
+    signal?: AbortSignal
+  ) => {
+    // Run ALL selected models concurrently
+    const modelPromises = selectedModelIds.map(async (modelId) => {
+      const modelObj = availableModels.find((m) => m.id === modelId);
+      if (!modelObj) {
+        console.warn(`Model ${modelId} not found in available models`);
+        return { modelId, result: null };
+      }
+
+      // Map provider to backend model_type ("azure", "gemini", "anthropic")
+      let modelType = "azure";
+      const provider = modelObj.provider?.toLowerCase() || "";
+
+      if (provider.includes("google") || provider.includes("gemini")) {
+        modelType = "gemini";
+      } else if (provider.includes("anthropic")) {
+        modelType = "anthropic";
+      } else if (provider.includes("azure")) {
+        modelType = "azure";
+      }
+
+      const modelConfig = {
+        modelType,
+        modelId: modelObj.id,
+        deployment: modelObj.deployment,
+        apiVersion: modelObj.api_version,
+      };
+
+      console.log(`  ▶️ Starting extraction with model: ${modelObj.name}`);
+
+      try {
+        const result = await extractEntityFromApi(
+          entity,
+          conversionId,
+          modelConfig,
+          token,
+          processorUsed,
+          signal
+        );
+        return { modelId, result };
+      } catch (error: any) {
+        console.error(
+          `Error extracting ${entity.name} with ${modelId}:`,
+          error
+        );
+        return {
+          modelId,
+          result: {
+            ...entity,
+            extracted: `Error: ${error.message}`,
+            answer: `Error: ${error.message}`,
+          },
+        };
+      }
+    });
+
+    // Wait for all models to complete
+    const results = await Promise.all(modelPromises);
+
+    // Build extractionsByModel object
+    const extractionsByModel: Record<string, any> = {};
+    results.forEach(({ modelId, result }) => {
+      if (result) {
+        extractionsByModel[modelId] = {
+          extracted: result.extracted,
+          answer: result.answer || result.extracted,
+          references: result.references || [],
+          duration: result.duration,
+          promptTokens: result.promptTokens,
+          completionTokens: result.completionTokens,
+        };
+      }
+    });
+
+    return {
+      results,
+      extractionsByModel,
+    };
+  };
+
+  // NEW: Extract entity with ALL selected models concurrently
+  const extractEntityWithAllModels = async (
+    entity: Entity,
+    index: number,
+    signal: AbortSignal,
+    conversionId: string,
+    selectedModelIds: string[],
+    token: string
+  ) => {
+    try {
+      // Mark entity as extracting
+      setExtractingEntities((prev) => new Set(prev).add(entity.name));
+
+      const { results, extractionsByModel } =
+        await extractEntityWithModelsInternal(
+          entity,
+          conversionId,
+          selectedModelIds,
+          token,
+          currentFile.processingResult?.processorUsed ||
+            documentData.processorUsed,
+          signal
+        );
+
+      // Use the currently selected model's result as the main display
+      // If the selected model wasn't run (e.g. batch mode with different selection), fallback to first result
+      const currentModelResult =
+        extractionsByModel[selectedModel] || results[0]?.result;
+
+      const updatedEntity = {
+        ...entity,
+        extractionsByModel,
+        // For backward compatibility and display:
+        extracted: currentModelResult?.extracted || "No result",
+        answer: currentModelResult?.answer,
+        references: currentModelResult?.references || [],
+        duration: currentModelResult?.duration,
+        promptTokens: currentModelResult?.promptTokens,
+        completionTokens: currentModelResult?.completionTokens,
+      };
+
+      // Update UI with results
+      setEntities((prev) => {
+        const newEntities = [...prev];
+        newEntities[index] = updatedEntity;
+        return newEntities;
+      });
+
+      // Mark entity as completed
+      setExtractingEntities((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(entity.name);
+        return newSet;
+      });
+      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+
+      return updatedEntity;
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.log(`Extraction aborted for ${entity.name}`);
+        throw err;
+      }
+      console.error(`Error extracting ${entity.name}:`, err);
+      const errorEntity = {
+        ...entity,
+        extracted: `Error: ${err.message}`,
+      };
+
+      // Update UI with error
+      setEntities((prev) => {
+        const newEntities = [...prev];
+        newEntities[index] = errorEntity;
+        return newEntities;
+      });
+
+      // Mark as completed (with error)
+      setExtractingEntities((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(entity.name);
+        return newSet;
+      });
+      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+      return errorEntity;
+    }
+  };
+
+  // LEGACY: Old single entity extraction function - replaced by extractEntityWithAllModels
+  /*
   const extractSingleEntity = async (
     entity: Entity,
     index: number,
@@ -645,7 +924,7 @@ export function EntityExtractionPage({
         modelConfig,
         token,
         currentFile.processingResult?.processorUsed ||
-          documentData.processorUsed,
+        documentData.processorUsed,
         signal
       );
 
@@ -693,6 +972,7 @@ export function EntityExtractionPage({
       return errorEntity;
     }
   };
+  */
 
   const handleRunSingleEntity = async (index: number) => {
     if (isExtracting) return;
@@ -721,27 +1001,33 @@ export function EntityExtractionPage({
         );
       }
 
-      const modelObj = availableModels.find((m) => m.id === selectedModel);
-      let modelTypeToUse = "azure";
-      if (modelObj?.category === "google") {
-        modelTypeToUse = "gemini";
-      } else if (modelObj?.category === "anthropic") {
-        modelTypeToUse = "anthropic";
-      }
-
       const token = localStorage.getItem("token") || "";
 
-      const updatedEntity = await extractSingleEntity(
+      // Get pre-selected models
+      const preSelectedModels =
+        currentFile?.selectedModels || documentData.selectedModels || [];
+
+      console.log("🔍 Debug Model Selection:", {
+        currentFileSelectedModels: currentFile?.selectedModels,
+        documentDataSelectedModels: documentData.selectedModels,
+        preSelectedModels,
+        selectedModelFallback: selectedModel,
+      });
+
+      const modelsToUse =
+        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+      console.log(
+        `🚀 Running entity extraction with ${modelsToUse.length} model(s): `,
+        modelsToUse
+      );
+
+      const updatedEntity = await extractEntityWithAllModels(
         entity,
         index,
         abortControllerRef.current.signal,
         conversionId,
-        {
-          modelType: modelTypeToUse,
-          modelId: modelObj?.id,
-          deployment: modelObj?.deployment,
-          apiVersion: modelObj?.api_version,
-        },
+        modelsToUse,
         token
       );
 
@@ -779,11 +1065,71 @@ export function EntityExtractionPage({
       });
     } catch (err: any) {
       if (err.name !== "AbortError") {
-        alert(`Extraction failed: ${err.message}`);
+        alert(`Extraction failed: ${err.message} `);
       }
     } finally {
       setIsExtracting(false);
       abortControllerRef.current = null;
+    }
+  };
+
+  // NEW: Generate summary only (without extraction)
+  const generateSummaryOnly = async () => {
+    setIsGeneratingParagraph(true);
+    const token = localStorage.getItem("token") || "";
+
+    try {
+      const modelObj = availableModels.find((m) => m.id === selectedModel);
+      let modelTypeToUse = "azure";
+      if (modelObj?.category === "google") modelTypeToUse = "gemini";
+      else if (modelObj?.category === "anthropic") modelTypeToUse = "anthropic";
+
+      const summaryResp = await fetch("/api/generate_paragraph", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entities: entities,
+          summary_prompt: summaryPrompt.includes("{{entities}}")
+            ? summaryPrompt
+            : `${summaryPrompt}\n\n{{entities}}`,
+          model_type: modelTypeToUse,
+          model_id: modelObj?.id,
+          deployment: modelObj?.deployment,
+          api_version: modelObj?.api_version,
+        }),
+      });
+
+      if (!summaryResp.ok) {
+        throw new Error("Summary generation failed");
+      }
+
+      const summaryData = await summaryResp.json();
+      const finalSummary = summaryData.summary;
+
+      // Update state
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.fileId === selectedFileId
+            ? { ...f, finalSummary, summaryPrompt }
+            : f
+        )
+      );
+      setDocumentData((prev) => ({
+        ...prev,
+        uploadedFiles: prev.uploadedFiles?.map((f) =>
+          f.fileId === selectedFileId
+            ? { ...f, finalSummary, summaryPrompt }
+            : f
+        ),
+      }));
+    } catch (err) {
+      console.error("Summary generation error:", err);
+      alert("Failed to generate summary");
+    } finally {
+      setIsGeneratingParagraph(false);
     }
   };
 
@@ -793,8 +1139,9 @@ export function EntityExtractionPage({
       (e) => e.extracted && !e.extracted.startsWith("Error:")
     );
 
-    if (allExtracted && showResults) {
-      setShowRerunDialog(true);
+    if (allExtracted) {
+      // Just generate summary
+      generateSummaryOnly();
     } else {
       // Run only missing entities (or all if none extracted)
       handleRunSummarization(false);
@@ -853,9 +1200,12 @@ export function EntityExtractionPage({
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
         console.log("[Pre-fetch] Caching PDF before entity extraction...");
-        const pdfResponse = await fetch(`/api/files/${currentFile.fileId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const pdfResponse = await fetch(
+          `/ api / files / ${currentFile.fileId} `,
+          {
+            headers: { Authorization: `Bearer ${token} ` },
+          }
+        );
         if (pdfResponse.ok) {
           await pdfResponse.blob(); // Force browser to cache
           console.log("[Pre-fetch] ✅ PDF cached successfully");
@@ -900,7 +1250,7 @@ export function EntityExtractionPage({
       //   try {
       //     await processFile(file, i, files.length);
       //   } catch (error) {
-      //     console.error(`Error processing file ${file.fileId}:`, error);
+      //     console.error(`Error processing file ${ file.fileId }: `, error);
       //     // Continue to next file even if one fails
       //   }
       // }
@@ -923,17 +1273,18 @@ export function EntityExtractionPage({
         setCurrentEntityIndex(i + 1);
 
         try {
-          const updatedEntity = await extractSingleEntity(
+          // Get pre-selected models
+          const preSelectedModels =
+            currentFile?.selectedModels || documentData.selectedModels || [];
+          const modelsToUse =
+            preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+          const updatedEntity = await extractEntityWithAllModels(
             entity,
             i,
             signal,
             conversionId,
-            {
-              modelType: modelTypeToUse,
-              modelId: modelIdToUse,
-              deployment: deploymentToUse,
-              apiVersion: apiVersionToUse,
-            },
+            modelsToUse,
             token
           );
           updatedEntities[i] = updatedEntity;
@@ -960,11 +1311,13 @@ export function EntityExtractionPage({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token} `,
         },
         body: JSON.stringify({
           entities: updatedEntities,
-          summary_prompt: summaryPrompt,
+          summary_prompt: summaryPrompt.includes("{{entities}}")
+            ? summaryPrompt
+            : `${summaryPrompt}\n\n{{entities}}`,
           model_type: modelTypeToUse,
           model_id: modelIdToUse,
           deployment: deploymentToUse,
@@ -1030,7 +1383,7 @@ export function EntityExtractionPage({
         });
       } else {
         console.error("Extraction error:", err);
-        alert(`Extraction failed: ${err.message}`);
+        alert(`Extraction failed: ${err.message} `);
 
         // Save partial results even on error
         const updatedFiles = files.map((f) =>
@@ -1071,7 +1424,7 @@ export function EntityExtractionPage({
       };
 
       const wordBlob = await generateWordDocument(fileData);
-      const fileName = `summary-report-${currentFile.file?.name || "document"}.docx`;
+      const fileName = `summary - report - ${currentFile.file?.name || "document"}.docx`;
       downloadFile(
         wordBlob,
         fileName,
@@ -1097,7 +1450,7 @@ export function EntityExtractionPage({
       };
 
       const markdownContent = generateMarkdownDocument(fileData);
-      const fileName = `summary-report-${currentFile.file?.name || "document"}.md`;
+      const fileName = `summary - report - ${currentFile.file?.name || "document"}.md`;
       downloadFile(markdownContent, fileName, "text/markdown");
     } catch (error) {
       console.error("Error generating Markdown document:", error);
@@ -1288,15 +1641,16 @@ export function EntityExtractionPage({
         <div className="grid md:grid-cols-2 gap-6">
           <Card className="border-gray-200">
             <CardHeader>
-              <CardTitle>Study Type Selection</CardTitle>
+              <CardTitle>Selected Study Type</CardTitle>
               <CardDescription>
-                Choose your study type to load appropriate extraction prompts
+                Study type configured during batch study selection
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Select
                 value={selectedStudyType}
                 onValueChange={handleStudyTypeChange}
+                disabled={true}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select study type" />
@@ -1323,10 +1677,18 @@ export function EntityExtractionPage({
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Bot className="h-5 w-5" />
-                AI Model Selection
+                Selected AI Model(s)
               </CardTitle>
               <CardDescription>
-                Choose the AI model for entity extraction
+                {selectedModel && availableModels.length > 0 ? (
+                  <span className="font-medium text-foreground">
+                    Currently viewing:{" "}
+                    {availableModels.find((m) => m.id === selectedModel)
+                      ?.name || "Unknown"}
+                  </span>
+                ) : (
+                  "Select from pre-configured models to view extraction results"
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1354,36 +1716,65 @@ export function EntityExtractionPage({
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-[60vh] sm:max-h-[400px] overflow-y-auto">
-                  {availableModels.map((model) => (
-                    <SelectItem
-                      key={model.id}
-                      value={model.id}
-                      className="py-3"
-                    >
-                      <span data-select-trigger-text={model.name} />
-                      <div className="flex flex-col gap-1.5 w-full">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">
-                            {model.name}
-                          </span>
-                          <span className="text-xs font-medium bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800">
-                            {model.provider}
-                          </span>
+                  {(() => {
+                    // Filter to only show pre-selected models
+                    const preSelectedModels =
+                      currentFile?.selectedModels ||
+                      documentData.selectedModels ||
+                      [];
+                    const filteredModels =
+                      preSelectedModels.length > 0
+                        ? availableModels.filter((m) =>
+                            preSelectedModels.includes(m.id)
+                          )
+                        : availableModels;
+
+                    return filteredModels.map((model) => (
+                      <SelectItem
+                        key={model.id}
+                        value={model.id}
+                        className="py-3"
+                      >
+                        <span data-select-trigger-text={model.name} />
+                        <div className="flex flex-col gap-1.5 w-full">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm">
+                              {model.name}
+                            </span>
+                            <span className="text-xs font-medium bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800">
+                              {model.provider}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground font-medium">
+                            {model.description}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground font-medium">
-                          {model.description}
-                        </div>
-                      </div>
-                    </SelectItem>
-                  ))}
+                      </SelectItem>
+                    ));
+                  })()}
                 </SelectContent>
               </Select>
 
-              {availableModels.length === 0 && (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Loading models from backend...
-                </p>
-              )}
+              {(() => {
+                const preSelectedModels =
+                  currentFile?.selectedModels ||
+                  documentData.selectedModels ||
+                  [];
+                if (preSelectedModels.length > 0) {
+                  return (
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Showing {preSelectedModels.length} pre-selected model
+                      {preSelectedModels.length !== 1 ? "s" : ""} from study
+                      selection
+                    </p>
+                  );
+                }
+                return availableModels.length === 0 ? (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Loading models from backend...
+                  </p>
+                ) : null;
+              })()}
             </CardContent>
           </Card>
         </div>
@@ -1429,14 +1820,14 @@ export function EntityExtractionPage({
                   return (
                     <div
                       key={index}
-                      id={`entity-card-${index}`}
-                      className={`rounded-2xl border p-5 space-y-5 transition-all duration-300 ${
+                      id={`entity - card - ${index} `}
+                      className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${
                         isExtracting
                           ? "border-blue-300 bg-blue-50/40 shadow-md"
                           : isCompleted
                             ? "border-emerald-200 bg-emerald-50/30"
                             : "border-gray-200 bg-white"
-                      }`}
+                      } `}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -1511,7 +1902,7 @@ export function EntityExtractionPage({
                             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                               <div className="flex items-center justify-between">
                                 <Label
-                                  htmlFor={`entity-name-${index}`}
+                                  htmlFor={`entity - name - ${index} `}
                                   className="text-sm font-semibold"
                                 >
                                   Entity Name
@@ -1521,7 +1912,7 @@ export function EntityExtractionPage({
                                 </span>
                               </div>
                               <Input
-                                id={`entity-name-${index}`}
+                                id={`entity - name - ${index} `}
                                 value={entity.name}
                                 onChange={(e) =>
                                   updateEntity(index, "name", e.target.value)
@@ -1534,7 +1925,7 @@ export function EntityExtractionPage({
                             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                               <div className="flex items-center justify-between">
                                 <Label
-                                  htmlFor={`entity-prompt-${index}`}
+                                  htmlFor={`entity - prompt - ${index} `}
                                   className="text-sm font-semibold"
                                 >
                                   Extraction Prompt
@@ -1544,7 +1935,7 @@ export function EntityExtractionPage({
                                 </span>
                               </div>
                               <Textarea
-                                id={`entity-prompt-${index}`}
+                                id={`entity - prompt - ${index} `}
                                 value={entity.prompt}
                                 onChange={(e) =>
                                   updateEntity(index, "prompt", e.target.value)
@@ -1598,9 +1989,7 @@ export function EntityExtractionPage({
                                               ref.best_match
                                                 ?.bounding_regions?.[0]
                                                 ?.page_number;
-                                            const refColor = `hsl(${
-                                              (refIdx * 60) % 360
-                                            }, 70%, 50%)`;
+                                            const refColor = `hsl(${(refIdx * 60) % 360}, 70%, 50%)`;
                                             const isActive =
                                               focusedReferenceByEntity[
                                                 index
@@ -1609,11 +1998,11 @@ export function EntityExtractionPage({
                                             return (
                                               <div
                                                 key={refIdx}
-                                                className={`text-xs bg-white p-3 rounded border-2 transition-all cursor-pointer ${
+                                                className={`text - xs bg - white p - 3 rounded border - 2 transition - all cursor - pointer ${
                                                   isActive
                                                     ? "border-blue-500 shadow-sm bg-blue-50/60"
                                                     : "border-gray-200 hover:border-blue-400"
-                                                }`}
+                                                } `}
                                                 style={{
                                                   borderLeftColor: refColor,
                                                   borderLeftWidth: "4px",
@@ -1627,7 +2016,7 @@ export function EntityExtractionPage({
                                               >
                                                 <div className="flex items-start gap-2">
                                                   <div
-                                                    className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                                    className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
                                                     style={{
                                                       backgroundColor: refColor,
                                                     }}
@@ -1707,9 +2096,9 @@ export function EntityExtractionPage({
                             </div>
                             {documentData.fileId &&
                             documentData.conversionId ? (
-                              <div id={`pdf-viewer-${index}`}>
+                              <div id={`pdf - viewer - ${index} `}>
                                 <EntityPDFViewerBeta
-                                  key={`${currentFile.fileId}-${index}`}
+                                  key={`${currentFile.fileId} -${index} `}
                                   fileId={currentFile.fileId}
                                   conversionId={
                                     currentFile.processingResult
@@ -1759,16 +2148,8 @@ export function EntityExtractionPage({
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
                     <Textarea
-                      value={summaryPrompt
-                        .replace(/\n*\{\{entities\}\}$/i, "")
-                        .trim()}
-                      onChange={(e) => {
-                        // Ensure {{entities}} placeholder is always appended
-                        const userInput = e.target.value.trim();
-                        setSummaryPrompt(
-                          userInput ? `${userInput}\n\n{{entities}}` : userInput
-                        );
-                      }}
+                      value={summaryPrompt}
+                      onChange={(e) => setSummaryPrompt(e.target.value)}
                       placeholder="Enter the prompt for paragraph generation..."
                       className="resize-none flex-1 min-h-[300px]"
                     />
@@ -1782,19 +2163,20 @@ export function EntityExtractionPage({
                         onClick={handleRunSummarizationClick}
                         disabled={
                           (isExtracting && !abortControllerRef.current) ||
+                          isGeneratingParagraph ||
                           entities.length === 0 ||
                           entities.some((e) => !e.name || !e.prompt) ||
                           !selectedModel ||
                           availableModels.length === 0
                         }
                         className={`flex-1 transition-all duration-300 ${
-                          isExtracting
+                          isExtracting || isGeneratingParagraph
                             ? "bg-blue-50 border-blue-300 shadow-lg"
                             : ""
                         }`}
                         size="lg"
                       >
-                        {isExtracting ? (
+                        {isExtracting || isGeneratingParagraph ? (
                           isGeneratingParagraph ? (
                             <>
                               <div className="relative mr-2">
@@ -1804,7 +2186,7 @@ export function EntityExtractionPage({
                                 </div>
                               </div>
                               <span className="font-medium">
-                                Generating Paragraph Summary...
+                                Regenerating Paragraph Summary...
                               </span>
                             </>
                           ) : (
@@ -1825,7 +2207,13 @@ export function EntityExtractionPage({
                           <>
                             <PlayCircle className="h-5 w-5 mr-2" />
                             <span className="font-medium">
-                              Run Entity Extraction & Generate Paragraph
+                              {entities.every(
+                                (e) =>
+                                  e.extracted &&
+                                  !e.extracted.startsWith("Error:")
+                              )
+                                ? "Regenerate Paragraph"
+                                : "Run Entity Extraction & Generate Paragraph"}
                             </span>
                           </>
                         )}
@@ -1854,6 +2242,134 @@ export function EntityExtractionPage({
                     <CardTitle className="flex items-center justify-between">
                       <span>Generated Paragraph Summary</span>
                       <div className="flex gap-2">
+                        {/* View All Extraction Results Button */}
+                        {entities.some((e) => e.extracted) && (
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                title="View all extraction results"
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                View All Results
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent
+                              className="max-h-[85vh] overflow-y-auto"
+                              style={{ width: "70vw", maxWidth: "70vw" }}
+                            >
+                              <DialogHeader>
+                                <DialogTitle className="text-xl">
+                                  All Extraction Results
+                                </DialogTitle>
+                                <DialogDescription>
+                                  Complete extraction details for{" "}
+                                  {entities.filter((e) => e.extracted).length}{" "}
+                                  of {entities.length} entities
+                                </DialogDescription>
+                              </DialogHeader>
+
+                              <div className="space-y-6 mt-4">
+                                {entities
+                                  .filter((e) => e.extracted)
+                                  .map((entity, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="border border-gray-200 rounded-lg p-6 space-y-6 bg-white shadow-sm"
+                                    >
+                                      {/* Entity Header */}
+                                      <div className="flex flex-col gap-2 pb-4 border-b border-gray-100">
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-sm">
+                                            {idx + 1}
+                                          </div>
+                                          <h3 className="text-xl font-semibold text-gray-900">
+                                            {entity.name}
+                                          </h3>
+                                        </div>
+                                        <div className="bg-gray-50 p-3 rounded text-xs text-gray-600 font-mono whitespace-pre-wrap">
+                                          {entity.prompt}
+                                        </div>
+                                      </div>
+
+                                      {/* Multi-Model Results */}
+                                      {entity.extractionsByModel ? (
+                                        <div className="grid gap-6">
+                                          {Object.entries(
+                                            entity.extractionsByModel
+                                          ).map(([modelId, result]) => {
+                                            const modelName =
+                                              availableModels.find(
+                                                (m) => m.id === modelId
+                                              )?.name || modelId;
+                                            return (
+                                              <div
+                                                key={modelId}
+                                                className="space-y-3"
+                                              >
+                                                <h4 className="font-medium text-sm text-gray-900 flex items-center gap-2 bg-gray-100 px-3 py-2 rounded w-fit">
+                                                  <Bot className="h-4 w-4" />
+                                                  {modelName}
+                                                </h4>
+                                                <div className="prose prose-sm max-w-none text-gray-800 p-4 rounded border border-gray-200 bg-white">
+                                                  <ReactMarkdown
+                                                    remarkPlugins={[remarkGfm]}
+                                                  >
+                                                    {result.answer ||
+                                                      result.extracted}
+                                                  </ReactMarkdown>
+                                                </div>
+
+                                                {/* References */}
+                                                {result.references &&
+                                                  result.references.length >
+                                                    0 && (
+                                                    <div className="pl-4 border-l-2 border-gray-200">
+                                                      <p className="text-xs font-semibold text-gray-500 mb-2">
+                                                        Sources:
+                                                      </p>
+                                                      <div className="space-y-2">
+                                                        {result.references.map(
+                                                          (
+                                                            ref: any,
+                                                            rIdx: number
+                                                          ) => (
+                                                            <div
+                                                              key={rIdx}
+                                                              className="text-xs text-gray-600 bg-gray-50 p-2 rounded"
+                                                            >
+                                                              {ref.text}
+                                                            </div>
+                                                          )
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        /* Fallback for single model (legacy) */
+                                        <div className="space-y-3">
+                                          <div className="prose prose-sm max-w-none text-gray-800 p-4 rounded border border-gray-200 bg-white">
+                                            <ReactMarkdown
+                                              remarkPlugins={[remarkGfm]}
+                                            >
+                                              {entity.answer ||
+                                                entity.extracted}
+                                            </ReactMarkdown>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        )}
                         <Button
                           onClick={handleExportWord}
                           disabled={isExporting}
