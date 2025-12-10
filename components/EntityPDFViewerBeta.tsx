@@ -562,6 +562,14 @@ function EntityPDFViewerBetaComponent({
                 viewport.height,
                 devicePixelRatio
               );
+
+              // Try to scroll to pending reference now that boxes are drawn
+              if (pendingFocusRefIdx !== null) {
+                const success = scrollReferenceIntoView(pendingFocusRefIdx);
+                if (success) {
+                  setPendingFocusRefIdx(null);
+                }
+              }
             }
           });
         }
