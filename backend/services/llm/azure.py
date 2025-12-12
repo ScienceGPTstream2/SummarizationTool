@@ -147,6 +147,7 @@ class AzureLLMClient:
         api_key_override: Optional[str] = None,
         max_tokens: int = 2048,
         temperature: float = 0.0,
+        system_message: Optional[str] = None,
     ) -> Dict[str, Any]:
         used_deployment = (
             deployment or self.default_deployment or self.default_model_name
@@ -164,9 +165,13 @@ class AzureLLMClient:
         if not used_endpoint or not used_api_key:
             return {"success": False, "error": "Azure endpoint or api key missing."}
 
-        system_message = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        # Use provided system message or default for paragraph generation
+        used_system_message = (
+            system_message
+            or "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        )
         messages = [
-            {"role": "system", "content": system_message},
+            {"role": "system", "content": used_system_message},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -371,6 +376,7 @@ class AzureLLMClient:
         api_key_override: Optional[str] = None,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        system_message: Optional[str] = None,
     ) -> Dict[str, Any]:
         used_deployment = (
             deployment or self.default_deployment or self.default_model_name
@@ -401,7 +407,11 @@ class AzureLLMClient:
                 base_url=f"{used_endpoint.rstrip('/')}/openai/v1/", api_key=used_api_key
             )
 
-            system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+            # Use provided system message or default
+            default_system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+            used_system_message = (
+                system_message if system_message else default_system_message
+            )
             user_message = f"""<markdown study>
 {markdown}
 </markdown study>
@@ -445,7 +455,7 @@ Prompt:
                         lambda: client.beta.chat.completions.parse(
                             model=used_deployment,
                             messages=[
-                                {"role": "system", "content": system_message},
+                                {"role": "system", "content": used_system_message},
                                 {"role": "user", "content": user_message},
                             ],
                             response_format=ExtractionResult,
@@ -523,7 +533,11 @@ Prompt:
             # Fallback to regular API call if structured outputs fail
             print(f"[LLMService] Falling back to regular API call...")
 
-            system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
+            # Use provided system message or default for fallback
+            default_fallback_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
+            used_system_message = (
+                system_message if system_message else default_fallback_message
+            )
             user_message = f"""<markdown study>
 {markdown}
 </markdown study>
@@ -532,7 +546,7 @@ Prompt:
 {extraction_prompt}
 """
             messages = [
-                {"role": "system", "content": system_message},
+                {"role": "system", "content": used_system_message},
                 {"role": "user", "content": user_message},
             ]
 

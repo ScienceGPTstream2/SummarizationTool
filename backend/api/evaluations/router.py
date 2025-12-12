@@ -58,9 +58,11 @@ async def evaluate_extraction(request: EvaluationRequest):
         model_kwargs = {}
         if request.provider == "azure_openai":
             model_kwargs = {
-                "deployment": request.azure_deployment,
-                "endpoint": request.azure_endpoint,
-                "api_key": request.azure_api_key,
+                "deployment": request.azure_deployment
+                or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+                "endpoint": request.azure_endpoint
+                or os.getenv("AZURE_OPENAI_ENDPOINT"),
+                "api_key": request.azure_api_key or os.getenv("AZURE_OPENAI_API_KEY"),
                 "model_name": request.azure_model_name,
             }
         elif request.provider == "vertex_ai":
@@ -101,6 +103,9 @@ async def evaluate_extraction(request: EvaluationRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(
             status_code=500, detail=f"Error during evaluation: {str(e)}"
         )

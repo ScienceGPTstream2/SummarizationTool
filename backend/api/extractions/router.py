@@ -27,6 +27,8 @@ async def extract_entities(request: ExtractRequest):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
     """
+    # Create a semaphore to limit concurrency
+    sem = asyncio.Semaphore(50)
     try:
         # For Azure Document Intelligence, use raw_analysis.content
         # This provides clean markdown without tags
@@ -55,21 +57,23 @@ async def extract_entities(request: ExtractRequest):
         async def run_extraction(entity: Entity):
             nonlocal raw_analysis  # Allow access to outer scope variable
 
-            result = await llm_service.extract_entities_from_markdown(
-                markdown=markdown,
-                extraction_prompt=entity.prompt,
-                model_type=request.model_type,
-                model_id=request.model_id,
-                deployment=request.deployment,
-                api_version=request.api_version,
-                endpoint_override=request.azure_endpoint,
-                api_key_override=request.azure_api_key,
-                gemini_api_key_override=request.gemini_api_key,
-                gemini_project_id_override=request.gemini_project_id,
-                gemini_location_override=request.gemini_location,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-            )
+            async with sem:
+                result = await llm_service.extract_entities_from_markdown(
+                    markdown=markdown,
+                    extraction_prompt=entity.prompt,
+                    model_type=request.model_type,
+                    model_id=request.model_id,
+                    deployment=request.deployment,
+                    api_version=request.api_version,
+                    endpoint_override=request.azure_endpoint,
+                    api_key_override=request.azure_api_key,
+                    gemini_api_key_override=request.gemini_api_key,
+                    gemini_project_id_override=request.gemini_project_id,
+                    gemini_location_override=request.gemini_location,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    system_message=entity.system_prompt,
+                )
             if result.get("success"):
                 response_data = {
                     "name": entity.name,

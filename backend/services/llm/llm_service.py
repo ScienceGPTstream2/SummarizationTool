@@ -50,6 +50,7 @@ class LLMService:
         gemini_location_override: Optional[str] = None,  # for Gemini
         max_tokens: int = 8048,
         temperature: float = 0.0,
+        system_message: Optional[str] = None,  # Custom system prompt
     ) -> Dict[str, Any]:
         """
         Extract entities from markdown using the specified LLM.
@@ -66,6 +67,7 @@ class LLMService:
                 api_key_override,
                 max_tokens,
                 temperature,
+                system_message,
             )
         elif model_type == "gemini":
             if self.gemini_client.disabled:
@@ -78,6 +80,7 @@ class LLMService:
                 temperature,
                 gemini_project_id_override,
                 gemini_location_override,
+                system_instruction=system_message,
             )
         elif model_type == "anthropic":
             if self.anthropic_client.disabled:
@@ -106,6 +109,7 @@ class LLMService:
         gemini_location_override: Optional[str] = None,  # for Gemini
         max_tokens: int = 8048,
         temperature: float = 0.0,
+        system_message: Optional[str] = None,  # Custom system prompt
     ) -> Dict[str, Any]:
         """
         Generate a paragraph using the specified LLM.
@@ -121,6 +125,7 @@ class LLMService:
                 api_key_override,
                 max_tokens,
                 temperature,
+                system_message,
             )
         elif model_type == "gemini":
             if self.gemini_client.disabled:
@@ -132,6 +137,7 @@ class LLMService:
                 temperature,
                 gemini_project_id_override,
                 gemini_location_override,
+                system_instruction=system_message,
             )
         elif model_type == "anthropic":
             if self.anthropic_client.disabled:
