@@ -58,6 +58,9 @@ import {
   Loader2,
   Clock,
   Eye,
+  Info,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -96,6 +99,7 @@ interface Reference {
 interface Entity {
   name: string;
   prompt: string;
+  systemPrompt?: string; // Per-entity system prompt
   extracted?: string;
   answer?: string;
   references?: Reference[];
@@ -189,6 +193,10 @@ export function EntityExtractionPage({
   );
   const [summaryPrompt, setSummaryPrompt] = useState(
     currentFile?.summaryPrompt || ""
+  );
+  const [paragraphSystemPrompt, setParagraphSystemPrompt] = useState(
+    currentFile?.paragraphSystemPrompt ||
+      "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy."
   );
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -642,7 +650,7 @@ export function EntityExtractionPage({
 
   const updateEntity = (
     index: number,
-    field: "name" | "prompt",
+    field: "name" | "prompt" | "systemPrompt",
     value: string
   ) => {
     const updated = entities.map((entity, i) =>
@@ -687,7 +695,13 @@ export function EntityExtractionPage({
         model_id: modelConfig.modelId,
         deployment: modelConfig.deployment,
         api_version: modelConfig.apiVersion,
-        entities: [entity],
+        entities: [
+          {
+            name: entity.name,
+            prompt: entity.prompt,
+            system_prompt: entity.systemPrompt || undefined,
+          },
+        ],
         max_tokens: 4096,
         temperature: 0.0,
         processor_used: processorUsed,
@@ -1095,6 +1109,7 @@ export function EntityExtractionPage({
           summary_prompt: summaryPrompt.includes("{{entities}}")
             ? summaryPrompt
             : `${summaryPrompt}\n\n{{entities}}`,
+          system_prompt: paragraphSystemPrompt || undefined,
           model_type: modelTypeToUse,
           model_id: modelObj?.id,
           deployment: modelObj?.deployment,
@@ -1255,44 +1270,62 @@ export function EntityExtractionPage({
       //   }
       // }
 
-      // Process entities one by one (sequentially) for real-time feedback
-      for (let i = 0; i < updatedEntities.length; i++) {
-        if (signal.aborted) break;
+      // Process entities with concurrency limit
+      const CONCURRENCY_LIMIT = 5;
+      let currentIndex = 0;
+      const totalEntities = updatedEntities.length;
 
-        const entity = updatedEntities[i];
+      const processNextEntity = async () => {
+        while (currentIndex < totalEntities) {
+          if (signal.aborted) break;
 
-        // Skip if not rerunning all AND already extracted successfully
-        if (
-          !rerunAll &&
-          entity.extracted &&
-          !entity.extracted.startsWith("Error:")
-        ) {
-          continue;
+          // Atomically capture and increment index
+          const i = currentIndex++;
+          const entity = updatedEntities[i];
+
+          // Skip if not rerunning all AND already extracted successfully
+          if (
+            !rerunAll &&
+            entity.extracted &&
+            !entity.extracted.startsWith("Error:")
+          ) {
+            continue;
+          }
+
+          setCurrentEntityIndex(i + 1);
+
+          try {
+            // Get pre-selected models
+            const preSelectedModels =
+              currentFile?.selectedModels || documentData.selectedModels || [];
+            const modelsToUse =
+              preSelectedModels.length > 0
+                ? preSelectedModels
+                : [selectedModel];
+
+            const updatedEntity = await extractEntityWithAllModels(
+              entity,
+              i,
+              signal,
+              conversionId,
+              modelsToUse,
+              token
+            );
+            updatedEntities[i] = updatedEntity;
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            // Continue to next entity if one fails (unless aborted)
+            console.error(`Error processing entity ${i}:`, err);
+          }
         }
+      };
 
-        setCurrentEntityIndex(i + 1);
+      // Start workers
+      const workers = Array(CONCURRENCY_LIMIT)
+        .fill(null)
+        .map(() => processNextEntity());
 
-        try {
-          // Get pre-selected models
-          const preSelectedModels =
-            currentFile?.selectedModels || documentData.selectedModels || [];
-          const modelsToUse =
-            preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
-
-          const updatedEntity = await extractEntityWithAllModels(
-            entity,
-            i,
-            signal,
-            conversionId,
-            modelsToUse,
-            token
-          );
-          updatedEntities[i] = updatedEntity;
-        } catch (err: any) {
-          if (err.name === "AbortError") throw err;
-          // Continue to next entity if one fails (unless aborted)
-        }
-      }
+      await Promise.all(workers);
 
       if (signal.aborted) return;
 
@@ -1922,14 +1955,79 @@ export function EntityExtractionPage({
                               />
                             </div>
 
+                            {/* System Prompt Section (Collapsible) */}
+                            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...entities];
+                                  (
+                                    updated[index] as any
+                                  )._systemPromptExpanded = !(
+                                    updated[index] as any
+                                  )._systemPromptExpanded;
+                                  setEntities(updated);
+                                }}
+                                className="w-full flex items-center justify-between text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Label className="text-sm font-semibold cursor-pointer">
+                                    System Prompt
+                                  </Label>
+                                  <div className="relative group">
+                                    <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                      Defines the AI's role and behavior.
+                                      <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {(entity as any)._systemPromptExpanded ? (
+                                  <ChevronUp className="h-4 w-4 text-gray-400" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                                )}
+                              </button>
+                              {(entity as any)._systemPromptExpanded && (
+                                <Textarea
+                                  id={`entity-system-prompt-${index}`}
+                                  value={
+                                    entity.systemPrompt ||
+                                    "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt."
+                                  }
+                                  onChange={(e) =>
+                                    updateEntity(
+                                      index,
+                                      "systemPrompt",
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Describe the AI's role and expertise..."
+                                  rows={3}
+                                  className="mt-3 resize-y min-h-[80px] text-sm"
+                                />
+                              )}
+                            </div>
+
+                            {/* Extraction Prompt (User Prompt) Section */}
                             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                               <div className="flex items-center justify-between">
-                                <Label
-                                  htmlFor={`entity - prompt - ${index} `}
-                                  className="text-sm font-semibold"
-                                >
-                                  Extraction Prompt
-                                </Label>
+                                <div className="flex items-center gap-2">
+                                  <Label
+                                    htmlFor={`entity - prompt - ${index} `}
+                                    className="text-sm font-semibold"
+                                  >
+                                    Extraction Prompt
+                                  </Label>
+                                  <div className="relative group">
+                                    <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                      The specific extraction instruction for
+                                      this entity.
+                                      <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                    </div>
+                                  </div>
+                                </div>
                                 <span className="text-xs text-gray-500">
                                   {promptCharCount} characters
                                 </span>
@@ -2146,14 +2244,85 @@ export function EntityExtractionPage({
                       included.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col">
-                    <Textarea
-                      value={summaryPrompt}
-                      onChange={(e) => setSummaryPrompt(e.target.value)}
-                      placeholder="Enter the prompt for paragraph generation..."
-                      className="resize-none flex-1 min-h-[300px]"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
+                  <CardContent className="flex-1 flex flex-col space-y-4">
+                    {/* System Prompt Section (Collapsible) */}
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const btn = document.getElementById(
+                            "paragraph-system-prompt-toggle"
+                          );
+                          const content = document.getElementById(
+                            "paragraph-system-prompt-content"
+                          );
+                          if (btn && content) {
+                            const isExpanded =
+                              content.classList.contains("hidden");
+                            content.classList.toggle("hidden");
+                            btn.setAttribute(
+                              "aria-expanded",
+                              String(isExpanded)
+                            );
+                          }
+                        }}
+                        id="paragraph-system-prompt-toggle"
+                        aria-expanded="false"
+                        className="w-full flex items-center justify-between text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium cursor-pointer">
+                            System Prompt
+                          </Label>
+                          <div className="relative group">
+                            <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                              Defines the AI's role for paragraph generation.
+                              <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronDown className="h-4 w-4 text-gray-400" />
+                      </button>
+                      <div
+                        id="paragraph-system-prompt-content"
+                        className="hidden mt-3"
+                      >
+                        <Textarea
+                          value={paragraphSystemPrompt}
+                          onChange={(e) =>
+                            setParagraphSystemPrompt(e.target.value)
+                          }
+                          placeholder="Describe the AI's role for paragraph generation..."
+                          rows={3}
+                          className="resize-y min-h-[80px] text-sm bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    {/* User Prompt Section */}
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Label className="text-sm font-medium">
+                          User Prompt
+                        </Label>
+                        <div className="relative group">
+                          <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                          <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                            The specific instructions for generating the
+                            paragraph.
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <Textarea
+                        value={summaryPrompt}
+                        onChange={(e) => setSummaryPrompt(e.target.value)}
+                        placeholder="Enter the prompt for paragraph generation..."
+                        className="resize-none flex-1 min-h-[250px]"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
                       💡 Tip: The extracted entities will be automatically
                       included below your instructions.
                     </p>
@@ -2430,31 +2599,34 @@ export function EntityExtractionPage({
               </div>
             </div>
 
-            {showResults && (
-              <div className="mt-6">
-                <Button
-                  onClick={() =>
-                    onComplete?.({
-                      ...documentData,
-                      studyType: selectedStudyType,
-                      selectedModel: selectedModel,
-                      entities: entities,
-                      summaryPrompt: summaryPrompt,
-                    })
-                  }
-                  variant="default"
-                  size="lg"
-                  className="w-full bg-green-600 hover:bg-green-700 h-14 text-lg shadow-lg"
-                >
-                  Continue to Evaluation
-                  <ArrowRight className="h-5 w-5 ml-2" />
-                </Button>
-                <p className="text-center text-sm text-muted-foreground mt-3">
-                  Evaluate your extractions with multiple LLM judges
-                  (GPT-5-Mini, Gemini) for quality assessment.
-                </p>
-              </div>
-            )}
+            {showResults &&
+              !isExtracting &&
+              !isGeneratingParagraph &&
+              !isBatchRunning && (
+                <div className="mt-6">
+                  <Button
+                    onClick={() =>
+                      onComplete?.({
+                        ...documentData,
+                        studyType: selectedStudyType,
+                        selectedModel: selectedModel,
+                        entities: entities,
+                        summaryPrompt: summaryPrompt,
+                      })
+                    }
+                    variant="default"
+                    size="lg"
+                    className="w-full bg-green-600 hover:bg-green-700 h-14 text-lg shadow-lg"
+                  >
+                    Continue to Evaluation
+                    <ArrowRight className="h-5 w-5 ml-2" />
+                  </Button>
+                  <p className="text-center text-sm text-muted-foreground mt-3">
+                    Evaluate your extractions with multiple LLM judges
+                    (GPT-5-Mini, Gemini) for quality assessment.
+                  </p>
+                </div>
+              )}
           </>
         )}
       </div>

@@ -44,7 +44,7 @@ const allParsers = [
 interface FileStatus {
   file: File;
   fileId: string;
-  uploadResult: any;
+  uploadResult?: any;
   status: "pending" | "processing" | "completed" | "error";
   processingResult?: {
     conversionId?: string;
