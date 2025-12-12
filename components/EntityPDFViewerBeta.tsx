@@ -992,7 +992,10 @@ function EntityPDFViewerBetaComponent({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 relative overflow-hidden bg-gray-100">
+      <div
+        ref={containerRef}
+        className="flex-1 relative overflow-auto bg-gray-100"
+      >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-50 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
