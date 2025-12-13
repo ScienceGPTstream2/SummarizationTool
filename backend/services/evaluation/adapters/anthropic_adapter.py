@@ -6,7 +6,7 @@ This follows the official DeepEval documentation pattern using Anthropic Vertex 
 import os
 from typing import Optional
 from deepeval.models.base_model import DeepEvalBaseLLM
-from anthropic import AnthropicVertex
+from anthropic import AnthropicVertex, AsyncAnthropicVertex
 
 
 class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
@@ -54,6 +54,9 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
 
         # Initialize Anthropic Vertex client
         self.client = AnthropicVertex(region=self.location, project_id=self.project)
+        self.async_client = AsyncAnthropicVertex(
+            region=self.location, project_id=self.project
+        )
 
     def load_model(self):
         """Load the Anthropic Vertex client"""
@@ -100,9 +103,24 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
         Returns:
             Generated text response
         """
-        # Anthropic SDK doesn't have async support yet, so we use sync version
-        # This is acceptable as DeepEval will handle async wrapping
-        return self.generate(prompt)
+        # Prepare request parameters
+        request_params = {
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            "model": self._model_name,
+        }
+
+        # Add temperature if explicitly provided
+        if self.temperature is not None:
+            request_params["temperature"] = self.temperature
+
+        # Make the API call
+        message = await self.async_client.messages.create(**request_params)
+
+        # Extract content from response
+        if message.content and len(message.content) > 0:
+            return message.content[0].text
+        return ""
 
     def get_model_name(self) -> str:
         """Return the model name"""
