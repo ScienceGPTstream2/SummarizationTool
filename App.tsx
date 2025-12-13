@@ -35,14 +35,42 @@ export interface DocumentData {
   studyType: string;
   summaryPrompt?: string;
   selectedModel: string;
+  selectedModels?: string[];
   entities: Array<{
     name: string;
     prompt: string;
     extracted?: string;
+    answer?: string;
+    references?: any[];
     duration?: number;
     promptTokens?: number;
     completionTokens?: number;
     groundTruth?: string;
+    extractionsByModel?: Record<
+      string,
+      {
+        extracted: string;
+        answer?: string;
+        references?: any[];
+        duration?: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        evaluationResults?: Array<{
+          provider: string;
+          model: string;
+          metrics: Array<{
+            metric_name: string;
+            score: number;
+            threshold: number;
+            success: boolean;
+            reason: string;
+          }>;
+          aggregate_score: number;
+          all_passed: boolean;
+          evaluation_time: number;
+        }>;
+      }
+    >;
     evaluationResults?: Array<{
       provider: string;
       model: string;
@@ -58,7 +86,7 @@ export interface DocumentData {
       evaluation_time: number;
     }>;
   }>;
-  finalSummary: string;
+  finalSummary?: string;
   conversionId?: string;
   markdownPath?: string;
   processorUsed?: string;
@@ -75,46 +103,26 @@ export interface DocumentData {
   figuresCount?: number;
   tablesCount?: number;
   showResults?: boolean;
-  // Evaluation configuration
   evaluationConfig?: {
     selectedMetrics?: string[];
+    selectedModels?: string[];
     selectedProviders?: string[];
     customEvaluationSteps?: Record<string, string[]>;
+    customPrompts?: Record<string, string[]>;
   };
   uploadedFiles?: Array<{
     file: File;
     fileId: string;
-    uploadResult: any;
-    status?: "pending" | "processing" | "completed" | "error";
-    processingResult?: {
-      conversionId?: string;
-      markdownPath?: string;
-      processorUsed?: string;
-      figures?: any[];
-      figuresCount?: number;
-      tablesCount?: number;
-      extractedText?: string;
-    };
-    // Extraction configuration and results
+    entities?: any[];
     studyType?: string;
     selectedModel?: string;
-    entities?: Array<{
-      name: string;
-      prompt: string;
-      extracted?: string;
-      answer?: string;
-      references?: any[];
-      duration?: number;
-      promptTokens?: number;
-      completionTokens?: number;
-      groundTruth?: string;
-      evaluationResults?: any[];
-    }>;
-    summaryPrompt?: string;
-    finalSummary?: string;
-
+    selectedModels?: string[];
+    processingResult?: any;
+    processorUsed?: string;
+    uploadResult?: any;
+    status?: "pending" | "processing" | "completed" | "error";
     selectedParser?: string;
-    error?: string;
+    summaryPrompt?: string;
   }>;
 }
 

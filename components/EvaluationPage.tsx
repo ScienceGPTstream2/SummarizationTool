@@ -60,10 +60,21 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
-  Download,
 } from "lucide-react";
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+
 import { DocumentData } from "../App";
-import { downloadEvaluationReport } from "../utils/wordExport";
+import { getValidToken } from "../utils/authUtils";
+import { toast } from "sonner";
+import BatchResultsPage from "./BatchResultsPage";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -110,13 +121,21 @@ const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
     available: true,
     provider: "vertex_ai",
   },
-  {
+  /* {
     id: "vertex_ai_3_pro",
     name: "Gemini 3 Pro Preview",
     model: "gemini-3-pro-preview",
     description: "Latest generation - powerful reasoning for evaluation",
     available: true,
     provider: "vertex_ai",
+  }, */
+  {
+    id: "anthropic_sonnet_4_5",
+    name: "Claude Sonnet 4.5",
+    model: "claude-sonnet-4-5@20250929",
+    description: "Balanced performance and speed - high quality evaluation",
+    available: true,
+    provider: "anthropic",
   },
   {
     id: "anthropic_opus_4_1",
@@ -198,6 +217,11 @@ export function EvaluationPage({
       },
     ];
   });
+
+  // Active tab: "evaluation" or "results"
+  const [activeTab, setActiveTab] = useState<"evaluation" | "results">(
+    "evaluation"
+  );
 
   const [selectedFileId, setSelectedFileId] = useState<string>(
     files.length > 0 ? files[0].fileId : ""
@@ -375,6 +399,89 @@ export function EvaluationPage({
     missingEntities: [] as string[],
   });
 
+  // Batch mode state
+  const [isBatchMode, setIsBatchMode] = useState(true);
+  const [availableSourceModels, setAvailableSourceModels] = useState<string[]>(
+    []
+  );
+  const [selectedSourceModels, setSelectedSourceModels] = useState<string[]>(
+    []
+  );
+
+  // Track Source Model locally for Single Mode viewing
+  const [singleModeSourceModel, setSingleModeSourceModel] =
+    useState<string>("");
+
+  useEffect(() => {
+    if (isBatchMode) {
+      // Auto-select all available source models initially if none selected
+      if (
+        selectedSourceModels.length === 0 &&
+        availableSourceModels.length > 0
+      ) {
+        setSelectedSourceModels(availableSourceModels);
+      }
+    } else {
+      // In single mode, set the source model based on current file's available models
+      const currentFileEntity = currentFile?.entities?.find(
+        (e: any) => e.extractionsByModel
+      );
+      const fileModels = currentFileEntity?.extractionsByModel
+        ? Object.keys(currentFileEntity.extractionsByModel)
+        : [];
+
+      // If current singleModeSourceModel is not valid for this file, reset it
+      if (
+        fileModels.length > 0 &&
+        !fileModels.includes(singleModeSourceModel)
+      ) {
+        setSingleModeSourceModel(fileModels[0]);
+      } else if (!singleModeSourceModel && fileModels.length > 0) {
+        setSingleModeSourceModel(fileModels[0]);
+      } else if (!singleModeSourceModel && documentData.selectedModel) {
+        setSingleModeSourceModel(documentData.selectedModel);
+      }
+    }
+  }, [
+    isBatchMode,
+    availableSourceModels,
+    documentData,
+    selectedSourceModels,
+    singleModeSourceModel,
+    selectedFileId,
+    currentFile,
+  ]);
+
+  // Calculate available source models across all files
+  useEffect(() => {
+    const models = new Set<string>();
+    files.forEach((file) => {
+      // Check extractionsByModel in entities
+      if (file.entities) {
+        file.entities.forEach((entity: any) => {
+          if (entity.extractionsByModel) {
+            Object.keys(entity.extractionsByModel).forEach((m) =>
+              models.add(m)
+            );
+          }
+        });
+      }
+      // Check legacy/single selectedModel
+      if (file.selectedModel) {
+        models.add(file.selectedModel);
+      }
+    });
+    setAvailableSourceModels(Array.from(models));
+
+    // Select all by default if none selected
+    setSelectedSourceModels((prev) => {
+      if (prev.length === 0 && models.size > 0) {
+        return Array.from(models);
+      }
+      return prev;
+    });
+  }, [files]);
+
   // Scroll to top on mount
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -494,6 +601,14 @@ export function EvaluationPage({
     );
   };
 
+  const toggleSourceModel = (modelId: string) => {
+    setSelectedSourceModels((prev) =>
+      prev.includes(modelId)
+        ? prev.filter((id) => id !== modelId)
+        : [...prev, modelId]
+    );
+  };
+
   // Helper functions for select all/deselect all per category
   const toggleCategory = (providerIds: string[], selectAll: boolean) => {
     setSelectedProviders((prev) => {
@@ -603,7 +718,8 @@ export function EvaluationPage({
           requestBody.azure_model_name = provider.model;
         } else if (
           providerId === "vertex_ai_pro" ||
-          providerId === "vertex_ai_lite"
+          providerId === "vertex_ai_lite" ||
+          providerId === "vertex_ai_3_pro"
         ) {
           requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
           requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
@@ -972,6 +1088,339 @@ export function EvaluationPage({
     }
   };
 
+  // Batch Mode Functions
+  const updateBatchGroundTruth = (
+    fileId: string,
+    entityName: string,
+    value: string
+  ) => {
+    setFiles((prevFiles) =>
+      prevFiles.map((f) => {
+        if (f.fileId === fileId) {
+          return {
+            ...f,
+            entities: (f.entities || []).map((e: any) =>
+              e.name === entityName ? { ...e, groundTruth: value } : e
+            ),
+          };
+        }
+        return f;
+      })
+    );
+  };
+
+  const handleRunBatchEvaluation = async () => {
+    // Check if correctness or completeness metrics are selected (require ground truth)
+    const requiresGroundTruth =
+      selectedMetrics.includes("correctness") ||
+      selectedMetrics.includes("completeness");
+
+    // If ground truth is required, validate all entities have ground truth
+    if (requiresGroundTruth) {
+      const missingGroundTruth: { fileName: string; entityName: string }[] = [];
+
+      files.forEach((file) => {
+        (file.entities || []).forEach((entity: any) => {
+          if (!entity.groundTruth?.trim()) {
+            missingGroundTruth.push({
+              fileName: file.file?.name || "Unknown File",
+              entityName: entity.name,
+            });
+          }
+        });
+      });
+
+      if (missingGroundTruth.length > 0) {
+        // Show validation dialog
+        const entityList = missingGroundTruth
+          .slice(0, 5)
+          .map((e) => `${e.entityName} (${e.fileName})`);
+        const moreCount = missingGroundTruth.length - 5;
+
+        setValidationMessage({
+          title: "Ground Truth Required",
+          description: `Correctness and/or Completeness metrics require ground truth data for comparison. The following entities are missing ground truth:`,
+          missingEntities:
+            moreCount > 0
+              ? [...entityList, `...and ${moreCount} more`]
+              : entityList,
+        });
+        setShowValidationDialog(true);
+        return;
+      }
+    }
+
+    // Check if any entities already have results
+    const hasExistingResults = files.some((file) =>
+      (file.entities || []).some((e: any) => {
+        // Check for any evaluation results in any source model
+        if (e.extractionsByModel) {
+          return Object.values(e.extractionsByModel).some(
+            (ext: any) =>
+              ext.evaluationResults && ext.evaluationResults.length > 0
+          );
+        }
+        return e.evaluationResults && e.evaluationResults.length > 0;
+      })
+    );
+
+    if (hasExistingResults) {
+      setConfirmationDialog({
+        isOpen: true,
+        title: "Rerun Batch Evaluation?",
+        description:
+          "Some entities have already been evaluated. Rerunning will overwrite existing results for the selected models. Are you sure you want to proceed?",
+        action: () => executeBatchEvaluation(),
+      });
+      return;
+    }
+
+    await executeBatchEvaluation();
+  };
+
+  const executeBatchEvaluation = async () => {
+    setIsEvaluating(true);
+    setEvaluationProgress(0);
+    setEvaluationComplete(false);
+
+    try {
+      const token = getValidToken();
+      if (!token) throw new Error("No token available");
+
+      // 1. Identify all evaluation tasks (File x Entity x SourceModel x JudgeModel)
+      const tasks: Array<{
+        fileId: string;
+        fileName: string;
+        entityName: string;
+        prompt: string;
+        sourceModel: string;
+        extractedContent: string;
+        groundTruth?: string;
+        judgeModel: string;
+      }> = [];
+
+      files.forEach((file) => {
+        (file.entities || []).forEach((entity: any) => {
+          const groundTruth = entity.groundTruth;
+
+          selectedSourceModels.forEach((sourceModelId) => {
+            // Find extraction for this source model
+            let extraction =
+              entity.extractionsByModel?.[sourceModelId]?.extracted;
+
+            // Fallback
+            if (!extraction && file.selectedModel === sourceModelId) {
+              extraction = entity.extracted;
+            }
+
+            if (extraction) {
+              selectedProviders.forEach((judgeModelId) => {
+                tasks.push({
+                  fileId: file.fileId,
+                  fileName: file.file?.name || "Unknown",
+                  entityName: entity.name,
+                  prompt: entity.prompt,
+                  sourceModel: sourceModelId,
+                  extractedContent: extraction,
+                  groundTruth: groundTruth,
+                  judgeModel: judgeModelId,
+                });
+              });
+            }
+          });
+        });
+      });
+
+      if (tasks.length === 0) {
+        toast.error("No evaluations to run", {
+          description: "No extractions found for the selected source models.",
+        });
+        setIsEvaluating(false);
+        return;
+      }
+
+      console.log(
+        `Starting batch processing of ${tasks.length} evaluations...`
+      );
+      let completedCount = 0;
+      const totalTasks = tasks.length;
+      const BATCH_SIZE = 10;
+
+      const fetchWithRetry = async (
+        url: string,
+        options: any,
+        retries = 3,
+        backoff = 1000
+      ) => {
+        try {
+          const res = await fetch(url, options);
+          if (res.status === 429) {
+            if (retries <= 0) throw new Error("Rate limit exceeded (429)");
+            const retryAfter = res.headers.get("Retry-After");
+            const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : backoff;
+            console.warn(`Rate limit hit. Retrying in ${waitTime}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, waitTime));
+            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+          }
+          return res;
+        } catch (err) {
+          if (retries <= 0) throw err;
+          console.warn(`Fetch error. Retrying... (${retries} left)`);
+          await new Promise((resolve) => setTimeout(resolve, backoff));
+          return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+      };
+
+      // 2. Execute tasks in batches
+      const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
+
+      for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+        if (abortControllerRef.current?.signal.aborted) break;
+
+        const batch = tasks.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (task) => {
+          try {
+            const providerId = task.judgeModel;
+            const provider = allProviders.find((p) => p.id === providerId);
+
+            if (!provider) {
+              console.error(`Provider not found: ${providerId}`);
+              // return skipped or error task result
+              completedCount++;
+              setEvaluationProgress(
+                Math.round((completedCount / totalTasks) * 100)
+              );
+              return null;
+            }
+
+            const requestBody: any = {
+              entity_name: task.entityName,
+              extraction_prompt: task.prompt,
+              actual_output: task.extractedContent,
+              expected_output: task.groundTruth,
+              metrics: selectedMetrics,
+              // provider: task.judgeModel, // REMOVE OLD incorrect assignment
+              threshold: 0.7,
+              strict_mode: false,
+              custom_evaluation_steps: customEvaluationSteps,
+            };
+
+            // Add provider-specific config (Copied from evaluateSingleEntity)
+            if (providerId.startsWith("azure-")) {
+              // Azure OpenAI models
+              requestBody.provider = "azure_openai";
+              requestBody.azure_deployment =
+                provider.deployment || provider.model;
+              requestBody.azure_model_name = provider.model;
+            } else if (
+              providerId === "vertex_ai_pro" ||
+              providerId === "vertex_ai_lite"
+            ) {
+              requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
+              requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
+            } else if (providerId.startsWith("anthropic_")) {
+              requestBody.provider = "anthropic"; // Backend expects "anthropic"
+              requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
+            } else {
+              // Fallback for other providers or if using just the ID
+              requestBody.provider = providerId;
+            }
+
+            const response = await fetchWithRetry("/api/evaluations/evaluate", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(requestBody),
+              signal: abortControllerRef.current?.signal,
+            });
+
+            if (!response.ok)
+              throw new Error(`API failed for ${task.entityName}`);
+            const result = await response.json();
+
+            // Update state with result (Atomic state updates are tricky in loops, but we use functional update)
+            setFiles((prevFiles) =>
+              prevFiles.map((f) => {
+                if (f.fileId !== task.fileId) return f;
+
+                return {
+                  ...f,
+                  entities: f.entities.map((e: any) => {
+                    if (e.name !== task.entityName) return e;
+
+                    const currentExtractions = e.extractionsByModel || {};
+                    const currentSourceExtraction = currentExtractions[
+                      task.sourceModel
+                    ] || {
+                      extracted: task.extractedContent,
+                    };
+
+                    const currentEvalResults =
+                      currentSourceExtraction.evaluationResults || [];
+                    const updatedEvalResults = [
+                      ...currentEvalResults.filter(
+                        (r: any) => r.model !== task.judgeModel
+                      ),
+                      result,
+                    ];
+
+                    return {
+                      ...e,
+                      extractionsByModel: {
+                        ...currentExtractions,
+                        [task.sourceModel]: {
+                          ...currentSourceExtraction,
+                          evaluationResults: updatedEvalResults,
+                        },
+                      },
+                    };
+                  }),
+                };
+              })
+            );
+            completedCount++;
+            // Update progress immediately after each task completes
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+          } catch (err) {
+            console.error(
+              `Error evaluating ${task.entityName} on ${task.fileName}:`,
+              err
+            );
+            completedCount++;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+          }
+        });
+
+        await Promise.all(batchPromises);
+      }
+
+      setEvaluationComplete(true);
+      setEvaluationProgress(100); // Ensure progress shows 100% on completion
+      toast.success("Batch Evaluation Complete", {
+        description: `Successfully processed ${completedCount} evaluations.`,
+      });
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        toast("Evaluation Stopped", {
+          description: "Batch processing cancelled.",
+        });
+      } else {
+        console.error("Batch evaluation error:", error);
+        toast.error("Evaluation Failed", {
+          description: error.message || "Unknown error occurred",
+        });
+      }
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
   return (
     <div>
       {/* CSS for highlight animation */}
@@ -1060,353 +1509,368 @@ export function EvaluationPage({
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="flex items-center gap-4 mb-6">
-        <Button variant="outline" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <h2 className="text-xl">Evaluation & Validation</h2>
-          <p className="text-muted-foreground">
-            Evaluate extraction quality against ground truth using LLM judges
-          </p>
-        </div>
-      </div>
-
-      {/* File Selector for Batch */}
-      {files.length > 0 && (
-        <div className="mb-6">
-          <Label className="mb-2 block">Select Document to Evaluate</Label>
-          <Select
-            value={selectedFileId}
-            onValueChange={setSelectedFileId}
-            disabled={isEvaluating}
-          >
-            <SelectTrigger className="w-full md:w-[400px] h-auto py-2">
-              <SelectValue placeholder="Select document">
-                {(() => {
-                  const file = files.find((f) => f.fileId === selectedFileId);
-                  if (!file) return "Select document";
-
-                  // Check evaluation status
-                  const hasResults = file.entities?.some(
-                    (e: any) =>
-                      e.evaluationResults && e.evaluationResults.length > 0
-                  );
-                  const allEvaluated = file.entities?.every(
-                    (e: any) =>
-                      e.evaluationResults && e.evaluationResults.length > 0
-                  );
-
-                  return (
-                    <div className="flex flex-col items-start text-left">
-                      <span className="font-medium truncate w-full">
-                        {file.file?.name || "Document"}
-                      </span>
-                      {allEvaluated ? (
-                        <span className="text-xs text-green-600">
-                          Evaluation Completed
-                        </span>
-                      ) : hasResults ? (
-                        <span className="text-xs text-blue-600">
-                          Partially Evaluated
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">
-                          Not Evaluated
-                        </span>
-                      )}
-                    </div>
-                  );
-                })()}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {files.map((file) => {
-                const hasResults = file.entities?.some(
-                  (e: any) =>
-                    e.evaluationResults && e.evaluationResults.length > 0
-                );
-                const allEvaluated = file.entities?.every(
-                  (e: any) =>
-                    e.evaluationResults && e.evaluationResults.length > 0
-                );
-
-                return (
-                  <SelectItem key={file.fileId} value={file.fileId}>
-                    <div className="flex items-center gap-2">
-                      {allEvaluated ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      ) : hasResults ? (
-                        <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                      ) : (
-                        <div className="h-4 w-4 rounded-full border border-gray-300 flex-shrink-0" />
-                      )}
-                      <div className="flex flex-col min-w-0">
-                        <span className="truncate max-w-[300px] font-medium">
-                          {file.file?.name || "Document"}
-                        </span>
-                      </div>
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
+      {/* Header - hidden in Results view */}
+      {activeTab === "evaluation" && (
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="sm" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Extraction
+            </Button>
+            <div>
+              <h2 className="text-xl">Evaluation & Validation</h2>
+              <p className="text-muted-foreground">
+                Evaluate extraction quality against ground truth using LLM
+                judges
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4"></div>
         </div>
       )}
 
-      {/* Warnings */}
-      {warnings.length > 0 && (
-        <Alert className="mb-6 border-yellow-500 bg-yellow-50">
-          <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertDescription>
-            <ul className="list-disc list-inside space-y-1">
-              {warnings.map((warning, idx) => (
-                <li key={idx} className="text-sm text-yellow-800">
-                  {warning}
-                </li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid gap-6">
-        {/* Configuration Section */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Metric Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Evaluation Metrics</CardTitle>
-              <CardDescription>
-                Select metrics to assess extraction quality
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {METRICS.map((metric) => (
-                <div
-                  key={metric.id}
-                  className="flex items-start space-x-3 space-y-0"
-                >
-                  <Checkbox
-                    id={metric.id}
-                    checked={selectedMetrics.includes(metric.id)}
-                    onCheckedChange={() => toggleMetric(metric.id)}
-                  />
-                  <div className="flex-1 space-y-1 leading-none">
-                    <div className="flex items-center justify-between">
-                      <Label
-                        htmlFor={metric.id}
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                      >
-                        {metric.label}
-                        {metric.requiresGroundTruth && (
-                          <span className="ml-2 text-xs text-orange-600 font-normal">
-                            (requires ground truth)
-                          </span>
-                        )}
-                      </Label>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2"
-                        onClick={() => setEditingMetric(metric.id)}
-                      >
-                        <Settings className="h-3.5 w-3.5 mr-1" />
-                        <span className="text-xs">Customize Prompt</span>
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {metric.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Provider Selection */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
+      {/* Conditional Rendering: Results View vs Evaluation View */}
+      {activeTab === "results" ? (
+        <div className="flex-1 -mx-6 -mb-6">
+          <BatchResultsPage
+            documentData={documentData}
+            onBack={() => setActiveTab("evaluation")}
+          />
+        </div>
+      ) : (
+        <>
+          {/* File Selector & Source Model Selector (Single Mode) */}
+          {!isBatchMode && files.length > 0 && (
+            <div className="mb-6">
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
                 <div>
-                  <CardTitle>Evaluation Models</CardTitle>
-                  <CardDescription>
-                    Select LLM judges for evaluation
-                  </CardDescription>
-                </div>
-                <Badge variant="secondary" className="text-sm">
-                  {selectedProviders.length} selected
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Accordion type="multiple" defaultValue={[]} className="w-full">
-                {/* Azure OpenAI Models */}
-                <AccordionItem value="azure">
-                  <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center justify-between w-full pr-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">Azure OpenAI</span>
-                        {(() => {
-                          const azureIds = azureModels.map((p) => p.id);
-                          const selection = getCategorySelection(azureIds);
+                  <Label className="mb-2 block">
+                    Select Document to Evaluate
+                  </Label>
+                  <Select
+                    value={selectedFileId}
+                    onValueChange={setSelectedFileId}
+                    disabled={isEvaluating}
+                  >
+                    <SelectTrigger className="w-full h-auto py-2">
+                      <SelectValue placeholder="Select document" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {files.map((file) => {
+                        // Check both entity.evaluationResults and extractionsByModel for results
+                        const hasResults = file.entities?.some(
+                          (e: any) =>
+                            (e.evaluationResults &&
+                              e.evaluationResults.length > 0) ||
+                            (e.extractionsByModel &&
+                              Object.values(e.extractionsByModel).some(
+                                (ext: any) =>
+                                  ext.evaluationResults &&
+                                  ext.evaluationResults.length > 0
+                              ))
+                        );
+                        const allEvaluated = file.entities?.every((e: any) => {
+                          if (isBatchMode && selectedSourceModels.length > 0) {
+                            return selectedSourceModels.every((modelId) => {
+                              // If no extraction for this model, consider it done (skipped)
+                              const extraction =
+                                e.extractionsByModel?.[modelId]?.extracted ||
+                                (file.selectedModel === modelId
+                                  ? e.extracted
+                                  : null);
+                              if (!extraction) return true;
+
+                              const results =
+                                e.extractionsByModel?.[modelId]
+                                  ?.evaluationResults ||
+                                (file.selectedModel === modelId
+                                  ? e.evaluationResults
+                                  : []);
+
+                              if (!results || results.length === 0)
+                                return false;
+
+                              if (selectedProviders.length > 0) {
+                                return selectedProviders.every((judgeId) =>
+                                  results.some((r: any) => r.model === judgeId)
+                                );
+                              }
+                              return true;
+                            });
+                          }
                           return (
-                            <Badge variant="outline" className="text-xs">
-                              {selection.selected}/{selection.total}
-                            </Badge>
+                            (e.evaluationResults &&
+                              e.evaluationResults.length > 0) ||
+                            (e.extractionsByModel &&
+                              Object.values(e.extractionsByModel).some(
+                                (ext: any) =>
+                                  ext.evaluationResults &&
+                                  ext.evaluationResults.length > 0
+                              ))
                           );
-                        })()}
-                      </div>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    {isLoadingModels ? (
-                      <p className="text-sm text-muted-foreground py-2">
-                        Loading models...
-                      </p>
-                    ) : azureModels.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-2">
-                        No Azure OpenAI models configured
-                      </p>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b">
-                          <span className="text-sm text-muted-foreground">
-                            {azureModels.length} model
-                            {azureModels.length !== 1 ? "s" : ""} available
-                          </span>
-                          {(() => {
-                            const azureIds = azureModels.map((p) => p.id);
-                            const selection = getCategorySelection(azureIds);
-                            return (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() =>
-                                  toggleCategory(
-                                    azureIds,
-                                    !selection.allSelected
-                                  )
-                                }
-                              >
-                                {selection.allSelected ? (
-                                  <>
-                                    <CheckSquare className="h-3 w-3 mr-1" />
-                                    Deselect All
-                                  </>
-                                ) : (
-                                  <>
-                                    <Square className="h-3 w-3 mr-1" />
-                                    Select All
-                                  </>
-                                )}
-                              </Button>
-                            );
-                          })()}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {azureModels.map((provider) => (
-                            <div
-                              key={provider.id}
-                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
-                            >
-                              <Checkbox
-                                id={provider.id}
-                                checked={selectedProviders.includes(
-                                  provider.id
-                                )}
-                                onCheckedChange={() =>
-                                  toggleProvider(provider.id)
-                                }
-                                disabled={!provider.available}
-                                className="mt-1"
-                              />
-                              <div className="flex-1 space-y-1 min-w-0">
-                                <Label
-                                  htmlFor={provider.id}
-                                  className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                >
-                                  {provider.model}
-                                </Label>
-                                <p className="text-xs text-muted-foreground line-clamp-2">
-                                  {provider.description}
-                                </p>
+                        });
+
+                        return (
+                          <SelectItem key={file.fileId} value={file.fileId}>
+                            <div className="flex items-center gap-2 w-full">
+                              {allEvaluated ? (
+                                <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
+                              ) : hasResults ? (
+                                <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                              ) : (
+                                <div className="h-4 w-4 rounded-full border border-gray-300 flex-shrink-0" />
+                              )}
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="truncate font-medium w-full block">
+                                  {file.file?.name || "Document"}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {allEvaluated
+                                    ? "Evaluation Complete"
+                                    : hasResults
+                                      ? "Partially Evaluated"
+                                      : "Ready for Eval"}
+                                </span>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </AccordionContent>
-                </AccordionItem>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                {/* Google AI Models */}
-                <AccordionItem value="google">
-                  <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center justify-between w-full pr-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">
-                          Google AI (Gemini)
-                        </span>
-                        {(() => {
-                          const googleIds = STATIC_EVAL_PROVIDERS.filter((p) =>
-                            p.id.startsWith("vertex_ai")
-                          ).map((p) => p.id);
-                          const selection = getCategorySelection(googleIds);
-                          return (
-                            <Badge variant="outline" className="text-xs">
-                              {selection.selected}/{selection.total}
-                            </Badge>
-                          );
-                        })()}
+                {availableSourceModels.length > 0 && (
+                  <div>
+                    <Label className="mb-2 block">
+                      View Extraction from Model
+                    </Label>
+                    <Select
+                      value={singleModeSourceModel}
+                      onValueChange={(val) => {
+                        setSingleModeSourceModel(val);
+                        // Update current file's selected model logic if needed for display
+                        setFiles((prev) =>
+                          prev.map((f) =>
+                            f.fileId === selectedFileId
+                              ? { ...f, selectedModel: val }
+                              : f
+                          )
+                        );
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Source Model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableSourceModels.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Warnings */}
+          {warnings.length > 0 && (
+            <Alert className="mb-6 border-yellow-500 bg-yellow-50">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription>
+                <ul className="list-disc list-inside space-y-1">
+                  {warnings.map((warning, idx) => (
+                    <li key={idx} className="text-sm text-yellow-800">
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="grid gap-6">
+            {/* Configuration Section */}
+            <div
+              className={`grid gap-6 ${isBatchMode ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}
+            >
+              {/* Source Models Selection (Batch Mode Only) */}
+              {isBatchMode && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Source Models</CardTitle>
+                    <CardDescription>
+                      Select LLM outputs to evaluate
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {availableSourceModels.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No models found in extracted data
+                      </p>
+                    ) : (
+                      availableSourceModels.map((model) => (
+                        <div key={model} className="flex items-start space-x-3">
+                          <Checkbox
+                            id={`source-${model}`}
+                            checked={selectedSourceModels.includes(model)}
+                            onCheckedChange={() => toggleSourceModel(model)}
+                          />
+                          <label
+                            htmlFor={`source-${model}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            {getDisplayModelName(model)}
+                          </label>
+                        </div>
+                      ))
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Metric Selection */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Evaluation Metrics</CardTitle>
+                  <CardDescription>
+                    Select metrics to assess extraction quality
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {METRICS.map((metric) => (
+                    <div
+                      key={metric.id}
+                      className="flex items-start space-x-3 space-y-0"
+                    >
+                      <Checkbox
+                        id={metric.id}
+                        checked={selectedMetrics.includes(metric.id)}
+                        onCheckedChange={() => toggleMetric(metric.id)}
+                      />
+                      <div className="flex-1 space-y-1 leading-none">
+                        <div className="flex items-center justify-between">
+                          <Label
+                            htmlFor={metric.id}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                          >
+                            {metric.label}
+                            {metric.requiresGroundTruth && (
+                              <span className="ml-2 text-xs text-orange-600 font-normal">
+                                (requires ground truth)
+                              </span>
+                            )}
+                          </Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setEditingMetric(metric.id)}
+                          >
+                            <Settings className="h-3.5 w-3.5 mr-1" />
+                            <span className="text-xs">Customize Prompt</span>
+                          </Button>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {metric.description}
+                        </p>
                       </div>
                     </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="space-y-3">
-                      {(() => {
-                        const googleProviders = STATIC_EVAL_PROVIDERS.filter(
-                          (p) => p.id.startsWith("vertex_ai")
-                        );
-                        const googleIds = googleProviders.map((p) => p.id);
-                        const selection = getCategorySelection(googleIds);
-                        return (
-                          <>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {/* Provider Selection */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Evaluation Models</CardTitle>
+                      <CardDescription>
+                        Select LLM judges for evaluation
+                      </CardDescription>
+                    </div>
+                    <Badge variant="secondary" className="text-sm">
+                      {selectedProviders.length} selected
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Accordion
+                    type="multiple"
+                    defaultValue={[]}
+                    className="w-full"
+                  >
+                    {/* Azure OpenAI Models */}
+                    <AccordionItem value="azure">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center justify-between w-full pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">Azure OpenAI</span>
+                            {(() => {
+                              const azureIds = azureModels.map((p) => p.id);
+                              const selection = getCategorySelection(azureIds);
+                              return (
+                                <Badge variant="outline" className="text-xs">
+                                  {selection.selected}/{selection.total}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        {isLoadingModels ? (
+                          <p className="text-sm text-muted-foreground py-2">
+                            Loading models...
+                          </p>
+                        ) : azureModels.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-2">
+                            No Azure OpenAI models configured
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
                             <div className="flex items-center justify-between pb-2 border-b">
                               <span className="text-sm text-muted-foreground">
-                                {googleProviders.length} model
-                                {googleProviders.length !== 1 ? "s" : ""}{" "}
-                                available
+                                {azureModels.length} model
+                                {azureModels.length !== 1 ? "s" : ""} available
                               </span>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() =>
-                                  toggleCategory(
-                                    googleIds,
-                                    !selection.allSelected
-                                  )
-                                }
-                              >
-                                {selection.allSelected ? (
-                                  <>
-                                    <CheckSquare className="h-3 w-3 mr-1" />
-                                    Deselect All
-                                  </>
-                                ) : (
-                                  <>
-                                    <Square className="h-3 w-3 mr-1" />
-                                    Select All
-                                  </>
-                                )}
-                              </Button>
+                              {(() => {
+                                const azureIds = azureModels.map((p) => p.id);
+                                const selection =
+                                  getCategorySelection(azureIds);
+                                return (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      toggleCategory(
+                                        azureIds,
+                                        !selection.allSelected
+                                      )
+                                    }
+                                  >
+                                    {selection.allSelected ? (
+                                      <>
+                                        <CheckSquare className="h-3 w-3 mr-1" />
+                                        Deselect All
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Square className="h-3 w-3 mr-1" />
+                                        Select All
+                                      </>
+                                    )}
+                                  </Button>
+                                );
+                              })()}
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {googleProviders.map((provider) => (
+                              {azureModels.map((provider) => (
                                 <div
                                   key={provider.id}
                                   className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
@@ -1436,694 +1900,1375 @@ export function EvaluationPage({
                                 </div>
                               ))}
                             </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                {/* Anthropic Models */}
-                <AccordionItem value="anthropic">
-                  <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center justify-between w-full pr-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">
-                          Anthropic (Claude)
-                        </span>
-                        {(() => {
-                          const anthropicIds = STATIC_EVAL_PROVIDERS.filter(
-                            (p) => p.id.startsWith("anthropic_")
-                          ).map((p) => p.id);
-                          const selection = getCategorySelection(anthropicIds);
-                          return (
-                            <Badge variant="outline" className="text-xs">
-                              {selection.selected}/{selection.total}
-                            </Badge>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="space-y-3">
-                      {(() => {
-                        const anthropicProviders = STATIC_EVAL_PROVIDERS.filter(
-                          (p) => p.id.startsWith("anthropic_")
-                        );
-                        const anthropicIds = anthropicProviders.map(
-                          (p) => p.id
-                        );
-                        const selection = getCategorySelection(anthropicIds);
-                        return (
-                          <>
-                            <div className="flex items-center justify-between pb-2 border-b">
-                              <span className="text-sm text-muted-foreground">
-                                {anthropicProviders.length} model
-                                {anthropicProviders.length !== 1
-                                  ? "s"
-                                  : ""}{" "}
-                                available
-                              </span>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() =>
-                                  toggleCategory(
-                                    anthropicIds,
-                                    !selection.allSelected
-                                  )
-                                }
-                              >
-                                {selection.allSelected ? (
-                                  <>
-                                    <CheckSquare className="h-3 w-3 mr-1" />
-                                    Deselect All
-                                  </>
-                                ) : (
-                                  <>
-                                    <Square className="h-3 w-3 mr-1" />
-                                    Select All
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {anthropicProviders.map((provider) => (
-                                <div
-                                  key={provider.id}
-                                  className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
-                                >
-                                  <Checkbox
-                                    id={provider.id}
-                                    checked={selectedProviders.includes(
-                                      provider.id
-                                    )}
-                                    onCheckedChange={() =>
-                                      toggleProvider(provider.id)
-                                    }
-                                    disabled={!provider.available}
-                                    className="mt-1"
-                                  />
-                                  <div className="flex-1 space-y-1 min-w-0">
-                                    <Label
-                                      htmlFor={provider.id}
-                                      className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                    >
-                                      {getDisplayModelName(provider.model)}
-                                    </Label>
-                                    <p className="text-xs text-muted-foreground line-clamp-2">
-                                      {provider.description}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Customize Evaluation Prompt Dialog */}
-        <Dialog
-          open={editingMetric !== null}
-          onOpenChange={(open) => !open && setEditingMetric(null)}
-        >
-          <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Customize {
-                  METRICS.find((m) => m.id === editingMetric)?.label
-                }{" "}
-                Evaluation Prompt
-              </DialogTitle>
-              <DialogDescription>
-                Modify the evaluation steps that LLM judges use to score this
-                metric. Changes are saved automatically.
-              </DialogDescription>
-            </DialogHeader>
-
-            {editingMetric && (
-              <div className="space-y-4 mt-4">
-                <Alert className="bg-blue-50 border-blue-200">
-                  <Info className="h-4 w-4 text-blue-600" />
-                  <AlertDescription className="text-blue-800">
-                    These steps guide the LLM judge on how to evaluate the
-                    extraction. Be specific and clear about what to check and
-                    how to score.
-                  </AlertDescription>
-                </Alert>
-
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-medium">
-                    Evaluation Steps:
-                  </Label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => resetEvaluationSteps(editingMetric)}
-                  >
-                    <RotateCcw className="h-3 w-3 mr-2" />
-                    Reset to Default
-                  </Button>
-                </div>
-
-                <div className="space-y-3">
-                  {customEvaluationSteps[editingMetric]?.map((step, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className="text-sm font-medium text-muted-foreground mt-3 min-w-[28px]">
-                        {idx + 1}.
-                      </span>
-                      <Textarea
-                        value={step}
-                        onChange={(e) =>
-                          updateEvaluationStep(
-                            editingMetric,
-                            idx,
-                            e.target.value
-                          )
-                        }
-                        rows={2}
-                        className="flex-1 text-sm"
-                        placeholder={`Evaluation step ${idx + 1}...`}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeEvaluationStep(editingMetric, idx)}
-                        disabled={
-                          customEvaluationSteps[editingMetric].length <= 1
-                        }
-                        className="mt-2"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addEvaluationStep(editingMetric)}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Evaluation Step
-                </Button>
-
-                <div className="pt-4 border-t">
-                  <Button
-                    onClick={() => setEditingMetric(null)}
-                    className="w-full"
-                  >
-                    Done
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Entities with Ground Truth & Results */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">
-              Entities (
-              {
-                (currentFile.entities || []).filter((e: any) => e.extracted)
-                  .length
-              }
-              )
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              <Info className="h-4 w-4 inline mr-1" />
-              Provide ground truth for reference-based metrics
-            </p>
-          </div>
-
-          <ScrollArea className="h-[600px]">
-            <div className="space-y-4 pr-4">
-              {(currentFile.entities || [])
-                .filter((e: any) => e.extracted)
-                .map((entity: any, index: number) => {
-                  const isEvaluating = evaluatingEntities.has(entity.name);
-                  const isCompleted = completedEntities.has(entity.name);
-
-                  return (
-                    <Card
-                      key={index}
-                      id={`entity-card-${entity.name}`}
-                      className={`border-2 transition-all duration-300 ${
-                        isEvaluating
-                          ? "border-blue-400 shadow-lg"
-                          : isCompleted
-                            ? "border-green-400"
-                            : ""
-                      }`}
-                    >
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <span className="text-xs font-medium px-2 py-1 bg-purple-100 text-purple-700 rounded">
-                            Entity
-                          </span>
-                          {entity.name}
-                          {isEvaluating && (
-                            <span className="flex items-center gap-1 text-sm font-normal text-blue-600 ml-auto">
-                              <Sparkles className="h-4 w-4 animate-spin" />
-                              Evaluating...
-                            </span>
-                          )}
-                          {!isEvaluating && (
-                            <div className="ml-auto flex items-center gap-2">
-                              {isCompleted && (
-                                <span className="flex items-center gap-1 text-sm font-normal text-green-600 mr-2">
-                                  <CheckCircle2 className="h-4 w-4" />
-                                  Completed
-                                </span>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                type="button"
-                                className="h-8 text-xs"
-                                onClick={() => handleRerunEntity(entity.name)}
-                                disabled={evaluatingEntities.has(entity.name)}
-                              >
-                                <RotateCcw className="h-3 w-3 mr-1" />
-                                Run
-                              </Button>
-                            </div>
-                          )}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {/* Extracted Output */}
-                        <div>
-                          <Label className="text-sm font-semibold text-blue-600">
-                            Extracted Output
-                          </Label>
-                          <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                            <p className="text-sm whitespace-pre-wrap">
-                              {entity.extracted}
-                            </p>
                           </div>
-                          {entity.duration && (
-                            <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                              <span>⏱️ {entity.duration.toFixed(2)}s</span>
-                              <span>
-                                📊 {entity.promptTokens} →{" "}
-                                {entity.completionTokens} tokens
-                              </span>
-                            </div>
-                          )}
-                        </div>
+                        )}
+                      </AccordionContent>
+                    </AccordionItem>
 
-                        {/* Ground Truth Input */}
-                        <div>
-                          <Label
-                            htmlFor={`ground-truth-${index}`}
-                            className="text-sm font-semibold"
-                          >
-                            Ground Truth / Expected Output
-                            {selectedMetrics.some(
-                              (m) => m === "correctness" || m === "completeness"
-                            ) && (
-                              <span className="ml-2 text-xs text-orange-600 font-normal">
-                                (required for Correctness/Completeness)
-                              </span>
-                            )}
-                          </Label>
-                          <Textarea
-                            id={`ground-truth-${index}`}
-                            value={entityGroundTruths[entity.name] || ""}
-                            onChange={(e) =>
-                              updateGroundTruth(entity.name, e.target.value)
-                            }
-                            placeholder="Enter the expected/correct output for this entity..."
-                            rows={3}
-                            className="mt-2"
-                          />
+                    {/* Google AI Models */}
+                    <AccordionItem value="google">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center justify-between w-full pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">
+                              Google AI (Gemini)
+                            </span>
+                            {(() => {
+                              const googleIds = STATIC_EVAL_PROVIDERS.filter(
+                                (p) => p.id.startsWith("vertex_ai")
+                              ).map((p) => p.id);
+                              const selection = getCategorySelection(googleIds);
+                              return (
+                                <Badge variant="outline" className="text-xs">
+                                  {selection.selected}/{selection.total}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
                         </div>
-
-                        {/* Evaluation Results Button */}
-                        {entity.evaluationResults &&
-                          entity.evaluationResults.length > 0 && (
-                            <div className="border-t pt-4 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    className="w-full relative"
-                                    size="lg"
-                                  >
-                                    <BarChart3 className="h-4 w-4 mr-2" />
-                                    View Evaluation Results (
-                                    {entity.evaluationResults.length} model
-                                    {entity.evaluationResults.length > 1
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-3">
+                          {(() => {
+                            const googleProviders =
+                              STATIC_EVAL_PROVIDERS.filter((p) =>
+                                p.id.startsWith("vertex_ai")
+                              );
+                            const googleIds = googleProviders.map((p) => p.id);
+                            const selection = getCategorySelection(googleIds);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between pb-2 border-b">
+                                  <span className="text-sm text-muted-foreground">
+                                    {googleProviders.length} model
+                                    {googleProviders.length !== 1
                                       ? "s"
-                                      : ""}
-                                    )
-                                    {isCompleted && !isEvaluating && (
-                                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                                      </span>
+                                      : ""}{" "}
+                                    available
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      toggleCategory(
+                                        googleIds,
+                                        !selection.allSelected
+                                      )
+                                    }
+                                  >
+                                    {selection.allSelected ? (
+                                      <>
+                                        <CheckSquare className="h-3 w-3 mr-1" />
+                                        Deselect All
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Square className="h-3 w-3 mr-1" />
+                                        Select All
+                                      </>
                                     )}
                                   </Button>
-                                </DialogTrigger>
-                                <DialogContent
-                                  className="max-h-[85vh] overflow-y-auto"
-                                  style={{ width: "60vw", maxWidth: "60vw" }}
-                                >
-                                  <DialogHeader>
-                                    <DialogTitle className="text-xl">
-                                      {entity.name} - Quality Evaluation
-                                    </DialogTitle>
-                                    <DialogDescription>
-                                      Compare how different LLM judges scored
-                                      each metric
-                                    </DialogDescription>
-                                  </DialogHeader>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {googleProviders.map((provider) => (
+                                    <div
+                                      key={provider.id}
+                                      className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                    >
+                                      <Checkbox
+                                        id={provider.id}
+                                        checked={selectedProviders.includes(
+                                          provider.id
+                                        )}
+                                        onCheckedChange={() =>
+                                          toggleProvider(provider.id)
+                                        }
+                                        disabled={!provider.available}
+                                        className="mt-1"
+                                      />
+                                      <div className="flex-1 space-y-1 min-w-0">
+                                        <Label
+                                          htmlFor={provider.id}
+                                          className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                        >
+                                          {provider.model}
+                                        </Label>
+                                        <p className="text-xs text-muted-foreground line-clamp-2">
+                                          {provider.description}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
 
-                                  {(() => {
-                                    // Get all unique metrics from all results
-                                    const allMetrics = Array.from(
-                                      new Set(
-                                        entity.evaluationResults!.flatMap(
-                                          (r: any) =>
-                                            r.metrics.map((m: any) =>
-                                              m.metric_name.replace(
-                                                "Entity Extraction ",
-                                                ""
-                                              )
-                                            )
-                                        )
+                    {/* Anthropic Models */}
+                    <AccordionItem value="anthropic">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center justify-between w-full pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">
+                              Anthropic (Claude)
+                            </span>
+                            {(() => {
+                              const anthropicIds = STATIC_EVAL_PROVIDERS.filter(
+                                (p) => p.id.startsWith("anthropic_")
+                              ).map((p) => p.id);
+                              const selection =
+                                getCategorySelection(anthropicIds);
+                              return (
+                                <Badge variant="outline" className="text-xs">
+                                  {selection.selected}/{selection.total}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-3">
+                          {(() => {
+                            const anthropicProviders =
+                              STATIC_EVAL_PROVIDERS.filter((p) =>
+                                p.id.startsWith("anthropic_")
+                              );
+                            const anthropicIds = anthropicProviders.map(
+                              (p) => p.id
+                            );
+                            const selection =
+                              getCategorySelection(anthropicIds);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between pb-2 border-b">
+                                  <span className="text-sm text-muted-foreground">
+                                    {anthropicProviders.length} model
+                                    {anthropicProviders.length !== 1
+                                      ? "s"
+                                      : ""}{" "}
+                                    available
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      toggleCategory(
+                                        anthropicIds,
+                                        !selection.allSelected
                                       )
-                                    ) as string[];
+                                    }
+                                  >
+                                    {selection.allSelected ? (
+                                      <>
+                                        <CheckSquare className="h-3 w-3 mr-1" />
+                                        Deselect All
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Square className="h-3 w-3 mr-1" />
+                                        Select All
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {anthropicProviders.map((provider) => (
+                                    <div
+                                      key={provider.id}
+                                      className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                    >
+                                      <Checkbox
+                                        id={provider.id}
+                                        checked={selectedProviders.includes(
+                                          provider.id
+                                        )}
+                                        onCheckedChange={() =>
+                                          toggleProvider(provider.id)
+                                        }
+                                        disabled={!provider.available}
+                                        className="mt-1"
+                                      />
+                                      <div className="flex-1 space-y-1 min-w-0">
+                                        <Label
+                                          htmlFor={provider.id}
+                                          className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                        >
+                                          {getDisplayModelName(provider.model)}
+                                        </Label>
+                                        <p className="text-xs text-muted-foreground line-clamp-2">
+                                          {provider.description}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </CardContent>
+              </Card>
+            </div>
 
-                                    // Metric definitions
-                                    const metricDefinitions: Record<
-                                      string,
-                                      string
-                                    > = {
-                                      Correctness:
-                                        "Measures whether the LLM output is factually accurate and adheres to the ground truth or expected answer. This means the generated output should not contain inconsistent, incorrect, or fabricated information. The metric typically compares the response against reference answers or established facts for validation.",
-                                      Completeness:
-                                        "Evaluates if the LLM output contains all information necessary to fully resolve the prompt or test case. An answer is complete when it covers every relevant aspect required by the input, without missing essential steps, explanations, or pieces of information expected for a thorough response.",
-                                      Relevance:
-                                        "Checks if the output directly addresses the question or input context in an informative and focused manner. The metric assesses whether the generated content is on-topic for the user's request, avoiding verbosity, tangential statements, or filler, and prioritizing concise, targeted responses.",
-                                      Safety:
-                                        "Measures whether the LLM output avoids harmful, toxic, or inappropriate content. This includes screening for bias, offensive language, dangerous instructions, and other outputs that could be considered unethical, illegal, or damaging. Safety metrics typically incorporate several automated red-teaming and prompt injection assessments to flag vulnerabilities or problematic responses.",
-                                    };
+            {/* Customize Evaluation Prompt Dialog */}
+            <Dialog
+              open={editingMetric !== null}
+              onOpenChange={(open) => !open && setEditingMetric(null)}
+            >
+              <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Customize{" "}
+                    {METRICS.find((m) => m.id === editingMetric)?.label}{" "}
+                    Evaluation Prompt
+                  </DialogTitle>
+                  <DialogDescription>
+                    Modify the evaluation steps that LLM judges use to score
+                    this metric. Changes are saved automatically.
+                  </DialogDescription>
+                </DialogHeader>
 
-                                    return (
-                                      <Tabs
-                                        defaultValue={allMetrics[0]}
-                                        className="w-full"
+                {editingMetric && (
+                  <div className="space-y-4 mt-4">
+                    <Alert className="bg-blue-50 border-blue-200">
+                      <Info className="h-4 w-4 text-blue-600" />
+                      <AlertDescription className="text-blue-800">
+                        These steps guide the LLM judge on how to evaluate the
+                        extraction. Be specific and clear about what to check
+                        and how to score.
+                      </AlertDescription>
+                    </Alert>
+
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium">
+                        Evaluation Steps:
+                      </Label>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => resetEvaluationSteps(editingMetric)}
+                      >
+                        <RotateCcw className="h-3 w-3 mr-2" />
+                        Reset to Default
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {customEvaluationSteps[editingMetric]?.map(
+                        (step, idx) => (
+                          <div key={idx} className="flex items-start gap-2">
+                            <span className="text-sm font-medium text-muted-foreground mt-3 min-w-[28px]">
+                              {idx + 1}.
+                            </span>
+                            <Textarea
+                              value={step}
+                              onChange={(e) =>
+                                updateEvaluationStep(
+                                  editingMetric,
+                                  idx,
+                                  e.target.value
+                                )
+                              }
+                              rows={2}
+                              className="flex-1 text-sm"
+                              placeholder={`Evaluation step ${idx + 1}...`}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                removeEvaluationStep(editingMetric, idx)
+                              }
+                              disabled={
+                                customEvaluationSteps[editingMetric].length <= 1
+                              }
+                              className="mt-2"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addEvaluationStep(editingMetric)}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Evaluation Step
+                    </Button>
+
+                    <div className="pt-4 border-t">
+                      <Button
+                        onClick={() => setEditingMetric(null)}
+                        className="w-full"
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
+            {/* Single Mode Content */}
+            {!isBatchMode && (
+              <>
+                {/* Entities with Ground Truth & Results */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {files.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-foreground px-2"
+                          onClick={() => setIsBatchMode(true)}
+                        >
+                          ← Back to File List
+                        </Button>
+                      )}
+                      <h3 className="text-lg font-semibold">
+                        Entities (
+                        {
+                          (currentFile.entities || []).filter(
+                            (e: any) => e.extracted
+                          ).length
+                        }
+                        )
+                      </h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      <Info className="h-4 w-4 inline mr-1" />
+                      Provide ground truth for reference-based metrics
+                    </p>
+                  </div>
+
+                  <ScrollArea className="h-[600px]">
+                    <div className="space-y-4 pr-4">
+                      {(currentFile.entities || [])
+                        .filter((e: any) => e.extracted)
+                        .map((entity: any, index: number) => {
+                          const isEvaluating = evaluatingEntities.has(
+                            entity.name
+                          );
+                          const isCompleted = completedEntities.has(
+                            entity.name
+                          );
+
+                          // Resolve evaluation results from the correct source
+                          // Priority: extractionsByModel[singleModeSourceModel] > entity.evaluationResults
+                          const resolvedEvaluationResults = (() => {
+                            if (
+                              singleModeSourceModel &&
+                              entity.extractionsByModel?.[singleModeSourceModel]
+                                ?.evaluationResults?.length > 0
+                            ) {
+                              return entity.extractionsByModel[
+                                singleModeSourceModel
+                              ].evaluationResults;
+                            }
+                            // Fallback: check if there's any extractionsByModel with results
+                            if (entity.extractionsByModel) {
+                              const modelsWithResults = Object.keys(
+                                entity.extractionsByModel
+                              ).filter(
+                                (m) =>
+                                  entity.extractionsByModel[m]
+                                    ?.evaluationResults?.length > 0
+                              );
+                              if (modelsWithResults.length > 0) {
+                                // Return the first one with results
+                                return entity.extractionsByModel[
+                                  modelsWithResults[0]
+                                ].evaluationResults;
+                              }
+                            }
+                            // Final fallback to legacy entity.evaluationResults
+                            return entity.evaluationResults || [];
+                          })();
+
+                          return (
+                            <Card
+                              key={index}
+                              id={`entity-card-${entity.name}`}
+                              className={`border-2 transition-all duration-300 ${
+                                isEvaluating
+                                  ? "border-blue-400 shadow-lg"
+                                  : isCompleted
+                                    ? "border-green-400"
+                                    : ""
+                              }`}
+                            >
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                  <span className="text-xs font-medium px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                    Entity
+                                  </span>
+                                  {entity.name}
+                                  {isEvaluating && (
+                                    <span className="flex items-center gap-1 text-sm font-normal text-blue-600 ml-auto">
+                                      <Sparkles className="h-4 w-4 animate-spin" />
+                                      Evaluating...
+                                    </span>
+                                  )}
+                                  {!isEvaluating && (
+                                    <div className="ml-auto flex items-center gap-2">
+                                      {isCompleted && (
+                                        <span className="flex items-center gap-1 text-sm font-normal text-green-600 mr-2">
+                                          <CheckCircle2 className="h-4 w-4" />
+                                          Completed
+                                        </span>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        type="button"
+                                        className="h-8 text-xs"
+                                        onClick={() =>
+                                          handleRerunEntity(entity.name)
+                                        }
+                                        disabled={evaluatingEntities.has(
+                                          entity.name
+                                        )}
                                       >
-                                        <TabsList
-                                          className="grid w-full"
+                                        <RotateCcw className="h-3 w-3 mr-1" />
+                                        Run
+                                      </Button>
+                                    </div>
+                                  )}
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                {/* Extracted Output */}
+                                {/* Extracted Output */}
+                                <div>
+                                  <Label className="text-sm font-semibold text-blue-600">
+                                    Extracted Output{" "}
+                                    {singleModeSourceModel
+                                      ? `(${singleModeSourceModel})`
+                                      : ""}
+                                  </Label>
+                                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                    <p className="text-sm whitespace-pre-wrap">
+                                      {(() => {
+                                        // Logic to resolve display text
+                                        if (
+                                          singleModeSourceModel &&
+                                          entity.extractionsByModel?.[
+                                            singleModeSourceModel
+                                          ]?.extracted
+                                        ) {
+                                          return entity.extractionsByModel[
+                                            singleModeSourceModel
+                                          ].extracted;
+                                        }
+                                        // Check if there's any model with extraction for this entity
+                                        if (
+                                          singleModeSourceModel &&
+                                          entity.extractionsByModel &&
+                                          !entity.extractionsByModel[
+                                            singleModeSourceModel
+                                          ]
+                                        ) {
+                                          return (
+                                            <span className="text-muted-foreground italic">
+                                              No extraction available for this
+                                              model. Select a different model.
+                                            </span>
+                                          );
+                                        }
+                                        return (
+                                          entity.extracted || (
+                                            <span className="text-muted-foreground italic">
+                                              No extraction available
+                                            </span>
+                                          )
+                                        );
+                                      })()}
+                                    </p>
+                                  </div>
+                                  {entity.duration && (
+                                    <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                                      <span>
+                                        ⏱️ {entity.duration.toFixed(2)}s
+                                      </span>
+                                      <span>
+                                        📊 {entity.promptTokens} →{" "}
+                                        {entity.completionTokens} tokens
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Ground Truth Input */}
+                                <div>
+                                  <Label
+                                    htmlFor={`ground-truth-${index}`}
+                                    className="text-sm font-semibold"
+                                  >
+                                    Ground Truth / Expected Output
+                                    {selectedMetrics.some(
+                                      (m) =>
+                                        m === "correctness" ||
+                                        m === "completeness"
+                                    ) && (
+                                      <span className="ml-2 text-xs text-orange-600 font-normal">
+                                        (required for Correctness/Completeness)
+                                      </span>
+                                    )}
+                                  </Label>
+                                  <Textarea
+                                    id={`ground-truth-${index}`}
+                                    value={
+                                      entityGroundTruths[entity.name] || ""
+                                    }
+                                    onChange={(e) =>
+                                      updateGroundTruth(
+                                        entity.name,
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="Enter the expected/correct output for this entity..."
+                                    rows={3}
+                                    className="mt-2"
+                                  />
+                                </div>
+
+                                {/* Evaluation Results Button */}
+                                {resolvedEvaluationResults &&
+                                  resolvedEvaluationResults.length > 0 && (
+                                    <div className="border-t pt-4 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
+                                      <Dialog>
+                                        <DialogTrigger asChild>
+                                          <Button
+                                            variant="outline"
+                                            className="w-full relative"
+                                            size="lg"
+                                          >
+                                            <BarChart3 className="h-4 w-4 mr-2" />
+                                            View Evaluation Results (
+                                            {resolvedEvaluationResults.length}{" "}
+                                            model
+                                            {resolvedEvaluationResults.length >
+                                            1
+                                              ? "s"
+                                              : ""}
+                                            )
+                                            {resolvedEvaluationResults.length >
+                                              1 && (
+                                              <span className="ml-2 text-sm font-semibold text-primary">
+                                                Avg:{" "}
+                                                {(
+                                                  (resolvedEvaluationResults.reduce(
+                                                    (sum: number, r: any) =>
+                                                      sum + r.aggregate_score,
+                                                    0
+                                                  ) /
+                                                    resolvedEvaluationResults.length) *
+                                                  100
+                                                ).toFixed(1)}
+                                                %
+                                              </span>
+                                            )}
+                                            {isCompleted && !isEvaluating && (
+                                              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                                              </span>
+                                            )}
+                                          </Button>
+                                        </DialogTrigger>
+                                        <DialogContent
+                                          className="max-h-[85vh] overflow-y-auto"
                                           style={{
-                                            gridTemplateColumns: `repeat(${allMetrics.length}, 1fr)`,
+                                            width: "60vw",
+                                            maxWidth: "60vw",
                                           }}
                                         >
-                                          {allMetrics.map((metricName) => (
-                                            <TabsTrigger
-                                              key={metricName}
-                                              value={metricName}
-                                            >
-                                              {metricName}
-                                            </TabsTrigger>
-                                          ))}
-                                        </TabsList>
-
-                                        {allMetrics.map((metricName) => (
-                                          <TabsContent
-                                            key={metricName}
-                                            value={metricName}
-                                            className="space-y-4 mt-4"
-                                          >
-                                            {/* Contextual Metric Definition */}
-                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                              <h4 className="font-semibold text-sm text-blue-900 mb-2 flex items-center gap-2">
-                                                <Info className="h-4 w-4" />
-                                                Understanding {metricName}
-                                              </h4>
-                                              <p className="text-sm text-blue-800 leading-relaxed">
-                                                {metricDefinitions[metricName]}
-                                              </p>
-                                              <p className="text-xs text-blue-700 italic mt-3 pt-3 border-t border-blue-200">
-                                                This metric uses LLM-as-a-judge
-                                                techniques, providing robust
-                                                scoring (0-1 range) and
-                                                human-explainable reasoning.
-                                              </p>
-                                            </div>
-
-                                            {/* Evaluation Reasoning Cards */}
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                              {entity.evaluationResults!.map(
-                                                (result: any, idx: number) => {
-                                                  const metric =
-                                                    result.metrics.find(
-                                                      (m: any) =>
-                                                        m.metric_name.replace(
-                                                          "Entity Extraction ",
-                                                          ""
-                                                        ) === metricName
-                                                    );
-                                                  if (!metric) return null;
-
-                                                  return (
-                                                    <Card key={idx}>
-                                                      <CardHeader className="pb-3">
-                                                        <CardTitle className="text-base flex items-center gap-2">
-                                                          {metric.success ? (
-                                                            <CheckCircle2 className="h-5 w-5 text-green-600" />
-                                                          ) : (
-                                                            <XCircle className="h-5 w-5 text-red-600" />
-                                                          )}
-                                                          {getDisplayModelName(
-                                                            result.model
-                                                          )}
-                                                        </CardTitle>
-                                                        <CardDescription className="flex flex-col gap-2">
-                                                          <div className="flex items-center gap-2">
-                                                            <Badge variant="outline">
-                                                              {getDisplayModelName(
-                                                                result.model
-                                                              )}
-                                                            </Badge>
-                                                            {result.all_passed ? (
-                                                              <Badge className="bg-green-500 hover:bg-green-600">
-                                                                Pass
-                                                              </Badge>
-                                                            ) : (
-                                                              <Badge variant="destructive">
-                                                                Fail
-                                                              </Badge>
-                                                            )}
-                                                            <span className="text-xs text-muted-foreground ml-auto">
-                                                              {result.evaluation_time.toFixed(
-                                                                2
-                                                              )}
-                                                              s
-                                                            </span>
-                                                          </div>
-                                                          <div className="flex items-center justify-between">
-                                                            <span>
-                                                              Score:{" "}
-                                                              <span
-                                                                className={
-                                                                  metric.success
-                                                                    ? "text-green-600 font-semibold"
-                                                                    : "text-red-600 font-semibold"
-                                                                }
-                                                              >
-                                                                {(
-                                                                  metric.score *
-                                                                  100
-                                                                ).toFixed(0)}
-                                                              </span>
-                                                              /100
-                                                            </span>
-                                                            <span className="text-muted-foreground">
-                                                              Threshold:{" "}
-                                                              {(
-                                                                metric.threshold *
-                                                                100
-                                                              ).toFixed(0)}
-                                                            </span>
-                                                          </div>
-                                                        </CardDescription>
-                                                      </CardHeader>
-                                                      <CardContent>
-                                                        <p className="text-sm text-muted-foreground leading-relaxed">
-                                                          {metric.reason}
-                                                        </p>
-                                                      </CardContent>
-                                                    </Card>
-                                                  );
-                                                }
+                                          <DialogHeader>
+                                            <DialogTitle className="text-xl">
+                                              {entity.name} - Quality Evaluation
+                                            </DialogTitle>
+                                            <DialogDescription>
+                                              {resolvedEvaluationResults.length >
+                                              1 ? (
+                                                <div className="flex items-center gap-2 mt-1">
+                                                  <span>
+                                                    Compare how different LLM
+                                                    judges scored each metric
+                                                  </span>
+                                                  <span className="text-primary font-semibold">
+                                                    • Average Score:{" "}
+                                                    {(
+                                                      (resolvedEvaluationResults.reduce(
+                                                        (sum: number, r: any) =>
+                                                          sum +
+                                                          r.aggregate_score,
+                                                        0
+                                                      ) /
+                                                        resolvedEvaluationResults.length) *
+                                                      100
+                                                    ).toFixed(1)}
+                                                    %
+                                                  </span>
+                                                </div>
+                                              ) : (
+                                                "Compare how different LLM judges scored each metric"
                                               )}
-                                            </div>
-                                          </TabsContent>
-                                        ))}
-                                      </Tabs>
-                                    );
-                                  })()}
-                                </DialogContent>
-                              </Dialog>
-                            </div>
+                                            </DialogDescription>
+                                          </DialogHeader>
+
+                                          {(() => {
+                                            // Get all unique metrics from all results
+                                            const allMetrics = Array.from(
+                                              new Set(
+                                                resolvedEvaluationResults.flatMap(
+                                                  (r: any) =>
+                                                    r.metrics.map((m: any) =>
+                                                      m.metric_name.replace(
+                                                        "Entity Extraction ",
+                                                        ""
+                                                      )
+                                                    )
+                                                )
+                                              )
+                                            ) as string[];
+
+                                            // Metric definitions
+                                            const metricDefinitions: Record<
+                                              string,
+                                              string
+                                            > = {
+                                              Correctness:
+                                                "Measures whether the LLM output is factually accurate and adheres to the ground truth or expected answer. This means the generated output should not contain inconsistent, incorrect, or fabricated information. The metric typically compares the response against reference answers or established facts for validation.",
+                                              Completeness:
+                                                "Evaluates if the LLM output contains all information necessary to fully resolve the prompt or test case. An answer is complete when it covers every relevant aspect required by the input, without missing essential steps, explanations, or pieces of information expected for a thorough response.",
+                                              Relevance:
+                                                "Checks if the output directly addresses the question or input context in an informative and focused manner. The metric assesses whether the generated content is on-topic for the user's request, avoiding verbosity, tangential statements, or filler, and prioritizing concise, targeted responses.",
+                                              Safety:
+                                                "Measures whether the LLM output avoids harmful, toxic, or inappropriate content. This includes screening for bias, offensive language, dangerous instructions, and other outputs that could be considered unethical, illegal, or damaging. Safety metrics typically incorporate several automated red-teaming and prompt injection assessments to flag vulnerabilities or problematic responses.",
+                                            };
+
+                                            return (
+                                              <Tabs
+                                                defaultValue={allMetrics[0]}
+                                                className="w-full"
+                                              >
+                                                <TabsList
+                                                  className="grid w-full"
+                                                  style={{
+                                                    gridTemplateColumns: `repeat(${allMetrics.length}, 1fr)`,
+                                                  }}
+                                                >
+                                                  {allMetrics.map(
+                                                    (metricName) => (
+                                                      <TabsTrigger
+                                                        key={metricName}
+                                                        value={metricName}
+                                                      >
+                                                        {metricName}
+                                                      </TabsTrigger>
+                                                    )
+                                                  )}
+                                                </TabsList>
+
+                                                {allMetrics.map(
+                                                  (metricName) => (
+                                                    <TabsContent
+                                                      key={metricName}
+                                                      value={metricName}
+                                                      className="space-y-4 mt-4"
+                                                    >
+                                                      {/* Contextual Metric Definition */}
+                                                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                                        <h4 className="font-semibold text-sm text-blue-900 mb-2 flex items-center gap-2">
+                                                          <Info className="h-4 w-4" />
+                                                          Understanding{" "}
+                                                          {metricName}
+                                                        </h4>
+                                                        <p className="text-sm text-blue-800 leading-relaxed">
+                                                          {
+                                                            metricDefinitions[
+                                                              metricName
+                                                            ]
+                                                          }
+                                                        </p>
+                                                        <p className="text-xs text-blue-700 italic mt-3 pt-3 border-t border-blue-200">
+                                                          This metric uses
+                                                          LLM-as-a-judge
+                                                          techniques, providing
+                                                          robust scoring (0-1
+                                                          range) and
+                                                          human-explainable
+                                                          reasoning.
+                                                        </p>
+                                                      </div>
+
+                                                      {/* Average Score Card (only show if multiple models exist) */}
+                                                      {(() => {
+                                                        // Use resolvedEvaluationResults which contains results from the current source model
+                                                        // Each item in resolvedEvaluationResults is from a different LLM judge
+                                                        const allResultsForAvg =
+                                                          resolvedEvaluationResults ||
+                                                          [];
+
+                                                        if (
+                                                          allResultsForAvg.length <=
+                                                          1
+                                                        )
+                                                          return null;
+
+                                                        // Calculate average score for this metric across all models
+                                                        const metricScores =
+                                                          allResultsForAvg
+                                                            .map(
+                                                              (result: any) => {
+                                                                const metric =
+                                                                  result.metrics.find(
+                                                                    (m: any) =>
+                                                                      m.metric_name.replace(
+                                                                        "Entity Extraction ",
+                                                                        ""
+                                                                      ) ===
+                                                                        metricName ||
+                                                                      m.metric_name
+                                                                        .toLowerCase()
+                                                                        .includes(
+                                                                          metricName.toLowerCase()
+                                                                        )
+                                                                  );
+                                                                return metric
+                                                                  ? metric.score
+                                                                  : null;
+                                                              }
+                                                            )
+                                                            .filter(
+                                                              (
+                                                                score:
+                                                                  | number
+                                                                  | null
+                                                              ) =>
+                                                                score !== null
+                                                            );
+
+                                                        if (
+                                                          metricScores.length ===
+                                                          0
+                                                        )
+                                                          return null;
+
+                                                        const avgScore =
+                                                          metricScores.reduce(
+                                                            (
+                                                              sum: number,
+                                                              s: number
+                                                            ) => sum + s,
+                                                            0
+                                                          ) /
+                                                          metricScores.length;
+                                                        const avgPercentage =
+                                                          avgScore * 100;
+
+                                                        return (
+                                                          <div
+                                                            className={`border rounded-lg p-4 ${
+                                                              avgPercentage >=
+                                                              70
+                                                                ? "bg-green-50 border-green-200"
+                                                                : avgPercentage >=
+                                                                    50
+                                                                  ? "bg-yellow-50 border-yellow-200"
+                                                                  : "bg-red-50 border-red-200"
+                                                            }`}
+                                                          >
+                                                            <div className="flex items-center justify-between">
+                                                              <div className="flex items-center gap-2">
+                                                                <BarChart3
+                                                                  className={`h-5 w-5 ${
+                                                                    avgPercentage >=
+                                                                    70
+                                                                      ? "text-green-600"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-600"
+                                                                        : "text-red-600"
+                                                                  }`}
+                                                                />
+                                                                <span
+                                                                  className={`font-semibold ${
+                                                                    avgPercentage >=
+                                                                    70
+                                                                      ? "text-green-900"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-900"
+                                                                        : "text-red-900"
+                                                                  }`}
+                                                                >
+                                                                  Average{" "}
+                                                                  {metricName}{" "}
+                                                                  Score Across
+                                                                  All Models
+                                                                </span>
+                                                              </div>
+                                                              <span
+                                                                className={`text-2xl font-bold ${
+                                                                  avgPercentage >=
+                                                                  70
+                                                                    ? "text-green-700"
+                                                                    : avgPercentage >=
+                                                                        50
+                                                                      ? "text-yellow-700"
+                                                                      : "text-red-700"
+                                                                }`}
+                                                              >
+                                                                {avgPercentage.toFixed(
+                                                                  1
+                                                                )}
+                                                                %
+                                                              </span>
+                                                            </div>
+                                                            <p
+                                                              className={`text-xs mt-2 ${
+                                                                avgPercentage >=
+                                                                70
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                      50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                              }`}
+                                                            >
+                                                              Based on
+                                                              evaluations from{" "}
+                                                              {
+                                                                metricScores.length
+                                                              }{" "}
+                                                              model
+                                                              {metricScores.length >
+                                                              1
+                                                                ? "s"
+                                                                : ""}
+                                                            </p>
+                                                          </div>
+                                                        );
+                                                      })()}
+
+                                                      {/* Evaluation Reasoning Cards */}
+                                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {resolvedEvaluationResults.map(
+                                                          (
+                                                            result: any,
+                                                            idx: number
+                                                          ) => {
+                                                            const metric =
+                                                              result.metrics.find(
+                                                                (m: any) =>
+                                                                  m.metric_name.replace(
+                                                                    "Entity Extraction ",
+                                                                    ""
+                                                                  ) ===
+                                                                  metricName
+                                                              );
+                                                            if (!metric)
+                                                              return null;
+
+                                                            return (
+                                                              <Card key={idx}>
+                                                                <CardHeader className="pb-3">
+                                                                  <CardTitle className="text-base flex items-center gap-2">
+                                                                    {metric.success ? (
+                                                                      <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                                                    ) : (
+                                                                      <XCircle className="h-5 w-5 text-red-600" />
+                                                                    )}
+                                                                    {getDisplayModelName(
+                                                                      result.model
+                                                                    )}
+                                                                  </CardTitle>
+                                                                  <CardDescription className="flex flex-col gap-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                      <Badge variant="outline">
+                                                                        {getDisplayModelName(
+                                                                          result.model
+                                                                        )}
+                                                                      </Badge>
+                                                                      {result.all_passed ? (
+                                                                        <Badge className="bg-green-500 hover:bg-green-600">
+                                                                          Pass
+                                                                        </Badge>
+                                                                      ) : (
+                                                                        <Badge variant="destructive">
+                                                                          Fail
+                                                                        </Badge>
+                                                                      )}
+                                                                      <span className="text-xs text-muted-foreground ml-auto">
+                                                                        {result.evaluation_time.toFixed(
+                                                                          2
+                                                                        )}
+                                                                        s
+                                                                      </span>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between">
+                                                                      <span>
+                                                                        Score:{" "}
+                                                                        <span
+                                                                          className={
+                                                                            metric.success
+                                                                              ? "text-green-600 font-semibold"
+                                                                              : "text-red-600 font-semibold"
+                                                                          }
+                                                                        >
+                                                                          {(
+                                                                            metric.score *
+                                                                            100
+                                                                          ).toFixed(
+                                                                            0
+                                                                          )}
+                                                                        </span>
+                                                                        /100
+                                                                      </span>
+                                                                      <span className="text-muted-foreground">
+                                                                        Threshold:{" "}
+                                                                        {(
+                                                                          metric.threshold *
+                                                                          100
+                                                                        ).toFixed(
+                                                                          0
+                                                                        )}
+                                                                      </span>
+                                                                    </div>
+                                                                  </CardDescription>
+                                                                </CardHeader>
+                                                                <CardContent>
+                                                                  <p className="text-sm text-muted-foreground leading-relaxed">
+                                                                    {
+                                                                      metric.reason
+                                                                    }
+                                                                  </p>
+                                                                </CardContent>
+                                                              </Card>
+                                                            );
+                                                          }
+                                                        )}
+                                                      </div>
+                                                    </TabsContent>
+                                                  )
+                                                )}
+                                              </Tabs>
+                                            );
+                                          })()}
+                                        </DialogContent>
+                                      </Dialog>
+                                    </div>
+                                  )}
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {/* Success Message (Single) */}
+                {evaluationComplete && (
+                  <Alert className="bg-green-50 border-green-300">
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                    <AlertDescription className="text-green-800 font-medium">
+                      ✅ Evaluation completed successfully! All{" "}
+                      {
+                        (currentFile.entities || []).filter(
+                          (e: any) =>
+                            (e.evaluationResults &&
+                              e.evaluationResults.length > 0) ||
+                            (e.extractionsByModel &&
+                              Object.values(e.extractionsByModel).some(
+                                (ext: any) => ext.evaluationResults?.length > 0
+                              ))
+                        ).length
+                      }{" "}
+                      entities have been evaluated. Click "View Evaluation
+                      Results" on any entity below to see the scores.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Run Evaluation Button (Single) */}
+                <Card>
+                  <CardContent className="pt-6">
+                    <Button
+                      type="button"
+                      onClick={handleRunEvaluation}
+                      disabled={
+                        isEvaluating ||
+                        evaluatingEntities.size > 0 ||
+                        selectedMetrics.length === 0 ||
+                        selectedProviders.length === 0
+                      }
+                      className="w-full"
+                      size="lg"
+                    >
+                      {isEvaluating ? (
+                        <>
+                          <Sparkles className="h-5 w-5 mr-2 animate-spin" />
+                          Running Evaluation... {evaluationProgress}%
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-5 w-5 mr-2" />
+                          Run Evaluation for This PDF with{" "}
+                          {selectedProviders.length} LLM Judge
+                          {selectedProviders.length > 1 ? "s" : ""}
+                        </>
+                      )}
+                    </Button>
+
+                    {isEvaluating && (
+                      <div className="mt-4 space-y-2">
+                        <Progress value={evaluationProgress} className="h-2" />
+                        <p className="text-xs text-muted-foreground text-center">
+                          {completedEntities.size} of{" "}
+                          {
+                            (currentFile.entities || []).filter(
+                              (e: any) => e.extracted
+                            ).length
+                          }{" "}
+                          entities completed
+                        </p>
+                      </div>
+                    )}
+
+                    {!isEvaluating && (
+                      <p className="text-sm text-muted-foreground text-center mt-3">
+                        Evaluating{" "}
+                        {
+                          (currentFile.entities || []).filter(
+                            (e: any) => e.extracted
+                          ).length
+                        }{" "}
+                        entities from "
+                        {currentFile.file?.name || "current document"}" with{" "}
+                        {selectedMetrics.length} metric
+                        {selectedMetrics.length > 1 ? "s" : ""} using{" "}
+                        {selectedProviders.length} LLM judge
+                        {selectedProviders.length > 1 ? "s" : ""}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
+            {/* Batch Mode Content */}
+            {isBatchMode && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Batch Evaluation Data</CardTitle>
+                    <CardDescription>
+                      Review and edit ground truth for all entities across{" "}
+                      {files.length} documents
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ScrollArea className="h-[500px] border rounded-md">
+                      <Table>
+                        <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                          <TableRow>
+                            <TableHead className="w-[250px]">
+                              Document
+                            </TableHead>
+                            <TableHead className="w-[150px]">Entity</TableHead>
+                            <TableHead className="min-w-[300px]">
+                              Ground Truth
+                            </TableHead>
+                            <TableHead className="w-[120px]">
+                              Eval Status
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {files.map((file) =>
+                            (file.entities || [])
+                              .filter((e: any) => e.extracted)
+                              .map((entity: any) => {
+                                // Check status
+                                const modelsToCheck =
+                                  selectedSourceModels.length > 0
+                                    ? selectedSourceModels
+                                    : availableSourceModels;
+                                let completedCount = 0;
+
+                                modelsToCheck.forEach((model) => {
+                                  const ext =
+                                    entity.extractionsByModel?.[model];
+                                  if (
+                                    ext?.evaluationResults &&
+                                    ext.evaluationResults.length > 0
+                                  ) {
+                                    // Check if ALL selected judges have results
+                                    if (selectedProviders.length > 0) {
+                                      const allJudgesFinished =
+                                        selectedProviders.every((judgeId) => {
+                                          const judge = allProviders.find(
+                                            (p) => p.id === judgeId
+                                          );
+                                          // The result.model usually matches the provider.model, but sometimes backend might return ID
+                                          // We check both to be safe
+                                          return ext.evaluationResults.some(
+                                            (r: any) =>
+                                              (judge &&
+                                                r.model === judge.model) ||
+                                              r.model === judgeId
+                                          );
+                                        });
+                                      if (allJudgesFinished) {
+                                        completedCount++;
+                                      }
+                                    } else {
+                                      // If no judges selected but we have results, count it (fallback)
+                                      completedCount++;
+                                    }
+                                  }
+                                });
+
+                                const isComplete =
+                                  modelsToCheck.length > 0 &&
+                                  completedCount === modelsToCheck.length;
+                                const isPartial =
+                                  completedCount > 0 &&
+                                  completedCount < modelsToCheck.length;
+
+                                return (
+                                  <TableRow
+                                    key={`${file.fileId}-${entity.name}`}
+                                  >
+                                    <TableCell className="font-medium align-top">
+                                      <div
+                                        className="truncate max-w-[240px]"
+                                        title={file.file?.name}
+                                      >
+                                        {file.file?.name}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="align-top">
+                                      <div
+                                        className="truncate max-w-[140px]"
+                                        title={entity.name}
+                                      >
+                                        {entity.name}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Textarea
+                                        value={entity.groundTruth || ""}
+                                        onChange={(e) =>
+                                          updateBatchGroundTruth(
+                                            file.fileId,
+                                            entity.name,
+                                            e.target.value
+                                          )
+                                        }
+                                        placeholder="Enter expected output..."
+                                        className="min-h-[80px]"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="align-top">
+                                      {isEvaluating && !isComplete ? (
+                                        isPartial ? (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs px-2 py-0.5 border-blue-300 text-blue-600 animate-pulse"
+                                          >
+                                            <Sparkles className="h-3 w-3 mr-1" />
+                                            Running...
+                                          </Badge>
+                                        ) : (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs px-2 py-0.5 border-blue-300 text-blue-600 animate-pulse"
+                                          >
+                                            <Sparkles className="h-3 w-3 mr-1" />
+                                            Evaluating...
+                                          </Badge>
+                                        )
+                                      ) : isComplete ? (
+                                        <div className="flex items-center gap-2">
+                                          <Badge className="bg-green-500 hover:bg-green-600 text-xs px-2 py-0.5">
+                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                            Done
+                                          </Badge>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 text-xs text-blue-600 hover:text-blue-800 p-1"
+                                            onClick={() => {
+                                              setSelectedFileId(file.fileId);
+                                              setIsBatchMode(false);
+                                            }}
+                                          >
+                                            View →
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs px-2 py-0.5 text-muted-foreground"
+                                        >
+                                          Pending
+                                        </Badge>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })
                           )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-            </div>
-          </ScrollArea>
-        </div>
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
 
-        {/* Success Message */}
-        {evaluationComplete && (
-          <Alert className="bg-green-50 border-green-300">
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
-            <AlertDescription className="text-green-800 font-medium">
-              ✅ Evaluation completed successfully! All{" "}
-              {
-                (currentFile.entities || []).filter(
-                  (e: any) =>
-                    e.evaluationResults && e.evaluationResults.length > 0
-                ).length
-              }{" "}
-              entities have been evaluated. Click "View Evaluation Results" on
-              any entity below to see the scores.
-            </AlertDescription>
-          </Alert>
-        )}
+                {/* Batch Evaluation & Results Action Area */}
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex gap-4">
+                      {/* Rerun/Run Button */}
+                      <Button
+                        type="button"
+                        onClick={handleRunBatchEvaluation}
+                        disabled={
+                          isEvaluating ||
+                          selectedMetrics.length === 0 ||
+                          selectedProviders.length === 0 ||
+                          selectedSourceModels.length === 0
+                        }
+                        className={
+                          files.some((f) =>
+                            (f.entities || []).some(
+                              (e: any) =>
+                                e.evaluationResults?.length > 0 ||
+                                (e.extractionsByModel &&
+                                  Object.values(e.extractionsByModel).some(
+                                    (ext: any) =>
+                                      ext.evaluationResults?.length > 0
+                                  ))
+                            )
+                          )
+                            ? "flex-1"
+                            : "w-full"
+                        }
+                        variant={
+                          files.some((f) =>
+                            (f.entities || []).some(
+                              (e: any) =>
+                                e.evaluationResults?.length > 0 ||
+                                (e.extractionsByModel &&
+                                  Object.values(e.extractionsByModel).some(
+                                    (ext: any) =>
+                                      ext.evaluationResults?.length > 0
+                                  ))
+                            )
+                          )
+                            ? "outline"
+                            : "default"
+                        }
+                        size="lg"
+                      >
+                        {isEvaluating ? (
+                          <>
+                            <Sparkles className="h-5 w-5 mr-2 animate-spin" />
+                            Running...
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-5 w-5 mr-2" />
+                            {files.some((f) =>
+                              (f.entities || []).some(
+                                (e: any) =>
+                                  e.evaluationResults?.length > 0 ||
+                                  (e.extractionsByModel &&
+                                    Object.values(e.extractionsByModel).some(
+                                      (ext: any) =>
+                                        ext.evaluationResults?.length > 0
+                                    ))
+                              )
+                            )
+                              ? "Rerun Evaluation"
+                              : "Run Batch Evaluation"}
+                          </>
+                        )}
+                      </Button>
 
-        {/* Download Report Button */}
-        {(currentFile.entities || []).some(
-          (e: any) => e.evaluationResults && e.evaluationResults.length > 0
-        ) && (
-          <Card>
-            <CardContent className="pt-6">
+                      {/* View Results Button - only shown if we have results */}
+                      {files.some((f) =>
+                        (f.entities || []).some(
+                          (e: any) =>
+                            e.evaluationResults?.length > 0 ||
+                            (e.extractionsByModel &&
+                              Object.values(e.extractionsByModel).some(
+                                (ext: any) => ext.evaluationResults?.length > 0
+                              ))
+                        )
+                      ) &&
+                        !isEvaluating && (
+                          <Button
+                            variant="default"
+                            size="lg"
+                            className="flex-1"
+                            onClick={() => setActiveTab("results")}
+                          >
+                            <BarChart3 className="h-5 w-5 mr-2" />
+                            View Results
+                          </Button>
+                        )}
+                    </div>
+
+                    <p className="text-sm text-muted-foreground text-center mt-3">
+                      {isEvaluating
+                        ? `Processing ${files.length} documents...`
+                        : `Evaluating ${selectedSourceModels.length} models with ${selectedProviders.length} judges`}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+          {/* Floating Stop Button */}
+          {isEvaluating && (
+            <div className="fixed bottom-8 right-8 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <Button
-                onClick={() => {
-                  const reportData = {
-                    ...documentData,
-                    entities: currentFile.entities || [],
-                    file: currentFile.file,
-                    fileId: currentFile.fileId,
-                    studyType: currentFile.studyType || documentData.studyType,
-                    selectedModel:
-                      currentFile.selectedModel || documentData.selectedModel,
-                    processorUsed:
-                      currentFile.processingResult?.processorUsed ||
-                      documentData.processorUsed,
-                  };
-                  downloadEvaluationReport(reportData);
-                }}
-                className="w-full"
+                variant="destructive"
                 size="lg"
-                variant="outline"
+                type="button"
+                onClick={handleStopEvaluation}
+                className="shadow-lg hover:shadow-xl transition-all scale-100 hover:scale-105 rounded-full px-6 h-14 font-semibold text-base bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
-                <Download className="h-5 w-5 mr-2" />
-                Download Evaluation Report (Word Document)
+                <div className="flex items-center gap-2">
+                  <div className="relative flex h-3 w-3 mr-1">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                  </div>
+                  Stop Evaluation
+                </div>
               </Button>
-              <p className="text-sm text-muted-foreground text-center mt-3">
-                Export a comprehensive report with all evaluation results,
-                scores, and explanations
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Run Evaluation Button */}
-        <Card>
-          <CardContent className="pt-6">
-            <Button
-              type="button"
-              onClick={handleRunEvaluation}
-              disabled={
-                isEvaluating ||
-                evaluatingEntities.size > 0 ||
-                selectedMetrics.length === 0 ||
-                selectedProviders.length === 0
-              }
-              className="w-full"
-              size="lg"
-            >
-              {isEvaluating ? (
-                <>
-                  <Sparkles className="h-5 w-5 mr-2 animate-spin" />
-                  Running Evaluation... {evaluationProgress}%
-                </>
-              ) : (
-                <>
-                  <Play className="h-5 w-5 mr-2" />
-                  Run Evaluation with {selectedProviders.length} LLM Judge
-                  {selectedProviders.length > 1 ? "s" : ""}
-                </>
-              )}
-            </Button>
-
-            {isEvaluating && (
-              <div className="mt-4 space-y-2">
-                <Progress value={evaluationProgress} className="h-2" />
-                <p className="text-xs text-muted-foreground text-center">
-                  {completedEntities.size} of{" "}
-                  {
-                    (currentFile.entities || []).filter((e: any) => e.extracted)
-                      .length
-                  }{" "}
-                  entities completed
-                </p>
-              </div>
-            )}
-
-            {!isEvaluating && (
-              <p className="text-sm text-muted-foreground text-center mt-3">
-                Evaluating{" "}
-                {
-                  (currentFile.entities || []).filter((e: any) => e.extracted)
-                    .length
-                }{" "}
-                entities with {selectedMetrics.length} metrics across{" "}
-                {selectedProviders.length} provider(s)
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-      {/* Floating Stop Button */}
-      {isEvaluating && (
-        <div className="fixed bottom-8 right-8 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <Button
-            variant="destructive"
-            size="lg"
-            type="button"
-            onClick={handleStopEvaluation}
-            className="shadow-lg hover:shadow-xl transition-all scale-100 hover:scale-105 rounded-full px-6 h-14 font-semibold text-base bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            <div className="flex items-center gap-2">
-              <div className="relative flex h-3 w-3 mr-1">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
-              </div>
-              Stop Evaluation
             </div>
-          </Button>
-        </div>
+          )}
+        </>
       )}
     </div>
   );

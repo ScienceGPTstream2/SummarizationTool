@@ -8,6 +8,7 @@ class Entity(BaseModel):
     name: str
     prompt: str
     extracted: Optional[str] = None
+    system_prompt: Optional[str] = None  # Per-entity system prompt
 
 
 class ExtractRequest(BaseModel):
