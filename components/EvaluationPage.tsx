@@ -121,13 +121,21 @@ const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
     available: true,
     provider: "vertex_ai",
   },
-  {
+  /* {
     id: "vertex_ai_3_pro",
     name: "Gemini 3 Pro Preview",
     model: "gemini-3-pro-preview",
     description: "Latest generation - powerful reasoning for evaluation",
     available: true,
     provider: "vertex_ai",
+  }, */
+  {
+    id: "anthropic_sonnet_4_5",
+    name: "Claude Sonnet 4.5",
+    model: "claude-sonnet-4-5@20250929",
+    description: "Balanced performance and speed - high quality evaluation",
+    available: true,
+    provider: "anthropic",
   },
   {
     id: "anthropic_opus_4_1",
@@ -710,7 +718,8 @@ export function EvaluationPage({
           requestBody.azure_model_name = provider.model;
         } else if (
           providerId === "vertex_ai_pro" ||
-          providerId === "vertex_ai_lite"
+          providerId === "vertex_ai_lite" ||
+          providerId === "vertex_ai_3_pro"
         ) {
           requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
           requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
