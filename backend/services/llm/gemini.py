@@ -386,6 +386,7 @@ class GeminiLLMClient:
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
+        system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
         # Supported models for structured outputs
         gemini_models = [
@@ -412,8 +413,11 @@ class GeminiLLMClient:
             else "publishers/google/models/gemini-2.5-flash"  # Default to flash
         )
 
-        # System instruction for structured extraction
-        system_instruction = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+        # System instruction for structured extraction - use provided or default
+        default_system_instruction = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+        used_system_instruction = (
+            system_instruction if system_instruction else default_system_instruction
+        )
 
         contents = [
             {
@@ -438,7 +442,7 @@ Prompt:
             contents,
             max_tokens,
             temperature,
-            system_instruction,
+            used_system_instruction,
             project_id_override,
             location_override,
             service_account_path_override,
@@ -454,6 +458,7 @@ Prompt:
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
+        system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
         # Supported models
         gemini_models = [
@@ -480,8 +485,11 @@ Prompt:
             else "publishers/google/models/gemini-2.5-flash"  # Default to flash
         )
 
-        # Add system instruction for Gemini
-        system_instruction = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        # Use provided system instruction or default for paragraph generation
+        used_system_instruction = (
+            system_instruction
+            or "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        )
 
         contents = [{"role": "user", "parts": [{"text": user_prompt}]}]
         return await self._call_gemini_api(
@@ -489,7 +497,7 @@ Prompt:
             contents,
             max_tokens,
             temperature,
-            system_instruction,
+            used_system_instruction,
             project_id_override,
             location_override,
             service_account_path_override,

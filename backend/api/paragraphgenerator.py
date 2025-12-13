@@ -14,6 +14,7 @@ llm_service = LLMService()
 class ParagraphGenerationRequest(BaseModel):
     entities: List[Dict]
     summary_prompt: str
+    system_prompt: Optional[str] = None  # Custom system prompt
     model_type: Optional[str] = "azure"  # New field for model type
     model_id: Optional[str] = None  # New field for Gemini model ID
     deployment: Optional[str] = None  # Made optional
@@ -65,6 +66,7 @@ async def generate_paragraph(request: ParagraphGenerationRequest):
             gemini_location_override=request.gemini_location,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
+            system_message=request.system_prompt,
         )
 
         if result.get("success"):

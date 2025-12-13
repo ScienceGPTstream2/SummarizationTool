@@ -22,6 +22,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "./ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "./ui/accordion";
+import { Checkbox } from "./ui/checkbox";
 
 import { Badge } from "./ui/badge";
 import {
@@ -34,6 +41,8 @@ import {
   Trash2,
   Save,
   RotateCcw,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { DocumentData } from "../App";
 import {
@@ -69,7 +78,7 @@ export function BatchStudySelectionPage({
 }: BatchStudySelectionPageProps) {
   const [files] = useState(documentData.uploadedFiles || []);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
-  const [globalModel, setGlobalModel] = useState<string>("");
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
 
   // Store configuration per file
   const [fileConfigs, setFileConfigs] = useState<Record<string, FileConfig>>(
@@ -87,25 +96,37 @@ export function BatchStudySelectionPage({
   const studyTypes = getAvailableStudyTypes();
 
   useEffect(() => {
+    // Load models asynchronously in background without blocking UI
     const loadModels = async () => {
-      await settingsManager.refreshServerConfig();
       const models = await settingsManager.getAvailableModelsAsync();
       setAvailableModels(models);
 
-      // Set default model to GPT-5 Mini if available, then GPT-4o, otherwise first available
-      const gpt5mini = models.find(
-        (m) =>
-          m.id.includes("gpt-5-mini") ||
-          m.name.toLowerCase().includes("gpt-5 mini")
-      );
-      const gpt4o = models.find((m) => m.id.includes("gpt-4o"));
+      // Auto-select Gemini 2.5 Flash Lite by default (only if nothing selected yet)
+      if (selectedModels.length === 0) {
+        const gemini25FlashLite = models.find(
+          (m) =>
+            m.id.toLowerCase().includes("gemini") &&
+            m.id.toLowerCase().includes("2.5") &&
+            (m.id.toLowerCase().includes("flash") ||
+              m.id.toLowerCase().includes("lite"))
+        );
 
-      if (gpt5mini) {
-        setGlobalModel(gpt5mini.id);
-      } else if (gpt4o) {
-        setGlobalModel(gpt4o.id);
-      } else if (models.length > 0) {
-        setGlobalModel(models[0].id);
+        const defaultModels: string[] = [];
+        if (gemini25FlashLite) {
+          defaultModels.push(gemini25FlashLite.id);
+        } else {
+          // Fallback: select first Gemini model or first model overall
+          const anyGemini = models.find((m) =>
+            m.id.toLowerCase().includes("gemini")
+          );
+          if (anyGemini) {
+            defaultModels.push(anyGemini.id);
+          } else if (models.length > 0) {
+            defaultModels.push(models[0].id);
+          }
+        }
+
+        setSelectedModels(defaultModels);
       }
     };
     loadModels();
@@ -260,6 +281,40 @@ export function BatchStudySelectionPage({
     }
   };
 
+  // Helper functions for multi-model selection
+  const toggleModel = (modelId: string) => {
+    setSelectedModels((prev) =>
+      prev.includes(modelId)
+        ? prev.filter((id) => id !== modelId)
+        : [...prev, modelId]
+    );
+  };
+
+  const toggleCategory = (modelIds: string[], selectAll: boolean) => {
+    setSelectedModels((prev) => {
+      if (selectAll) {
+        // Add all models in category that aren't already selected
+        const newModels = modelIds.filter((id) => !prev.includes(id));
+        return [...prev, ...newModels];
+      } else {
+        // Remove all models in category
+        return prev.filter((id) => !modelIds.includes(id));
+      }
+    });
+  };
+
+  const getCategorySelection = (modelIds: string[]) => {
+    const selected = modelIds.filter((id) =>
+      selectedModels.includes(id)
+    ).length;
+    return {
+      selected,
+      total: modelIds.length,
+      allSelected: selected === modelIds.length,
+      someSelected: selected > 0 && selected < modelIds.length,
+    };
+  };
+
   const handleBatchRun = () => {
     // Validate that all files have a study type selected
     const missingConfigs = files.filter((f) => !fileConfigs[f.fileId]);
@@ -268,14 +323,20 @@ export function BatchStudySelectionPage({
       return;
     }
 
-    // Update documentData with selected study types and model
+    // Validate that at least one model is selected
+    if (selectedModels.length === 0) {
+      alert("Please select at least one AI model.");
+      return;
+    }
+
+    // Update documentData with selected study types and models
     const updatedFiles = files.map((f) => {
       const config = fileConfigs[f.fileId];
 
       return {
         ...f,
         studyType: config.studyType,
-        selectedModel: globalModel,
+        selectedModels: selectedModels, // Pass array of selected models
         entities: config.entities,
         summaryPrompt: config.summaryPrompt,
         // Reset extraction results if study type changed (though here we assume fresh start or overwrite)
@@ -285,6 +346,7 @@ export function BatchStudySelectionPage({
 
     onComplete({
       uploadedFiles: updatedFiles,
+      selectedModels: selectedModels, // Also store at document level
     });
   };
 
@@ -304,39 +366,282 @@ export function BatchStudySelectionPage({
       </div>
 
       <div className="grid gap-6">
-        {/* Global Model Selection */}
+        {/* Multi-Model Selection */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Bot className="h-5 w-5" />
-              Global Model Selection
-            </CardTitle>
-            <CardDescription>
-              Select the AI model to use for all documents (Default: GPT-4o)
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Bot className="h-5 w-5" />
+                  AI Models Selection
+                </CardTitle>
+                <CardDescription>
+                  Select one or more AI models to use for entity extraction
+                  across all documents
+                </CardDescription>
+              </div>
+              <Badge variant="secondary" className="text-sm">
+                {selectedModels.length} selected
+              </Badge>
+            </div>
           </CardHeader>
           <CardContent>
-            <Select
-              value={globalModel}
-              onValueChange={setGlobalModel}
-              disabled={availableModels.length === 0}
-            >
-              <SelectTrigger className="w-full md:w-[400px]">
-                <SelectValue placeholder="Select AI Model" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{model.name}</span>
-                      <Badge variant="outline" className="text-xs font-normal">
-                        {model.provider}
-                      </Badge>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Accordion type="multiple" defaultValue={[]} className="w-full">
+              {/* Azure OpenAI Models */}
+              {(() => {
+                const azureModels = availableModels.filter((m) =>
+                  m.provider?.toLowerCase().includes("azure")
+                );
+                if (azureModels.length === 0) return null;
+
+                const azureIds = azureModels.map((m) => m.id);
+                const selection = getCategorySelection(azureIds);
+
+                return (
+                  <AccordionItem value="azure">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">Azure OpenAI</span>
+                          <Badge variant="outline" className="text-xs">
+                            {selection.selected}/{selection.total}
+                          </Badge>
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                          <span className="text-sm text-muted-foreground">
+                            {azureModels.length} model
+                            {azureModels.length !== 1 ? "s" : ""} available
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              toggleCategory(azureIds, !selection.allSelected)
+                            }
+                          >
+                            {selection.allSelected ? (
+                              <>
+                                <CheckSquare className="h-3 w-3 mr-1" />
+                                Deselect All
+                              </>
+                            ) : (
+                              <>
+                                <Square className="h-3 w-3 mr-1" />
+                                Select All
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {azureModels.map((model) => (
+                            <div
+                              key={model.id}
+                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                            >
+                              <Checkbox
+                                id={model.id}
+                                checked={selectedModels.includes(model.id)}
+                                onCheckedChange={() => toggleModel(model.id)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                <Label
+                                  htmlFor={model.id}
+                                  className="text-sm font-medium leading-none cursor-pointer"
+                                >
+                                  {model.name}
+                                </Label>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {model.description || model.provider}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })()}
+
+              {/* Vertex AI Models */}
+              {(() => {
+                const vertexModels = availableModels.filter(
+                  (m) =>
+                    m.provider?.toLowerCase().includes("vertex") ||
+                    m.provider?.toLowerCase().includes("google")
+                );
+                if (vertexModels.length === 0) return null;
+
+                const vertexIds = vertexModels.map((m) => m.id);
+                const selection = getCategorySelection(vertexIds);
+
+                return (
+                  <AccordionItem value="vertex">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">
+                            Vertex AI (Google)
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {selection.selected}/{selection.total}
+                          </Badge>
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                          <span className="text-sm text-muted-foreground">
+                            {vertexModels.length} model
+                            {vertexModels.length !== 1 ? "s" : ""} available
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              toggleCategory(vertexIds, !selection.allSelected)
+                            }
+                          >
+                            {selection.allSelected ? (
+                              <>
+                                <CheckSquare className="h-3 w-3 mr-1" />
+                                Deselect All
+                              </>
+                            ) : (
+                              <>
+                                <Square className="h-3 w-3 mr-1" />
+                                Select All
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {vertexModels.map((model) => (
+                            <div
+                              key={model.id}
+                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                            >
+                              <Checkbox
+                                id={model.id}
+                                checked={selectedModels.includes(model.id)}
+                                onCheckedChange={() => toggleModel(model.id)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                <Label
+                                  htmlFor={model.id}
+                                  className="text-sm font-medium leading-none cursor-pointer"
+                                >
+                                  {model.name}
+                                </Label>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {model.description || model.provider}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })()}
+
+              {/* Anthropic Models */}
+              {(() => {
+                const anthropicModels = availableModels.filter(
+                  (m) =>
+                    m.provider?.toLowerCase().includes("anthropic") ||
+                    m.provider?.toLowerCase().includes("claude")
+                );
+                if (anthropicModels.length === 0) return null;
+
+                const anthropicIds = anthropicModels.map((m) => m.id);
+                const selection = getCategorySelection(anthropicIds);
+
+                return (
+                  <AccordionItem value="anthropic">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">Anthropic</span>
+                          <Badge variant="outline" className="text-xs">
+                            {selection.selected}/{selection.total}
+                          </Badge>
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                          <span className="text-sm text-muted-foreground">
+                            {anthropicModels.length} model
+                            {anthropicModels.length !== 1 ? "s" : ""} available
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              toggleCategory(
+                                anthropicIds,
+                                !selection.allSelected
+                              )
+                            }
+                          >
+                            {selection.allSelected ? (
+                              <>
+                                <CheckSquare className="h-3 w-3 mr-1" />
+                                Deselect All
+                              </>
+                            ) : (
+                              <>
+                                <Square className="h-3 w-3 mr-1" />
+                                Select All
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {anthropicModels.map((model) => (
+                            <div
+                              key={model.id}
+                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                            >
+                              <Checkbox
+                                id={model.id}
+                                checked={selectedModels.includes(model.id)}
+                                onCheckedChange={() => toggleModel(model.id)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                <Label
+                                  htmlFor={model.id}
+                                  className="text-sm font-medium leading-none cursor-pointer"
+                                >
+                                  {model.name}
+                                </Label>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {model.description || model.provider}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })()}
+            </Accordion>
           </CardContent>
         </Card>
 

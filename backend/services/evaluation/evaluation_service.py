@@ -5,6 +5,7 @@ This service coordinates entity extraction evaluation using G-Eval metrics.
 Supports both Azure OpenAI and Vertex AI for LLM-as-a-judge evaluation.
 """
 
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -249,20 +250,19 @@ class EvaluationService:
                 retrieval_context=[retrieval_context] if retrieval_context else None,
             )
 
-            # Run evaluation for each metric
-            results = []
-            for metric in metric_objects:
+            # Run evaluation for each metric in parallel
+            async def evaluate_single_metric(metric):
                 await metric.a_measure(test_case)
+                return {
+                    "metric_name": metric.name,
+                    "score": metric.score,
+                    "threshold": metric.threshold,
+                    "success": metric.is_successful(),
+                    "reason": metric.reason,
+                }
 
-                results.append(
-                    {
-                        "metric_name": metric.name,
-                        "score": metric.score,
-                        "threshold": metric.threshold,
-                        "success": metric.is_successful(),
-                        "reason": metric.reason,
-                    }
-                )
+            metric_tasks = [evaluate_single_metric(metric) for metric in metric_objects]
+            results = await asyncio.gather(*metric_tasks)
 
             # Calculate aggregate score
             avg_score = sum(r["score"] for r in results) / len(results)
@@ -322,6 +322,7 @@ class EvaluationService:
         provider: str = "azure_openai",
         threshold: float = 0.5,
         metrics: Optional[List[str]] = None,
+        batch_size: int = 50,
         **model_kwargs,
     ) -> Dict[str, Any]:
         """
@@ -340,20 +341,27 @@ class EvaluationService:
         batch_id = str(uuid.uuid4())
         start_time = datetime.now()
 
-        results = []
-        for extraction in extractions:
-            result = await self.evaluate_extraction(
-                entity_name=extraction.get("entity_name", "Unknown"),
-                extraction_prompt=extraction.get("extraction_prompt", ""),
-                actual_output=extraction.get("actual_output", ""),
-                expected_output=extraction.get("expected_output"),
-                retrieval_context=extraction.get("retrieval_context"),
-                metrics=metrics,
-                provider=provider,
-                threshold=threshold,
-                **model_kwargs,
-            )
-            results.append(result)
+        if metrics is None:
+            metrics = ["correctness", "completeness", "relevance", "safety"]
+
+        semaphore = asyncio.Semaphore(batch_size)
+
+        async def bounded_evaluate(extraction):
+            async with semaphore:
+                return await self.evaluate_extraction(
+                    entity_name=extraction.get("entity_name", "Unknown"),
+                    extraction_prompt=extraction.get("extraction_prompt", ""),
+                    actual_output=extraction.get("actual_output", ""),
+                    expected_output=extraction.get("expected_output"),
+                    retrieval_context=extraction.get("retrieval_context"),
+                    metrics=metrics,
+                    provider=provider,
+                    threshold=threshold,
+                    **model_kwargs,
+                )
+
+        tasks = [bounded_evaluate(extraction) for extraction in extractions]
+        results = await asyncio.gather(*tasks)
 
         end_time = datetime.now()
         batch_time = (end_time - start_time).total_seconds()
