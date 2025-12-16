@@ -36,7 +36,8 @@ const templates: Record<string, StudyTypeTemplate> = {
   "level-2-in-vivo": level2InVivoTemplate,
   "level-2-in-vivo-noshot": level2InVivoNoShotTemplate,
   "level-1-epidemiology": level1EpidemiologyTemplate,
-  "General-level-1-epidemiology-AdamV1": generalLevel1EpidemiologyAdamV1Template,
+  "General-level-1-epidemiology-AdamV1":
+    generalLevel1EpidemiologyAdamV1Template,
   "General-level-1-epidemiology-AdamV1-NoShot":
     generalLevel1EpidemiologyAdamV1NoShotTemplate,
   "Level-0-epidemiology-MetaData": level0EpidemiologyMetaDataTemplate,
