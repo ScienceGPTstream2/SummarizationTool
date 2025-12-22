@@ -416,7 +416,12 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-6">
-        <Button variant="outline" size="lg" onClick={onBack} className="text-lg px-6 py-6">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onBack}
+          className="text-lg px-6 py-6"
+        >
           <ArrowLeft className="h-6 w-6 mr-2" />
           Back
         </Button>
@@ -447,7 +452,11 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
               </SelectTrigger>
               <SelectContent>
                 {INGESTION_METHODS.map((method) => (
-                  <SelectItem key={method.id} value={method.id} className="text-lg py-3">
+                  <SelectItem
+                    key={method.id}
+                    value={method.id}
+                    className="text-lg py-3"
+                  >
                     {method.name}
                   </SelectItem>
                 ))}
@@ -463,7 +472,11 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
               </SelectTrigger>
               <SelectContent>
                 {availableModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id} className="text-lg py-3">
+                  <SelectItem
+                    key={model.id}
+                    value={model.id}
+                    className="text-lg py-3"
+                  >
                     {model.name}
                   </SelectItem>
                 ))}
@@ -479,7 +492,11 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
               </SelectTrigger>
               <SelectContent>
                 {studyTypes.map((type) => (
-                  <SelectItem key={type.id} value={type.id} className="text-lg py-3">
+                  <SelectItem
+                    key={type.id}
+                    value={type.id}
+                    className="text-lg py-3"
+                  >
                     {type.name}
                   </SelectItem>
                 ))}
@@ -491,79 +508,82 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         {/* Upload & Action Area */}
         <CardContent className="pt-8">
           <div className="grid gap-8 md:grid-cols-3">
-        <div className="md:col-span-2">
-          <div
-            className={`border-4 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer h-full flex flex-col items-center justify-center shadow-sm ${
-              dragActive
-                ? "border-primary bg-primary/5"
-                : "border-gray-300 hover:border-blue-500"
-            }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="h-20 w-20 text-muted-foreground mb-6" />
-            <p className="text-3xl font-medium">
-              Upload Toxicology Reports Here
-            </p>
-            <p className="text-xl text-muted-foreground mt-2">
-              or click to browse
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-          </div>
-        </div>
+            <div className="md:col-span-2">
+              <div
+                className={`border-4 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer h-full flex flex-col items-center justify-center shadow-sm ${
+                  dragActive
+                    ? "border-primary bg-primary/5"
+                    : "border-gray-300 hover:border-blue-500"
+                }`}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-20 w-20 text-muted-foreground mb-6" />
+                <p className="text-3xl font-medium">
+                  Upload Toxicology Reports Here
+                </p>
+                <p className="text-xl text-muted-foreground mt-2">
+                  or click to browse
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+            </div>
 
-        <div className="flex flex-col justify-center space-y-6">
-          <Button
-            className="w-full h-40 text-3xl shadow-lg relative overflow-hidden"
-            onClick={runPipeline}
-            disabled={
-              isRunning || files.length === 0 || !studyType || !selectedModel
-            }
-          >
-            <div className="relative z-10 flex items-center justify-center">
-              {isRunning ? (
-                <>
-                  <Loader2 className="mr-3 h-8 w-8 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Play className="mr-3 h-8 w-8" />
-                  Generate Scientific Summaries
-                </>
-              )}
-            </div>
-            <SparklesCore
-              background="transparent"
-              minSize={0.6}
-              maxSize={1.4}
-              particleDensity={300}
-              className="absolute inset-0 w-full h-full"
-              particleColor={[
-                "#FF00FF",
-                "#00FFFF",
-                "#FFFF00",
-                "#FF0000",
-                "#00FF00",
-                "#0000FF",
-              ]}
-            />
-          </Button>
-            <div className="text-center text-xl text-muted-foreground">
-              {files.length} file{files.length !== 1 ? "s" : ""} queued
+            <div className="flex flex-col justify-center space-y-6">
+              <Button
+                className="w-full h-40 text-3xl shadow-lg relative overflow-hidden"
+                onClick={runPipeline}
+                disabled={
+                  isRunning ||
+                  files.length === 0 ||
+                  !studyType ||
+                  !selectedModel
+                }
+              >
+                <div className="relative z-10 flex items-center justify-center">
+                  {isRunning ? (
+                    <>
+                      <Loader2 className="mr-3 h-8 w-8 animate-spin" />
+                      Running...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-3 h-8 w-8" />
+                      Generate Scientific Summaries
+                    </>
+                  )}
+                </div>
+                <SparklesCore
+                  background="transparent"
+                  minSize={0.6}
+                  maxSize={1.4}
+                  particleDensity={300}
+                  className="absolute inset-0 w-full h-full"
+                  particleColor={[
+                    "#FF00FF",
+                    "#00FFFF",
+                    "#FFFF00",
+                    "#FF0000",
+                    "#00FF00",
+                    "#0000FF",
+                  ]}
+                />
+              </Button>
+              <div className="text-center text-xl text-muted-foreground">
+                {files.length} file{files.length !== 1 ? "s" : ""} queued
+              </div>
             </div>
           </div>
-        </div>
         </CardContent>
       </Card>
 
@@ -594,7 +614,9 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-4">
-                        <p className="font-bold text-2xl truncate">{file.file.name}</p>
+                        <p className="font-bold text-2xl truncate">
+                          {file.file.name}
+                        </p>
                         <span
                           className={`text-base px-3 py-1 rounded-full capitalize ${
                             file.status === "completed"
@@ -668,7 +690,11 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                       <>
                         <Dialog>
                           <DialogTrigger asChild>
-                            <Button variant="outline" size="lg" className="text-lg px-6 py-4 h-12">
+                            <Button
+                              variant="outline"
+                              size="lg"
+                              className="text-lg px-6 py-4 h-12"
+                            >
                               <Eye className="h-6 w-6 mr-3" />
                               View
                             </Button>
