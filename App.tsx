@@ -253,7 +253,7 @@ export default function App() {
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-medium text-foreground">
-                AI Document Summarization Tool
+                AI Toxicology Extraction and Summarization
               </h1>
               {currentStep === "settings" ? (
                 <Button variant="outline" size="sm" onClick={handleBack}>
