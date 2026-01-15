@@ -79,10 +79,28 @@ async def get_server_config():
         ]
     )
 
+    # Check for Llama configuration: project, location, region, and service account file
+    llama_project_id = os.getenv("LLAMA_PROJECT_ID") or os.getenv("GEMINI_PROJECT_ID")
+    llama_location = os.getenv("LLAMA_LOCATION", "us-east5")
+    llama_region = os.getenv("LLAMA_REGION", "us-east5")
+
+    # Reuse the same service account path check (same service account for all GCP models)
+    # service_account_path is already checked above for Gemini
+
+    is_llama_configured = all(
+        [
+            llama_project_id,
+            llama_location,
+            llama_region,
+            service_account_path is not None,
+        ]
+    )
+
     return ServerConfig(
         is_azure_openai_configured=is_azure_openai_configured,
         is_gemini_configured=is_gemini_configured,
         is_azure_document_intelligence_configured=is_azure_document_intelligence_configured,
+        is_llama_configured=is_llama_configured,
     )
 
 
@@ -216,6 +234,14 @@ async def get_available_models():
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
+            {
+                "id": "publishers/google/models/gemini-3-flash-preview",
+                "name": "Gemini 3 Flash",
+                "provider": "Google Gemini",
+                "description": "Ultra-fast + Ultra-Smart",
+                "project_id": gemini_project_id,
+                "location": gemini_location,
+            },
         ]
         models.extend(gemini_models)
 
@@ -254,5 +280,30 @@ async def get_available_models():
             },
         ]
         models.extend(anthropic_models)
+
+    # Add Llama models if configured (using service account authentication via Vertex AI)
+    # Check for Llama configuration: project, location, region, and service account file
+    llama_project_id = os.getenv("LLAMA_PROJECT_ID") or os.getenv("GEMINI_PROJECT_ID")
+    llama_location = os.getenv("LLAMA_LOCATION", "us-east5")
+    llama_region = os.getenv("LLAMA_REGION", "us-east5")
+
+    # Reuse the same service account path check (same service account for all GCP models)
+    # service_account_path is already checked above for Gemini
+
+    if llama_project_id and llama_location and llama_region and service_account_path:
+        # Add Llama 4 model
+        llama_models = [
+            {
+                "id": "meta/llama-4-maverick-17b-128e-instruct-maas",
+                "name": "Llama 4 Maverick",
+                "provider": "Meta Llama",
+                "description": "Reasoning",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+        ]
+        models.extend(llama_models)
+        print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration")
 
     return JSONResponse(status_code=200, content=models)

@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
 from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
+from .llama import LlamaLLMClient
 import toml
 
 
@@ -34,6 +35,7 @@ class LLMService:
         self.azure_client = AzureLLMClient()
         self.gemini_client = GeminiLLMClient()
         self.anthropic_client = AnthropicLLMClient()
+        self.llama_client = LlamaLLMClient()
 
     async def extract_entities_from_markdown(
         self,
@@ -92,6 +94,16 @@ class LLMService:
                 max_tokens,
                 temperature,
             )
+        elif model_type == "llama":
+            if self.llama_client.disabled:
+                return {"success": False, "error": "Llama is not configured."}
+            return await self.llama_client.extract_entities_with_llama(
+                markdown,
+                extraction_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+            )
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
 
@@ -143,6 +155,15 @@ class LLMService:
             if self.anthropic_client.disabled:
                 return {"success": False, "error": "Anthropic is not configured."}
             return await self.anthropic_client.generate_paragraph_with_anthropic(
+                user_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+            )
+        elif model_type == "llama":
+            if self.llama_client.disabled:
+                return {"success": False, "error": "Llama is not configured."}
+            return await self.llama_client.generate_paragraph_with_llama(
                 user_prompt,
                 model_id,
                 max_tokens,
