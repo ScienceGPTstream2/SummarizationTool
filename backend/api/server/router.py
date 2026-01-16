@@ -291,13 +291,58 @@ async def get_available_models():
     # service_account_path is already checked above for Gemini
 
     if llama_project_id and llama_location and llama_region and service_account_path:
-        # Add Llama 4 model
+        # Add Llama models
         llama_models = [
             {
                 "id": "meta/llama-4-maverick-17b-128e-instruct-maas",
-                "name": "Llama 4 Maverick",
+                "name": "Llama 4 Maverick 17B",
                 "provider": "Meta Llama",
                 "description": "Reasoning",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+            {
+                "id": "meta/llama-4-scout-17b-16e-instruct-mass",
+                "name": "Llama 4 Scout 17B",
+                "provider": "Meta Llama",
+                "description": "Fast",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+            {
+                "id": "meta/llama-3.3-70b-instruct-maas",
+                "name": "Llama 3.3 70B",
+                "provider": "Meta Llama",
+                "description": "Powerful",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+            {
+                "id": "meta/llama-3.1-405b-instruct-maas",
+                "name": "Llama 3.1 405B",
+                "provider": "Meta Llama",
+                "description": "Powerful",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+            {
+                "id": "meta/llama-3.1-70b-instruct-maas",
+                "name": "Llama 3.1 70B",
+                "provider": "Meta Llama",
+                "description": "Free",
+                "project_id": llama_project_id,
+                "location": llama_location,
+                "region": llama_region,
+            },
+            {
+                "id": "meta/llama-3.1-8b-instruct-maas",
+                "name": "Llama 3.1 8B",
+                "provider": "Meta Llama",
+                "description": "Free",
                 "project_id": llama_project_id,
                 "location": llama_location,
                 "region": llama_region,
