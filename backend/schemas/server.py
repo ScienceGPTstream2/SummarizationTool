@@ -9,3 +9,4 @@ class ServerConfig(BaseModel):
     is_azure_document_intelligence_configured: bool = (
         False  # Added for Azure Document Intelligence configuration status
     )
+    is_llama_configured: bool = False  # Added for Llama configuration status
