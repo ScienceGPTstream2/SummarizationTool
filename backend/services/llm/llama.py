@@ -1,12 +1,11 @@
 import os
+import json
 import asyncio
 import time
-import json
 import requests
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
 
 # For service account authentication
 try:
@@ -18,44 +17,28 @@ except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
 
 
-# Pydantic models for structured output
-class MarkdownReference(BaseModel):
-    """A reference to a specific section of the markdown that was used"""
-
-    text: str = Field(
-        description="The exact text excerpt from the markdown that was referenced"
-    )
-
-
-class ExtractionResult(BaseModel):
-    """Structured result containing both the extracted answer and its references"""
-
-    answer: str = Field(
-        description="The extracted information or answer based on the prompt"
-    )
-    references: List[MarkdownReference] = Field(
-        description="List of specific text excerpts from the markdown that were used to generate this answer"
-    )
-
-
-class GeminiLLMClient:
+class LlamaLLMClient:
     def __init__(self):
-        # Load from environment variables or secrets.toml
-        self.project_id = os.environ.get("GEMINI_PROJECT_ID") or os.environ.get(
-            "GEMINI_PROJECT"
+        # Load from environment variables
+        self.project_id = os.environ.get("LLAMA_PROJECT_ID") or os.environ.get(
+            "GEMINI_PROJECT_ID"
         )
-        self.location = os.environ.get("GEMINI_LOCATION", "us-central1")
+        self.location = os.environ.get("LLAMA_LOCATION", "us-east5")
+        self.region = os.environ.get("LLAMA_REGION", "us-east5")
 
-        # Find service account file
+        # Find service account file (same pattern as Gemini)
         self.service_account_path = self._find_service_account_file()
 
-        # Client is disabled if project_id, location, or service account is missing
+        # Client is disabled if project_id, location, region, or service account is missing
         self.disabled = (
-            not self.project_id or not self.location or not self.service_account_path
+            not self.project_id
+            or not self.location
+            or not self.region
+            or not self.service_account_path
         )
 
     def _find_service_account_file(self) -> Optional[Path]:
-        """Find service account JSON file"""
+        """Find service account JSON file (same pattern as Gemini)"""
         # Check GOOGLE_APPLICATION_CREDENTIALS env var first
         creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         if creds_path and Path(creds_path).exists():
@@ -96,39 +79,39 @@ class GeminiLLMClient:
         except Exception as e:
             raise Exception(f"Failed to get access token: {str(e)}")
 
-    async def _call_gemini_api(
+    async def _call_llama_api(
         self,
-        model_id: str,
-        contents: Dict[str, Any],
-        max_tokens: int = 8024,
+        model_name: str,
+        messages: list,
+        max_tokens: int = 1024,
         temperature: float = 0.0,
-        system_instruction: Optional[str] = None,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
+        region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
-        response_json_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         # Use overrides if provided, otherwise fall back to instance variables
         used_project_id = project_id_override or self.project_id
         used_location = location_override or self.location
+        used_region = region_override or self.region
         used_service_account_path = (
             service_account_path_override or self.service_account_path
         )
 
         print(
-            f"[LLMService] Gemini API call starting - Model: {model_id}, Location: {used_location}"
+            f"[LLMService] Llama API call starting - Model: {model_name}, Region: {used_region}"
         )
         print(
             f"[LLMService] Project ID: {used_project_id}, Service Account: {used_service_account_path.name if used_service_account_path else 'NOT FOUND'}"
         )
 
-        if not used_project_id or not used_location or not used_service_account_path:
+        if not used_project_id or not used_region or not used_service_account_path:
             print(
-                f"[LLMService] Gemini disabled - Project ID: {bool(used_project_id)}, Location: {bool(used_location)}, Service Account: {bool(used_service_account_path)}"
+                f"[LLMService] Llama disabled - Project ID: {bool(used_project_id)}, Region: {bool(used_region)}, Service Account: {bool(used_service_account_path)}"
             )
             return {
                 "success": False,
-                "error": "Gemini project ID, location, or service account missing.",
+                "error": "Llama project ID, region, or service account missing.",
             }
 
         # Get access token from service account
@@ -143,37 +126,20 @@ class GeminiLLMClient:
                 "error": f"Failed to authenticate with service account: {str(e)}",
             }
 
-        # Always use aiplatform API with the format from your working example
-        # Extract simple model name from full model ID
-        if model_id.startswith("publishers/google/models/"):
-            simple_model_id = model_id.replace("publishers/google/models/", "")
-        else:
-            simple_model_id = model_id
+        # Vertex AI endpoints API endpoint for Llama
+        endpoint = f"https://{used_region}-aiplatform.googleapis.com"
+        url = f"{endpoint}/v1/projects/{used_project_id}/locations/{used_region}/endpoints/openapi/chat/completions"
 
-        url = (
-            f"https://{used_location}-aiplatform.googleapis.com/v1/"
-            f"projects/{used_project_id}/locations/{used_location}/publishers/google/models/{simple_model_id}:generateContent"
-        )
-        print(
-            f"[LLMService] Using aiplatform endpoint with model '{simple_model_id}': {url}"
-        )
+        print(f"[LLMService] Using Vertex AI endpoints URL: {url}")
 
+        # Prepare the request payload in OpenAI chat completions format
         payload = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-            },
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,  # We'll handle non-streaming for now
         }
-
-        # Add structured outputs if schema provided
-        if response_json_schema:
-            payload["generationConfig"]["responseMimeType"] = "application/json"
-            payload["generationConfig"]["responseJsonSchema"] = response_json_schema
-
-        # Add system instruction if provided
-        if system_instruction:
-            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
         headers = {
             "Content-Type": "application/json",
@@ -228,8 +194,8 @@ class GeminiLLMClient:
 
                 # Check if response is empty or not JSON
                 if not resp.content:
-                    print(f"[LLMService] Gemini returned empty response")
-                    return {"success": False, "error": "Empty response from Gemini API"}
+                    print(f"[LLMService] Llama returned empty response")
+                    return {"success": False, "error": "Empty response from Llama API"}
 
                 print(
                     f"[LLMService] Raw response text: {resp.text[:500]}..."
@@ -242,7 +208,7 @@ class GeminiLLMClient:
                     )
                 except json.JSONDecodeError as je:
                     print(
-                        f"[LLMService] Gemini JSON decode error: {je}, Response: {resp.text}"
+                        f"[LLMService] Llama JSON decode error: {je}, Response: {resp.text}"
                     )
                     return {
                         "success": False,
@@ -283,7 +249,7 @@ class GeminiLLMClient:
                 # Non-retryable error or success
                 if not resp.ok:
                     err = raw.get("error") if isinstance(raw, dict) else resp.text
-                    print(f"[LLMService] Gemini Error response: {raw}")
+                    print(f"[LLMService] Llama Error response: {raw}")
                     return {"success": False, "error": err, "raw": raw}
 
                 # Success - break out of retry loop
@@ -323,185 +289,105 @@ class GeminiLLMClient:
             }
 
         try:
-            response_text = (
-                raw.get("candidates", [])[0]
-                .get("content", {})
-                .get("parts", [])[0]
-                .get("text", "")
-            )
+            # Extract content from OpenAI-style response
+            choices = raw.get("choices", [])
+            if not choices:
+                print(f"[LLMService] No choices in Llama response: {raw}")
+                return {"success": False, "error": "No choices in response"}
 
-            # If structured output was requested, parse the JSON
-            if response_json_schema:
-                try:
-                    parsed_json = json.loads(response_text)
-                    result = ExtractionResult.model_validate(parsed_json)
-                    content = result.answer
-                    references = [{"text": ref.text} for ref in result.references]
-                    print(
-                        f"[LLMService] Extracted structured content length: {len(content)}"
-                    )
-                    print(f"[LLMService] References count: {len(references)}")
-                except (json.JSONDecodeError, Exception) as e:
-                    print(f"[LLMService] Failed to parse structured output: {e}")
-                    print(f"[LLMService] Response text: {response_text[:500]}...")
-                    return {
-                        "success": False,
-                        "error": f"Failed to parse structured output: {str(e)}",
-                        "raw": raw,
-                    }
-            else:
-                content = response_text
-                references = []
-                print(f"[LLMService] Extracted content length: {len(content)}")
-                print(f"[LLMService] Content preview: {content[:200]}...")
-        except (IndexError, KeyError) as e:
-            print(f"[LLMService] Gemini content extraction error: {e}, Raw: {raw}")
+            content = choices[0].get("message", {}).get("content", "")
+            print(f"[LLMService] Extracted content length: {len(content)}")
+            print(f"[LLMService] Content preview: {content[:200]}...")
+
+        except (IndexError, KeyError, TypeError) as e:
+            print(f"[LLMService] Llama content extraction error: {e}, Raw: {raw}")
             return {"success": False, "error": f"Unexpected response format: {raw}"}
 
         result = {
             "success": True,
-            "content": content,  # Keep for backward compatibility
+            "content": content,
             "raw": raw,
             "meta": {
                 "timestamp": datetime.utcnow().isoformat(),
-                "model": model_id,
+                "model": model_name,
                 "duration": duration,
             },
         }
 
-        # Add structured output fields if available
-        if response_json_schema:
-            result["answer"] = content
-            result["references"] = references
-
         return result
 
-    async def extract_entities_with_gemini(
+    async def extract_entities_with_llama(
         self,
         markdown: str,
         extraction_prompt: str,
-        model_id: Optional[str] = None,
-        max_tokens: int = 8048,  # Increased default for structured outputs
+        model_name: Optional[str] = None,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
+        region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
-        system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # Supported models for structured outputs
-        gemini_models = [
-            "publishers/google/models/gemini-2.5-pro",
-            "publishers/google/models/gemini-2.5-flash-lite",
-            "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
-            "publishers/google/models/gemini-3-flash-preview",
-        ]
+        # Default Llama model
+        used_model_name = model_name or "meta/llama-4-maverick-17b-128e-instruct-maas"
 
-        # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
-        if model_id and not model_id.startswith("publishers/google/models/"):
-            # Map simple model names to full Vertex AI model IDs
-            model_mapping = {
-                "gemini-2.5-pro": "publishers/google/models/gemini-2.5-pro",
-                "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
-                "gemini-2.5-flash-lite": "publishers/google/models/gemini-2.5-flash-lite",
-                "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
-                "gemini-3-flash-preview": "publishers/google/models/gemini-3-flash-preview",
-            }
-            model_id = model_mapping.get(model_id, model_id)
+        # System message for structured extraction
+        system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
 
-        used_model_id = (
-            model_id
-            if model_id and model_id in gemini_models
-            else "publishers/google/models/gemini-2.5-flash"  # Default to flash
-        )
-
-        # System instruction for structured extraction - use provided or default
-        default_system_instruction = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
-        used_system_instruction = (
-            system_instruction if system_instruction else default_system_instruction
-        )
-
-        contents = [
+        messages = [
+            {"role": "system", "content": system_message},
             {
                 "role": "user",
-                "parts": [
-                    {
-                        "text": f"""<markdown study>
+                "content": f"""<markdown study>
 {markdown}
 </markdown study>
 
 Prompt:
 {extraction_prompt}
-"""
-                    }
-                ],
-            }
+""",
+            },
         ]
 
-        # Use structured outputs with JSON schema
-        return await self._call_gemini_api(
-            used_model_id,
-            contents,
+        return await self._call_llama_api(
+            used_model_name,
+            messages,
             max_tokens,
             temperature,
-            used_system_instruction,
             project_id_override,
             location_override,
+            region_override,
             service_account_path_override,
-            response_json_schema=ExtractionResult.model_json_schema(),
         )
 
-    async def generate_paragraph_with_gemini(
+    async def generate_paragraph_with_llama(
         self,
         user_prompt: str,
-        model_id: Optional[str] = None,
-        max_tokens: int = 8048,
+        model_name: Optional[str] = None,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
+        region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
-        system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # Supported models
-        gemini_models = [
-            "publishers/google/models/gemini-2.5-pro",
-            "publishers/google/models/gemini-2.5-flash-lite",
-            "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
+        # Default Llama model
+        used_model_name = model_name or "meta/llama-4-maverick-17b-128e-instruct-maas"
+
+        # System message for paragraph generation
+        system_message = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_prompt},
         ]
 
-        # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
-        if model_id and not model_id.startswith("publishers/google/models/"):
-            # Map simple model names to full Vertex AI model IDs
-            model_mapping = {
-                "gemini-2.5-pro": "publishers/google/models/gemini-2.5-pro",
-                "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
-                "gemini-2.5-flash-lite": "publishers/google/models/gemini-2.5-flash-lite",
-                "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
-            }
-            model_id = model_mapping.get(model_id, model_id)
-
-        used_model_id = (
-            model_id
-            if model_id and model_id in gemini_models
-            else "publishers/google/models/gemini-2.5-flash"  # Default to flash
-        )
-
-        # Use provided system instruction or default for paragraph generation
-        used_system_instruction = (
-            system_instruction
-            or "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
-        )
-
-        contents = [{"role": "user", "parts": [{"text": user_prompt}]}]
-        return await self._call_gemini_api(
-            used_model_id,
-            contents,
+        return await self._call_llama_api(
+            used_model_name,
+            messages,
             max_tokens,
             temperature,
-            used_system_instruction,
             project_id_override,
             location_override,
+            region_override,
             service_account_path_override,
-            response_json_schema=None,  # No structured output for paragraph generation
         )
