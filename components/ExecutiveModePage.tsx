@@ -415,21 +415,21 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           onClick={onBack}
-          className="text-lg px-6 py-6"
+          className="h-10 px-4"
         >
-          <ArrowLeft className="h-6 w-6 mr-2" />
+          <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
         <div>
-          <h2 className="text-6xl font-bold tracking-tight">
+          <h2 className="text-3xl font-bold tracking-tight">
             <AuroraText speed={2}>Executive Mode</AuroraText>
           </h2>
-          <p className="text-xl text-muted-foreground mt-2">
+          <p className="text-sm text-muted-foreground mt-1">
             Batch process multiple documents with high efficiency.
           </p>
         </div>
@@ -437,26 +437,22 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
 
       {/* Configuration Card */}
       <Card className="shadow-md border-grey-500 border-2">
-        <CardHeader>
-          <CardTitle className="text-3xl">Configuration</CardTitle>
-          <CardDescription className="text-xl">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-xl">Configuration</CardTitle>
+          <CardDescription className="text-sm">
             Set up your processing pipeline parameters.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid md:grid-cols-3 gap-8">
-          <div className="space-y-4">
-            <Label className="text-2xl">Ingestion Method</Label>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Ingestion Method</Label>
             <Select value={ingestionMethod} onValueChange={setIngestionMethod}>
-              <SelectTrigger className="h-14 text-lg">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {INGESTION_METHODS.map((method) => (
-                  <SelectItem
-                    key={method.id}
-                    value={method.id}
-                    className="text-lg py-3"
-                  >
+                  <SelectItem key={method.id} value={method.id}>
                     {method.name}
                   </SelectItem>
                 ))}
@@ -464,19 +460,17 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             </Select>
           </div>
 
-          <div className="space-y-4">
-            <Label className="text-2xl">Entity Extraction Model</Label>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">
+              Entity Extraction Model
+            </Label>
             <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="h-14 text-lg">
+              <SelectTrigger>
                 <SelectValue placeholder="Select Model" />
               </SelectTrigger>
               <SelectContent>
                 {availableModels.map((model) => (
-                  <SelectItem
-                    key={model.id}
-                    value={model.id}
-                    className="text-lg py-3"
-                  >
+                  <SelectItem key={model.id} value={model.id}>
                     {model.name}
                   </SelectItem>
                 ))}
@@ -484,19 +478,15 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             </Select>
           </div>
 
-          <div className="space-y-4">
-            <Label className="text-2xl">Study Template</Label>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Study Template</Label>
             <Select value={studyType} onValueChange={setStudyType}>
-              <SelectTrigger className="h-14 text-lg">
+              <SelectTrigger>
                 <SelectValue placeholder="Select Template" />
               </SelectTrigger>
               <SelectContent>
                 {studyTypes.map((type) => (
-                  <SelectItem
-                    key={type.id}
-                    value={type.id}
-                    className="text-lg py-3"
-                  >
+                  <SelectItem key={type.id} value={type.id}>
                     {type.name}
                   </SelectItem>
                 ))}
@@ -521,11 +511,11 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
               >
-                <Upload className="h-20 w-20 text-muted-foreground mb-6" />
-                <p className="text-3xl font-medium">
+                <Upload className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="text-lg font-medium">
                   Upload Toxicology Reports Here
                 </p>
-                <p className="text-xl text-muted-foreground mt-2">
+                <p className="text-sm text-muted-foreground mt-1">
                   or click to browse
                 </p>
                 <input
@@ -541,7 +531,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
 
             <div className="flex flex-col justify-center space-y-6">
               <Button
-                className="w-full h-40 text-3xl shadow-lg relative overflow-hidden"
+                className="w-full h-24 text-base shadow-lg relative overflow-hidden"
                 onClick={runPipeline}
                 disabled={
                   isRunning ||
@@ -579,7 +569,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                   ]}
                 />
               </Button>
-              <div className="text-center text-xl text-muted-foreground">
+              <div className="text-center text-sm text-muted-foreground">
                 {files.length} file{files.length !== 1 ? "s" : ""} queued
               </div>
             </div>
@@ -590,15 +580,15 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
       {/* File List */}
       {files.length > 0 && (
         <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle className="text-3xl">Processing Queue</CardTitle>
+          <CardHeader className="py-4">
+            <CardTitle className="text-lg">Processing Queue</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
               {files.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-6 border-2 rounded-xl bg-card hover:bg-accent/50 transition-colors"
+                  className="flex items-center justify-between p-4 border rounded-xl bg-card hover:bg-accent/50 transition-colors"
                 >
                   <div className="flex items-center gap-6 flex-1 min-w-0">
                     <div
@@ -610,15 +600,15 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                             : "bg-blue-100 text-blue-600"
                       }`}
                     >
-                      <FileText className="h-8 w-8" />
+                      <FileText className="h-5 w-5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-4">
-                        <p className="font-bold text-2xl truncate">
+                      <div className="flex items-center gap-3">
+                        <p className="font-semibold text-base truncate">
                           {file.file.name}
                         </p>
                         <span
-                          className={`text-base px-3 py-1 rounded-full capitalize ${
+                          className={`text-xs px-2 py-0.5 rounded-full capitalize ${
                             file.status === "completed"
                               ? "bg-green-100 text-green-700"
                               : file.status === "error"
@@ -632,7 +622,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                         </span>
                       </div>
                       {file.error && (
-                        <p className="text-lg text-red-500 mt-2">
+                        <p className="text-sm text-red-500 mt-1">
                           {file.error}
                         </p>
                       )}
@@ -646,7 +636,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                             />
                           </div>
                         )}
-                      <div className="flex flex-wrap gap-x-6 gap-y-2 mt-2 text-base text-muted-foreground">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-muted-foreground">
                         {file.ingestionTime && (
                           <span>
                             Ingestion: {file.ingestionTime.toFixed(1)}s
@@ -692,44 +682,44 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                           <DialogTrigger asChild>
                             <Button
                               variant="outline"
-                              size="lg"
-                              className="text-lg px-6 py-4 h-12"
+                              size="sm"
+                              className="h-8 px-3"
                             >
-                              <Eye className="h-6 w-6 mr-3" />
+                              <Eye className="h-4 w-4 mr-2" />
                               View
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="sm:max-w-[98vw] w-[98vw] max-h-[95vh] h-[95vh] overflow-y-auto">
+                          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
-                              <DialogTitle className="text-3xl">
+                              <DialogTitle className="text-xl">
                                 Summary: {file.file.name}
                               </DialogTitle>
                             </DialogHeader>
                             <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
                               <div className="space-y-6 h-full">
-                                <div className="p-6 bg-muted rounded-xl h-[85vh] overflow-y-auto">
-                                  <h4 className="font-bold mb-4 text-lg text-muted-foreground uppercase tracking-wider">
+                                <div className="p-4 bg-muted rounded-lg h-[60vh] overflow-y-auto">
+                                  <h4 className="font-bold mb-2 text-sm text-muted-foreground uppercase tracking-wider">
                                     Generated Paragraph
                                   </h4>
-                                  <p className="whitespace-pre-wrap leading-relaxed text-xl">
+                                  <p className="whitespace-pre-wrap leading-relaxed text-base">
                                     {file.extractedData?.finalSummary ||
                                       "No summary available."}
                                   </p>
                                 </div>
                               </div>
                               <div className="space-y-6 h-full">
-                                <div className="border-2 rounded-xl h-[85vh] overflow-y-auto">
-                                  <h4 className="font-bold p-6 pb-4 text-lg text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">
+                                <div className="border rounded-lg h-[60vh] overflow-y-auto">
+                                  <h4 className="font-bold p-4 pb-2 text-sm text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">
                                     Extracted Entities
                                   </h4>
-                                  <div className="p-6 pt-0">
+                                  <div className="p-4 pt-0">
                                     <Table>
                                       <TableHeader>
                                         <TableRow>
-                                          <TableHead className="w-[200px] text-lg font-bold">
+                                          <TableHead className="w-[150px] text-sm font-bold">
                                             Entity
                                           </TableHead>
-                                          <TableHead className="text-lg font-bold">
+                                          <TableHead className="text-sm font-bold">
                                             Extracted Value
                                           </TableHead>
                                         </TableRow>
@@ -738,10 +728,10 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                                         {file.extractedData?.entities?.map(
                                           (entity: any, idx: number) => (
                                             <TableRow key={idx}>
-                                              <TableCell className="font-medium align-top text-lg py-4">
+                                              <TableCell className="font-medium align-top text-sm py-2">
                                                 {entity.name}
                                               </TableCell>
-                                              <TableCell className="align-top whitespace-pre-wrap text-lg py-4">
+                                              <TableCell className="align-top whitespace-pre-wrap text-sm py-2">
                                                 {entity.answer ||
                                                   entity.extracted ||
                                                   "-"}
@@ -771,19 +761,19 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                         </Dialog>
                         <Button
                           variant="outline"
-                          size="lg"
-                          className="text-lg px-6 py-4 h-12"
+                          size="sm"
+                          className="h-8 px-3"
                           onClick={() => handleDownload(file)}
                         >
-                          <Download className="h-6 w-6 mr-3" />
+                          <Download className="h-4 w-4 mr-2" />
                           Word
                         </Button>
                       </>
                     )}
                     <Button
                       variant="ghost"
-                      size="lg"
-                      className="h-12 w-12"
+                      size="sm"
+                      className="h-8 w-8"
                       onClick={() => removeFile(file.id)}
                       disabled={
                         isRunning &&
@@ -792,7 +782,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                         file.status !== "queued"
                       }
                     >
-                      <X className="h-6 w-6" />
+                      <X className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

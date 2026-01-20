@@ -1,5 +1,5 @@
 """Authentication services"""
 
-from .auth_service import AuthService
+from .supabase_auth_service import SupabaseAuthService
 
-__all__ = ["AuthService"]
+__all__ = ["SupabaseAuthService"]

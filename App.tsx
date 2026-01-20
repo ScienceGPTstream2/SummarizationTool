@@ -1,28 +1,31 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import LoginPage from "./components/LoginPage";
+import { AuthCallback } from "./components/AuthCallback";
 import { UploadPage } from "./components/UploadPage";
 import { ProcessingPage } from "./components/ProcessingPage";
 import { EntityExtractionPage } from "./components/EntityExtractionPage";
 import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
-import { SettingsPage } from "./components/SettingsPage";
+
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
-import { Settings, ArrowLeft, Briefcase } from "lucide-react";
+import { Briefcase, LogOut } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
-import { getValidToken } from "./utils/authUtils";
+import { supabase, Session } from "./lib/supabase";
+import { signOut, getCurrentUser } from "./utils/authUtils";
 import { Toaster } from "./components/ui/sonner";
 
 export type Step =
   | "login"
+  | "auth_callback"
   | "upload"
   | "processing"
   | "study_selection"
   | "extraction"
   | "evaluation"
-  | "settings"
+  | "evaluation"
   | "executive";
 
 export interface DocumentData {
@@ -126,11 +129,28 @@ export interface DocumentData {
   }>;
 }
 
+// User info from Supabase session
+interface UserInfo {
+  id: string;
+  email: string | undefined;
+  name: string | undefined;
+  avatar: string | undefined;
+}
+
 export default function App() {
-  // Check token validity on mount - automatically clears expired tokens
-  const [token, setToken] = useState<string | null>(getValidToken());
-  const [currentStep, setCurrentStep] = useState<Step>("upload");
-  const [previousStep, setPreviousStep] = useState<Step>("upload");
+  // Supabase session state
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+
+  // Check if we're on the auth callback route
+  const isAuthCallback =
+    window.location.pathname === "/auth/callback" ||
+    window.location.hash.includes("access_token");
+
+  const [currentStep, setCurrentStep] = useState<Step>(
+    isAuthCallback ? "auth_callback" : "upload"
+  );
   const [documentData, setDocumentData] = useState<DocumentData>({
     file: null,
     parser: "",
@@ -143,12 +163,71 @@ export default function App() {
     uploadedFiles: [],
   });
 
-  const handleLogin = async (jwt: string) => {
-    setToken(jwt);
-    localStorage.setItem("token", jwt);
-    // Refresh server config after successful login
-    await settingsManager.refreshServerConfig();
-  };
+  // Initialize Supabase auth listener
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+
+      // If we have a session and we're on callback, redirect to main app
+      if (session && isAuthCallback) {
+        // Clean up URL
+        window.history.replaceState({}, document.title, "/");
+        setCurrentStep("upload");
+      }
+    });
+
+    // Listen for auth state changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+
+      if (session) {
+        // If we just logged in, go to upload
+        if (currentStep === "login" || currentStep === "auth_callback") {
+          // Clean up URL if needed
+          if (
+            window.location.pathname === "/auth/callback" ||
+            window.location.hash.includes("access_token")
+          ) {
+            window.history.replaceState({}, document.title, "/");
+          }
+          setCurrentStep("upload");
+        }
+      } else {
+        // Session ended, show login
+        setCurrentStep("login");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch user info when session changes
+  useEffect(() => {
+    if (session) {
+      getCurrentUser().then(setUserInfo);
+      // Refresh server config after successful login
+      settingsManager.refreshServerConfig();
+    } else {
+      setUserInfo(null);
+    }
+  }, [session]);
+
+  const handleAuthSuccess = useCallback(() => {
+    // Clean up URL
+    window.history.replaceState({}, document.title, "/");
+    setCurrentStep("upload");
+  }, []);
+
+  const handleAuthError = useCallback((error: string) => {
+    console.error("Auth error:", error);
+    // Clean up URL and redirect to login
+    window.history.replaceState({}, document.title, "/");
+    setCurrentStep("login");
+  }, []);
 
   const handleStepComplete = (step: Step, data: Partial<DocumentData>) => {
     setDocumentData((prev) => ({ ...prev, ...data }));
@@ -163,9 +242,10 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    setToken(null);
+  const handleLogout = async () => {
+    await signOut();
+    setSession(null);
+    setCurrentStep("login");
   };
 
   const handleBack = () => {
@@ -177,22 +257,20 @@ export default function App() {
       setCurrentStep("study_selection");
     } else if (currentStep === "evaluation") {
       setCurrentStep("extraction");
-    } else if (currentStep === "settings") {
-      setCurrentStep(previousStep);
     } else if (currentStep === "executive") {
       setCurrentStep("upload");
     }
   };
 
-  const handleSettingsClick = () => {
-    if (currentStep !== "settings") {
-      setPreviousStep(currentStep);
-    }
-    setCurrentStep("settings");
-  };
-
   const renderStep = () => {
     switch (currentStep) {
+      case "auth_callback":
+        return (
+          <AuthCallback
+            onSuccess={handleAuthSuccess}
+            onError={handleAuthError}
+          />
+        );
       case "executive":
         return <ExecutiveModePage onBack={handleBack} />;
       case "upload":
@@ -235,15 +313,37 @@ export default function App() {
             setDocumentData={setDocumentData}
           />
         );
-      case "settings":
-        return <SettingsPage onBack={handleBack} />;
+
       default:
         return null;
     }
   };
 
-  if (!token) {
-    return <LoginPage onLogin={handleLogin} />;
+  // Show loading state while checking session
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="mx-auto w-12 h-12 relative">
+            <div className="absolute inset-0 rounded-full border-4 border-primary/20"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+          </div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show auth callback page if processing OAuth
+  if (currentStep === "auth_callback") {
+    return (
+      <AuthCallback onSuccess={handleAuthSuccess} onError={handleAuthError} />
+    );
+  }
+
+  // Show login if no session
+  if (!session) {
+    return <LoginPage />;
   }
 
   return (
@@ -255,39 +355,43 @@ export default function App() {
               <h1 className="text-2xl font-medium text-foreground">
                 AI Toxicology Extraction and Summarization
               </h1>
-              {currentStep === "settings" ? (
-                <Button variant="outline" size="sm" onClick={handleBack}>
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back
-                </Button>
-              ) : (
-                <div className="flex items-center">
-                  {currentStep !== "executive" && (
-                    <RainbowButton
-                      size="sm"
-                      onClick={() => setCurrentStep("executive")}
-                      className="mr-2 !rounded-md"
-                    >
-                      <Briefcase className="h-4 w-4 mr-2" />
-                      Executive Mode
-                    </RainbowButton>
+              <div className="flex items-center gap-2">
+                {currentStep !== "executive" && (
+                  <RainbowButton
+                    size="sm"
+                    onClick={() => setCurrentStep("executive")}
+                    className="!rounded-md"
+                  >
+                    <Briefcase className="h-4 w-4 mr-2" />
+                    Executive Mode
+                  </RainbowButton>
+                )}
+
+                <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
+                  {userInfo?.avatar && (
+                    <img
+                      src={userInfo.avatar}
+                      alt={userInfo.name || "User"}
+                      className="w-8 h-8 rounded-full border border-border"
+                    />
+                  )}
+                  {userInfo?.name && (
+                    <span className="text-sm text-muted-foreground hidden md:inline">
+                      {userInfo.name}
+                    </span>
                   )}
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSettingsClick}
-                    className="mr-2"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleLogout}
+                    title="Logout"
                   >
-                    <Settings className="h-4 w-4 mr-2" />
-                    Settings
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleLogout}>
-                    Logout
+                    <LogOut className="h-4 w-4" />
                   </Button>
                 </div>
-              )}
+              </div>
             </div>
-            {currentStep !== "settings" && currentStep !== "executive" && (
+            {currentStep !== "executive" && (
               <div className="flex items-center gap-4 mt-2">
                 <div
                   className={`flex items-center gap-2 ${currentStep === "upload" ? "text-foreground" : "text-muted-foreground"}`}
