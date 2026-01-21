@@ -124,22 +124,6 @@ def load_config():
                 if anthropic_location:
                     os.environ.setdefault("ANTHROPIC_LOCATION", anthropic_location)
 
-                # Llama configuration (for Llama models via Vertex AI)
-                llama_cfg = cfg.get("llama", {}) or {}
-                llama_project = llama_cfg.get("project_id")
-                llama_location = llama_cfg.get("location")
-                llama_region = llama_cfg.get("region")
-                if llama_project:
-                    os.environ.setdefault("LLAMA_PROJECT_ID", llama_project)
-                if llama_location:
-                    os.environ.setdefault("LLAMA_LOCATION", llama_location)
-                if llama_region:
-                    os.environ.setdefault("LLAMA_REGION", llama_region)
-
-                # Log Llama configuration if any values were set
-                if any([llama_project, llama_location, llama_region]):
-                    print(f"✅ Llama configuration loaded from secrets.toml")
-
                 # Set up Google Cloud credentials for Vertex AI (shared by Gemini and Anthropic)
                 # Look for service account key in backend/core/ directory
                 service_account_path = (
