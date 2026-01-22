@@ -214,6 +214,7 @@ export function EntityExtractionPage({
   const [focusedReferenceByEntity, setFocusedReferenceByEntity] = useState<
     Record<number, number | null>
   >({});
+  const [figures, setFigures] = useState<any[]>([]);
 
   // Track processing status for each file independently
   const [fileProcessingStatus, setFileProcessingStatus] = useState<
@@ -479,9 +480,14 @@ export function EntityExtractionPage({
     try {
       // Determine model type for summary
       let modelTypeToUse = "azure";
-      if (primaryModelObj?.category === "google") modelTypeToUse = "gemini";
-      else if (primaryModelObj?.category === "anthropic")
+      const provider = primaryModelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
+        modelTypeToUse = "gemini";
+      } else if (provider.includes("anthropic")) {
         modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
+      }
 
       const summaryResp = await fetch("/api/generate_paragraph", {
         method: "POST",
@@ -602,6 +608,40 @@ export function EntityExtractionPage({
       startBatchProcessing();
     }
   }, [availableModels]);
+
+  // Fetch figures for PDF viewer
+  useEffect(() => {
+    const fetchFigures = async () => {
+      if (!currentFile.processingResult?.conversionId) return;
+
+      try {
+        const token = localStorage.getItem("token");
+        const response = await fetch(
+          `/api/documents/${currentFile.processingResult.conversionId}/figures`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          setFigures(data.figures || []);
+          console.log(`[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`);
+        }
+      } catch (err) {
+        console.error("Error fetching figures:", err);
+      }
+    };
+
+    fetchFigures();
+  }, [currentFile.processingResult?.conversionId]);
+
+  // Debug: Log figures when they change
+  useEffect(() => {
+    if (figures.length > 0) {
+      console.log('[EntityExtractionPage] Figures loaded for PDF viewer:', figures.map(f => ({ id: f.id, page: f.page, caption: f.caption?.substring(0, 50) })));
+    }
+  }, [figures]);
 
   useEffect(() => {
     if (
@@ -756,7 +796,7 @@ export function EntityExtractionPage({
         return { modelId, result: null };
       }
 
-      // Map provider to backend model_type ("azure", "gemini", "anthropic")
+      // Map provider to backend model_type ("azure", "gemini", "anthropic", "llama")
       let modelType = "azure";
       const provider = modelObj.provider?.toLowerCase() || "";
 
@@ -766,6 +806,8 @@ export function EntityExtractionPage({
         modelType = "anthropic";
       } else if (provider.includes("azure")) {
         modelType = "azure";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelType = "llama";
       }
 
       const modelConfig = {
@@ -1095,8 +1137,14 @@ export function EntityExtractionPage({
     try {
       const modelObj = availableModels.find((m) => m.id === selectedModel);
       let modelTypeToUse = "azure";
-      if (modelObj?.category === "google") modelTypeToUse = "gemini";
-      else if (modelObj?.category === "anthropic") modelTypeToUse = "anthropic";
+      const provider = modelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
+        modelTypeToUse = "gemini";
+      } else if (provider.includes("anthropic")) {
+        modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
+      }
 
       const summaryResp = await fetch("/api/generate_paragraph", {
         method: "POST",
@@ -1199,12 +1247,15 @@ export function EntityExtractionPage({
       }
 
       const modelObj = availableModels.find((m) => m.id === selectedModel);
-      // Determine model_type based on category
+      // Determine model_type based on provider
       let modelTypeToUse = "azure"; // default
-      if (modelObj?.category === "google") {
+      const provider = modelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
         modelTypeToUse = "gemini";
-      } else if (modelObj?.category === "anthropic") {
+      } else if (provider.includes("anthropic")) {
         modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
       }
       const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
       const deploymentToUse = modelObj?.deployment; // For Azure models
@@ -2207,6 +2258,7 @@ export function EntityExtractionPage({
                                   focusedReferenceIndex={
                                     focusedReferenceByEntity[index] ?? null
                                   }
+                                  figures={figures}
                                 />
                               </div>
                             ) : (
