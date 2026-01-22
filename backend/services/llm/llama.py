@@ -4,8 +4,9 @@ import asyncio
 import time
 import requests
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
+from pydantic import BaseModel, Field
 
 # For service account authentication
 try:
@@ -15,6 +16,26 @@ try:
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
+
+
+# Pydantic models for structured output (same as Azure)
+class MarkdownReference(BaseModel):
+    """A reference to a specific section of the markdown that was used"""
+
+    text: str = Field(
+        description="The exact text excerpt from the markdown that was referenced"
+    )
+
+
+class ExtractionResult(BaseModel):
+    """Structured result containing both the extracted answer and its references"""
+
+    answer: str = Field(
+        description="The extracted information or answer based on the prompt"
+    )
+    references: List[MarkdownReference] = Field(
+        description="List of specific text excerpts from the markdown that were used to generate this answer"
+    )
 
 
 class LlamaLLMClient:
@@ -85,6 +106,7 @@ class LlamaLLMClient:
         messages: list,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        response_format: Optional[Dict[str, Any]] = None,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         region_override: Optional[str] = None,
@@ -140,6 +162,10 @@ class LlamaLLMClient:
             "temperature": temperature,
             "stream": False,  # We'll handle non-streaming for now
         }
+
+        # Add response format if provided (for JSON mode)
+        if response_format:
+            payload["response_format"] = response_format
 
         headers = {
             "Content-Type": "application/json",
@@ -331,26 +357,17 @@ class LlamaLLMClient:
         # Default Llama model
         used_model_name = model_name or "meta/llama-4-maverick-17b-128e-instruct-maas"
 
-        # System message for structured extraction
-        system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
+        # Use structured outputs with JSON mode (similar to Azure but without server-side schema enforcement)
+        print(f"[LLMService] Using structured outputs with Llama model: {used_model_name}")
 
-        messages = [
-            {"role": "system", "content": system_message},
-            {
-                "role": "user",
-                "content": f"""<markdown study>
-{markdown}
-</markdown study>
+        # Optimize prompts for Llama to prevent hallucination
+        optimized_prompt, optimized_markdown = self._optimize_prompts_for_llama(extraction_prompt, markdown)
 
-Prompt:
-{extraction_prompt}
-""",
-            },
-        ]
-
-        return await self._call_llama_api(
+        # Try primary strategy first
+        result = await self._try_llama_extraction_strategy(
+            optimized_prompt,
+            optimized_markdown,
             used_model_name,
-            messages,
             max_tokens,
             temperature,
             project_id_override,
@@ -358,6 +375,292 @@ Prompt:
             region_override,
             service_account_path_override,
         )
+
+        # If primary strategy failed with hallucination, try fallback
+        if result.get("success") == False and "parsing_error" in result.get("meta", {}):
+            print("[LLMService] Primary strategy failed, trying fallback...")
+            fallback_result = await self._try_llama_fallback_strategy(
+                optimized_prompt,
+                optimized_markdown,
+                used_model_name,
+                max_tokens,
+                temperature,
+                project_id_override,
+                location_override,
+                region_override,
+                service_account_path_override,
+            )
+            if fallback_result.get("success"):
+                return fallback_result
+
+        return result
+
+    def _optimize_prompts_for_llama(self, extraction_prompt: str, markdown: str) -> tuple[str, str]:
+        """Optimize prompts and content for Llama to prevent hallucination."""
+
+        # Simplify extraction prompt - remove complex few-shot examples that cause issues
+        if len(extraction_prompt) > 500:  # If prompt is too long
+            # Extract just the core instruction
+            lines = extraction_prompt.split('\n')
+            core_instruction = ""
+            for line in lines:
+                if not line.startswith('Input:') and not line.startswith('Output:') and line.strip():
+                    if "Extract" in line or "extract" in line:
+                        core_instruction = line.strip()
+                        break
+            if not core_instruction:
+                core_instruction = extraction_prompt[:200] + "..."  # Truncate if can't find core
+            optimized_prompt = core_instruction
+        else:
+            optimized_prompt = extraction_prompt
+
+        # Truncate markdown if too long (Llama context limits)
+        max_markdown_length = 15000  # Conservative limit
+        if len(markdown) > max_markdown_length:
+            # Try to truncate at a reasonable boundary
+            truncated = markdown[:max_markdown_length]
+            # Find last complete sentence or paragraph
+            last_period = truncated.rfind('.')
+            last_newline = truncated.rfind('\n')
+            cutoff = max(last_period, last_newline)
+            if cutoff > max_markdown_length * 0.8:  # Only if we can keep most content
+                truncated = truncated[:cutoff + 1]
+            optimized_markdown = truncated + "\n\n[Content truncated for processing...]"
+        else:
+            optimized_markdown = markdown
+
+        print(f"[LLMService] Optimized prompt length: {len(optimized_prompt)} (was {len(extraction_prompt)})")
+        print(f"[LLMService] Optimized markdown length: {len(optimized_markdown)} (was {len(markdown)})")
+
+        return optimized_prompt, optimized_markdown
+
+    async def _try_llama_extraction_strategy(
+        self,
+        extraction_prompt: str,
+        markdown: str,
+        model_name: str,
+        max_tokens: int,
+        temperature: float,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        region_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """Try the primary extraction strategy with optimized prompts."""
+
+        # Simplified system message for Llama (less prone to hallucination)
+        system_message = """You are a data extraction assistant. Extract information and return valid JSON only.
+
+Response format: {"answer": "extracted info", "references": [{"text": "quote"}]}"""
+
+        # Simplified user message
+        user_message = f"""Task: {extraction_prompt}
+
+Content: {markdown}
+
+Return JSON only:"""
+
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+
+        # Call with JSON mode and lower max_tokens to prevent runaway generation
+        safe_max_tokens = min(max_tokens, 2048)  # Conservative limit
+
+        response = await self._call_llama_api(
+            model_name,
+            messages,
+            safe_max_tokens,
+            temperature,
+            response_format={"type": "json_object"},
+            project_id_override=project_id_override,
+            location_override=location_override,
+            region_override=region_override,
+            service_account_path_override=service_account_path_override,
+        )
+
+        # Parse and validate JSON response
+        content = response["content"]
+        try:
+            parsed_json = json.loads(content.strip())
+            result = ExtractionResult.model_validate(parsed_json)
+
+            return {
+                "success": True,
+                "content": result.answer,
+                "answer": result.answer,
+                "references": [{"text": ref.text} for ref in result.references],
+                "raw": response["raw"],
+                "meta": {
+                    "timestamp": response["meta"]["timestamp"],
+                    "model": model_name,
+                    "duration": response["meta"]["duration"],
+                    "prompt_tokens": response["raw"].get("usage", {}).get("prompt_tokens"),
+                    "completion_tokens": response["raw"].get("usage", {}).get("completion_tokens"),
+                    "strategy": "primary_optimized"
+                },
+            }
+
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[LLMService] Primary strategy failed: {e}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "primary_optimized"
+            )
+
+    async def _try_llama_fallback_strategy(
+        self,
+        extraction_prompt: str,
+        markdown: str,
+        model_name: str,
+        max_tokens: int,
+        temperature: float,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        region_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """Fallback strategy with minimal prompting to avoid hallucination."""
+
+        print("[LLMService] Attempting fallback extraction strategy...")
+
+        # Ultra-minimal system message
+        system_message = """Return JSON: {"answer": "response", "references": [{"text": "quote"}]}"""
+
+        # Extract just essential content (first 2000 chars)
+        essential_markdown = markdown[:2000] + "..." if len(markdown) > 2000 else markdown
+
+        # Simplify prompt to core instruction
+        simple_prompt = extraction_prompt.split('.')[0] if '.' in extraction_prompt else extraction_prompt[:100]
+
+        user_message = f"""{simple_prompt}
+
+Text: {essential_markdown}"""
+
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+
+        # Very conservative token limit
+        response = await self._call_llama_api(
+            model_name,
+            messages,
+            1024,  # Very low token limit
+            0.0,   # Zero temperature for consistency
+            response_format={"type": "json_object"},
+            project_id_override=project_id_override,
+            location_override=location_override,
+            region_override=region_override,
+            service_account_path_override=service_account_path_override,
+        )
+
+        # Parse and validate
+        content = response["content"]
+        try:
+            parsed_json = json.loads(content.strip())
+            result = ExtractionResult.model_validate(parsed_json)
+
+            return {
+                "success": True,
+                "content": result.answer,
+                "answer": result.answer,
+                "references": [{"text": ref.text} for ref in result.references],
+                "raw": response["raw"],
+                "meta": {
+                    "timestamp": response["meta"]["timestamp"],
+                    "model": model_name,
+                    "duration": response["meta"]["duration"],
+                    "strategy": "fallback_minimal"
+                },
+            }
+
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[LLMService] Fallback strategy also failed: {e}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "fallback_minimal"
+            )
+
+    async def _handle_llama_parsing_error(
+        self,
+        error: Exception,
+        content: str,
+        response: Dict[str, Any],
+        model_name: str,
+        strategy: str
+    ) -> Dict[str, Any]:
+        """Handle JSON parsing errors with enhanced logging and fallback."""
+
+        print(f"[LLMService] Llama {strategy} strategy parsing failed: {error}")
+        print(f"[LLMService] Content length: {len(content)}")
+        print(f"[LLMService] Content preview: {content[:200]}...")
+
+        # Enhanced logging
+        error_log_path = Path(__file__).resolve().parents[1] / "logs" / "llama_errors"
+        error_log_path.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time())
+
+        error_details = {
+            "timestamp": timestamp,
+            "strategy": strategy,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "model": model_name,
+            "content_length": len(content),
+            "content_preview": content[:500],
+            "full_content": content,
+            "api_response": response["raw"],
+        }
+
+        error_file = error_log_path / f"llama_error_{timestamp}_{strategy}.json"
+        with open(error_file, 'w') as f:
+            json.dump(error_details, f, indent=2, default=str)
+        print(f"[LLMService] Error logged to: {error_file}")
+
+        # Smart fallback extraction
+        fallback_answer = ""
+        fallback_references = []
+
+        if not content or not content.strip():
+            fallback_answer = "Error: Llama returned empty response"
+        elif len(content) < 10:
+            fallback_answer = f"Error: Llama returned incomplete response: {content}"
+        else:
+            # Try to extract any valid JSON fragments
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    fragment = json.loads(json_match.group())
+                    if "answer" in fragment:
+                        fallback_answer = fragment["answer"]
+                    if "references" in fragment and isinstance(fragment["references"], list):
+                        fallback_references = fragment["references"]
+                except:
+                    pass
+
+            if not fallback_answer:
+                # Check for repetitive patterns (hallucination detection)
+                if "extracted information and references" in content.lower():
+                    fallback_answer = "Error: Llama generated repetitive hallucination instead of valid response"
+                else:
+                    fallback_answer = f"Error: Llama returned malformed response ({len(content)} chars)"
+
+        return {
+            "success": False,
+            "error": f"Llama {strategy} parsing failed: {str(error)}",
+            "content": fallback_answer,
+            "answer": fallback_answer,
+            "references": fallback_references,
+            "raw": response["raw"],
+            "meta": {
+                **response["meta"],
+                "parsing_error": str(error),
+                "content_length": len(content),
+                "error_logged": str(error_file),
+                "strategy": strategy
+            },
+        }
 
     async def generate_paragraph_with_llama(
         self,

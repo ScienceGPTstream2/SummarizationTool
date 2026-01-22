@@ -68,6 +68,8 @@ interface Reference {
       polygon: number[];
     }>;
     polygon?: number[];
+    figure_id?: string;
+    has_figure_reference?: boolean;
   };
 }
 
@@ -77,6 +79,15 @@ interface EntityPDFViewerBetaProps {
   references: Reference[];
   onPageChange?: (page: number) => void;
   focusedReferenceIndex?: number | null;
+  figures?: Array<{
+    id: string;
+    page: number | null;
+    caption: string | null;
+    bounding_regions?: Array<{
+      page_number: number;
+      polygon: number[];
+    }>;
+  }>;
 }
 
 function EntityPDFViewerBetaComponent({
@@ -85,6 +96,7 @@ function EntityPDFViewerBetaComponent({
   references,
   onPageChange,
   focusedReferenceIndex,
+  figures,
 }: EntityPDFViewerBetaProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -793,6 +805,100 @@ function EntityPDFViewerBetaComponent({
       (rect as any).refIdx = refIdx;
       (rect as any).pageNumber = pageNumber;
     });
+
+    // Draw figure bounding boxes with different styling - only for referenced figures
+    if (figures) {
+    // Find which figures are referenced in the current references
+    const referencedFigureIds = new Set<string>();
+    references.forEach(ref => {
+      // Check if this reference has figure information
+      if (ref.best_match?.type === 'figure' && ref.best_match?.figure_id) {
+        referencedFigureIds.add(ref.best_match.figure_id);
+      }
+      // Also check for references that contain figure references (enhanced matching)
+      if (ref.best_match?.has_figure_reference && ref.best_match?.figure_id) {
+        referencedFigureIds.add(ref.best_match.figure_id);
+      }
+    });
+
+      console.log(`[PDF_VIEWER] Referenced figure IDs on page ${pageNum}:`, Array.from(referencedFigureIds));
+
+      figures.forEach((figure, figIdx) => {
+        if (figure.page !== pageNum) return;
+
+        // Only show figures that are referenced
+        const figureId = figure.id;
+        if (!referencedFigureIds.has(figureId)) {
+          // Try different ID formats (e.g., "1" vs "1.1")
+          const isReferenced = Array.from(referencedFigureIds).some(refId => {
+            return refId === figureId ||
+                   refId === figureId.split('.')[0] || // "1.1" -> "1"
+                   figureId.startsWith(refId + '.');   // "1" -> "1.x"
+          });
+          if (!isReferenced) return;
+        }
+
+        const polygon = figure.bounding_regions?.[0]?.polygon;
+        if (!polygon) return;
+
+        const rect = polygonToRect(polygon);
+        if (!rect) return;
+
+        // Use a distinct style for figures (purple theme)
+        const figureColor = "#9333ea"; // Purple color
+        context.strokeStyle = figureColor;
+        context.lineWidth = 2;
+        context.setLineDash([8, 4]); // Dashed line for figures
+        context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+        context.setLineDash([]); // Reset dash
+
+        // Draw figure label
+        context.font = "bold 12px sans-serif";
+        const labelText = `Fig ${figure.id}`;
+        const textMetrics = context.measureText(labelText);
+        const labelWidth = textMetrics.width + 10;
+        const labelHeight = 18;
+
+        // Position figure labels on the right side when possible
+        const margin = 6;
+        let labelX = rect.x + rect.width + margin;
+        let labelY = rect.y;
+
+        // Check if label fits on the right, otherwise place on left or top
+        const canPlaceRight = canvasWidth && labelX + labelWidth <= canvasWidth;
+        if (!canPlaceRight) {
+          if (rect.x - labelWidth - margin >= 0) {
+            // Place on left
+            labelX = rect.x - labelWidth - margin;
+          } else {
+            // Place on top
+            labelX = rect.x;
+            labelY = rect.y - labelHeight - margin;
+          }
+        }
+
+        // Ensure label stays within canvas bounds
+        if (canvasWidth && labelX + labelWidth > canvasWidth) {
+          labelX = Math.max(0, canvasWidth - labelWidth - margin);
+        }
+        if (canvasHeight && labelY + labelHeight > canvasHeight) {
+          labelY = Math.max(0, canvasHeight - labelHeight - margin);
+        }
+        if (labelY < 0) {
+          labelY = rect.y + rect.height + margin;
+        }
+
+        context.fillStyle = "rgba(147, 51, 234, 0.1)"; // Light purple background
+        context.strokeStyle = figureColor;
+        context.lineWidth = 1;
+        context.fillRect(labelX, labelY, labelWidth, labelHeight);
+        context.strokeRect(labelX, labelY, labelWidth, labelHeight);
+
+        context.fillStyle = figureColor;
+        context.fillText(labelText, labelX + 5, labelY + labelHeight - 5);
+      });
+    }
+
     context.restore();
 
     // Store click handler info on canvas

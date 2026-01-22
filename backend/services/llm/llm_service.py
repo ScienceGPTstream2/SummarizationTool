@@ -1,4 +1,7 @@
 import os
+import asyncio
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
 from .gemini import GeminiLLMClient
@@ -37,6 +40,61 @@ class LLMService:
         self.anthropic_client = AnthropicLLMClient()
         self.llama_client = LlamaLLMClient()
 
+        # Timeout logging setup
+        self.timeout_log_dir = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
+        self.timeout_log_dir.mkdir(parents=True, exist_ok=True)
+        self.timeout_log_file = self.timeout_log_dir / "timeout_log.txt"
+
+    def _log_timeout(self, operation: str, details: str, duration: float = None):
+        """
+        Log timeout events to a file for monitoring API request issues.
+
+        Args:
+            operation: The operation that timed out (e.g., "entity_extraction", "figure_ocr")
+            details: Additional details about the timeout
+            duration: How long it took before timing out (if available)
+        """
+        timestamp = datetime.now().isoformat()
+        duration_str = f" ({duration:.2f}s)" if duration else ""
+
+        log_entry = f"[{timestamp}] TIMEOUT - {operation}{duration_str}: {details}\n"
+
+        try:
+            with open(self.timeout_log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+            print(f"[TIMEOUT_LOG] {log_entry.strip()}")
+        except Exception as e:
+            print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
+
+    async def _call_with_timeout_logging(self, operation: str, coro, timeout_seconds: int = 120):
+        """
+        Call an async function with timeout detection and logging.
+
+        Args:
+            operation: Name of the operation for logging
+            coro: The coroutine to call
+            timeout_seconds: Timeout in seconds
+
+        Returns:
+            The result of the coroutine
+        """
+        start_time = datetime.now()
+
+        try:
+            result = await asyncio.wait_for(coro, timeout=timeout_seconds)
+            return result
+        except asyncio.TimeoutError:
+            duration = (datetime.now() - start_time).total_seconds()
+            self._log_timeout(operation, f"Request timed out after {timeout_seconds}s", duration)
+            raise
+        except Exception as e:
+            # For other errors, also log if they seem timeout-related
+            duration = (datetime.now() - start_time).total_seconds()
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['timeout', 'timed out', 'deadline', 'connection']):
+                self._log_timeout(operation, f"Timeout-related error: {str(e)}", duration)
+            raise
+
     async def extract_entities_from_markdown(
         self,
         markdown: str,
@@ -57,11 +115,117 @@ class LLMService:
         """
         Extract entities from markdown using the specified LLM.
         """
-        if model_type == "azure":
+        operation_name = f"entity_extraction_{model_type}"
+
+        try:
+            if model_type == "azure":
+                if self.azure_client.disabled:
+                    return {"success": False, "error": "Azure OpenAI is not configured."}
+                return await self._call_with_timeout_logging(
+                    operation_name,
+                    self.azure_client.extract_entities_with_azure(
+                        markdown,
+                        extraction_prompt,
+                        deployment,
+                        api_version,
+                        endpoint_override,
+                        api_key_override,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    )
+                )
+            elif model_type == "gemini":
+                if self.gemini_client.disabled:
+                    return {"success": False, "error": "Gemini is not configured."}
+                return await self._call_with_timeout_logging(
+                    operation_name,
+                    self.gemini_client.extract_entities_with_gemini(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        gemini_project_id_override,
+                        gemini_location_override,
+                        system_instruction=system_message,
+                    )
+                )
+            elif model_type == "anthropic":
+                if self.anthropic_client.disabled:
+                    return {"success": False, "error": "Anthropic is not configured."}
+                return await self._call_with_timeout_logging(
+                    operation_name,
+                    self.anthropic_client.extract_entities_with_anthropic(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                    )
+                )
+            elif model_type == "llama":
+                if self.llama_client.disabled:
+                    return {"success": False, "error": "Llama is not configured."}
+                return await self._call_with_timeout_logging(
+                    operation_name,
+                    self.llama_client.extract_entities_with_llama(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                    )
+                )
+            else:
+                return {"success": False, "error": f"Unsupported model type: {model_type}"}
+        except asyncio.TimeoutError:
+            return {"success": False, "error": f"Request timed out for {model_type} model"}
+        except Exception as e:
+            # Log other errors that might be timeout-related
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['timeout', 'timed out', 'deadline', 'connection']):
+                # This was already logged by _call_with_timeout_logging
+                pass
+            return {"success": False, "error": str(e)}
+
+    async def extract_content_from_image(
+        self,
+        image_path: str,
+        extraction_prompt: str,
+        model_type: str,  # e.g., "gemini", "azure"
+        model_id: Optional[str] = None,  # for Gemini
+        deployment: Optional[str] = None,  # for Azure
+        api_version: Optional[str] = None,  # for Azure
+        endpoint_override: Optional[str] = None,  # for Azure
+        api_key_override: Optional[str] = None,  # for Azure
+        gemini_project_id_override: Optional[str] = None,  # for Gemini
+        gemini_location_override: Optional[str] = None,  # for Gemini
+        max_tokens: int = 8048,
+        temperature: float = 0.0,
+        system_message: Optional[str] = None,  # Custom system prompt
+    ) -> Dict[str, Any]:
+        """
+        Extract content from an image using vision-capable LLMs.
+        """
+        if model_type == "gemini":
+            if self.gemini_client.disabled:
+                return {"success": False, "error": "Gemini is not configured."}
+            return await self.gemini_client.extract_content_from_image(
+                image_path,
+                extraction_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+                gemini_project_id_override,
+                gemini_location_override,
+                system_instruction=system_message,
+            )
+        elif model_type == "azure":
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
-            return await self.azure_client.extract_entities_with_azure(
-                markdown,
+            return await self.azure_client.extract_content_from_image(
+                image_path,
                 extraction_prompt,
                 deployment,
                 api_version,
@@ -71,41 +235,8 @@ class LLMService:
                 temperature,
                 system_message,
             )
-        elif model_type == "gemini":
-            if self.gemini_client.disabled:
-                return {"success": False, "error": "Gemini is not configured."}
-            return await self.gemini_client.extract_entities_with_gemini(
-                markdown,
-                extraction_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-                gemini_project_id_override,
-                gemini_location_override,
-                system_instruction=system_message,
-            )
-        elif model_type == "anthropic":
-            if self.anthropic_client.disabled:
-                return {"success": False, "error": "Anthropic is not configured."}
-            return await self.anthropic_client.extract_entities_with_anthropic(
-                markdown,
-                extraction_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-            )
-        elif model_type == "llama":
-            if self.llama_client.disabled:
-                return {"success": False, "error": "Llama is not configured."}
-            return await self.llama_client.extract_entities_with_llama(
-                markdown,
-                extraction_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-            )
         else:
-            return {"success": False, "error": f"Unsupported model type: {model_type}"}
+            return {"success": False, "error": f"Unsupported model type for vision: {model_type}"}
 
     async def generate_paragraph(
         self,
