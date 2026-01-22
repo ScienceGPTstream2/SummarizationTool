@@ -13,6 +13,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 // import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
@@ -127,6 +134,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     new Map()
   );
   const [copiedToClipboard, setCopiedToClipboard] = useState<string | null>(null);
+
+  // Model selection state
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
 
   if (!figures || figures.length === 0) {
     return null;
@@ -243,6 +253,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
         },
         body: JSON.stringify({
           model_type: "gemini",
+          model_id: selectedModel,
           max_tokens: 2048,
           temperature: 0.0,
         }),
@@ -461,13 +472,29 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                   </Button>
                 </div>
 
+                {/* Model Selection */}
+                <div className="mb-4">
+                  <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                    AI Model for Analysis
+                  </label>
+                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                    <SelectTrigger className="w-full max-w-xs">
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Fast)</SelectItem>
+                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Most Capable)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Scientific Summary Display */}
                 {selectedFigure.scientific_summary ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">
                         Generated: {new Date(selectedFigure.scientific_summary.generated_at).toLocaleString()}
-                        • Model: {selectedFigure.scientific_summary.model_used}
+                        • Model: {selectedFigure.scientific_summary.model_used} (Selected: {selectedModel})
                       </div>
                       <Button
                         size="sm"

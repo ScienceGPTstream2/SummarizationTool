@@ -41,10 +41,17 @@ class ExtractionResult(BaseModel):
 class GeminiLLMClient:
     def __init__(self):
         # Load from environment variables or secrets.toml
-        self.project_id = os.environ.get("GEMINI_PROJECT_ID") or os.environ.get(
-            "GEMINI_PROJECT"
+        # Check both GEMINI_ and VERTEX_AI_ prefixes for compatibility
+        self.project_id = (
+            os.environ.get("GEMINI_PROJECT_ID") or
+            os.environ.get("GEMINI_PROJECT") or
+            os.environ.get("VERTEX_AI_PROJECT")
         )
-        self.location = os.environ.get("GEMINI_LOCATION", "us-central1")
+        self.location = (
+            os.environ.get("GEMINI_LOCATION") or
+            os.environ.get("VERTEX_AI_LOCATION") or
+            "us-central1"
+        )
 
         # Find service account file
         self.service_account_path = self._find_service_account_file()
@@ -393,8 +400,6 @@ class GeminiLLMClient:
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
-            "publishers/google/models/gemini-3-flash-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
@@ -467,7 +472,6 @@ Prompt:
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
@@ -539,7 +543,6 @@ Prompt:
         vision_models = [
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping

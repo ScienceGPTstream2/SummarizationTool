@@ -670,7 +670,7 @@ async def generate_figure_summary(
 
         summary_content = result["content"]
 
-        # Check for potential truncation and add warning if detected
+        # Check for potential truncation and retry with more focused prompt if detected
         truncation_indicators = ["...", "…", "comet assay", "data", "figure", "results"]
         is_likely_truncated = (
             len(summary_content) > 500 and  # Long enough to potentially be truncated
@@ -678,9 +678,35 @@ async def generate_figure_summary(
             not summary_content.strip().endswith(('.', '!', '?'))  # Doesn't end with proper punctuation
         )
 
+        # If truncated and we haven't exceeded max retries, try again with focused prompt
+        if is_likely_truncated and max_tokens <= 4096:  # Only retry if not already at high limit
+            print(f"[SUMMARY] ⚠️ Detected potential truncation in summary for figure {figure_id}, retrying with focused prompt...")
+
+            # Retry with more focused prompt and higher token limit
+            focused_result = await _generate_figure_summary_with_retry(
+                image_path=str(image_path),
+                figure_id=figure_id,
+                model_type=model_type,
+                model_id=model_id,
+                max_tokens=min(max_tokens * 2, 8192),  # Double token limit, max 8K
+                temperature=max(temperature, 0.1),  # Slight temperature increase for more complete responses
+                max_retries=1,  # Only one additional retry for truncation
+            )
+
+            if focused_result["success"]:
+                focused_content = focused_result["content"]
+                # Check if the focused attempt is significantly longer and more complete
+                if len(focused_content) > len(summary_content) * 1.2:  # At least 20% longer
+                    summary_content = focused_content
+                    result = focused_result
+                    is_likely_truncated = False
+                    print(f"[SUMMARY] ✅ Successfully regenerated longer summary for figure {figure_id}")
+                else:
+                    print(f"[SUMMARY] ⚠️ Focused retry did not produce significantly longer summary, keeping original")
+
         if is_likely_truncated:
             summary_content += "\n\n⚠️ *Note: This summary may be truncated due to length limits. Consider regenerating with a more focused prompt.*"
-            print(f"[SUMMARY] ⚠️ Detected potential truncation in summary for figure {figure_id}")
+            print(f"[SUMMARY] ⚠️ Summary for figure {figure_id} may be truncated")
 
         # Store the summary persistently in figure metadata
         summary_data = {

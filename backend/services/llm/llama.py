@@ -4,7 +4,7 @@ import asyncio
 import time
 import requests
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,7 @@ except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
 
 
-# Pydantic models for structured output (same as Azure)
+# Pydantic models for structured output (adapted for Llama)
 class MarkdownReference(BaseModel):
     """A reference to a specific section of the markdown that was used"""
 
@@ -30,8 +30,8 @@ class MarkdownReference(BaseModel):
 class ExtractionResult(BaseModel):
     """Structured result containing both the extracted answer and its references"""
 
-    answer: str = Field(
-        description="The extracted information or answer based on the prompt"
+    answer: Union[str, Dict[str, Any]] = Field(
+        description="The extracted information or answer based on the prompt (string or structured data)"
     )
     references: List[MarkdownReference] = Field(
         description="List of specific text excerpts from the markdown that were used to generate this answer"
@@ -349,6 +349,7 @@ class LlamaLLMClient:
         model_name: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        max_input_length: int = 128000,  # Match Llama's actual context window (128K tokens ≈ 96K chars)
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         region_override: Optional[str] = None,
@@ -357,11 +358,30 @@ class LlamaLLMClient:
         # Default Llama model
         used_model_name = model_name or "meta/llama-4-maverick-17b-128e-instruct-maas"
 
+        # Validate that only supported models are used and set correct regions
+        model_region_map = {
+            "meta/llama-4-maverick-17b-128e-instruct-maas": "us-east5",
+            "meta/llama-4-scout-17b-16e-instruct-maas": "us-east5",
+            "meta/llama-3.3-70b-instruct-maas": "us-central1",
+            "meta/llama-3.1-405b-instruct-maas": "us-central1",
+        }
+
+        if used_model_name not in model_region_map:
+            return {
+                "success": False,
+                "error": f"Model '{used_model_name}' is not available in this Vertex AI project. "
+                        f"Available Llama models: {', '.join(model_region_map.keys())}. "
+                        f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1."
+            }
+
+        # Override region for this specific model
+        region_override = model_region_map[used_model_name]
+
         # Use structured outputs with JSON mode (similar to Azure but without server-side schema enforcement)
-        print(f"[LLMService] Using structured outputs with Llama model: {used_model_name}")
+        print(f"[LLMService] Using structured outputs with Llama model: {used_model_name} in region: {region_override}")
 
         # Optimize prompts for Llama to prevent hallucination
-        optimized_prompt, optimized_markdown = self._optimize_prompts_for_llama(extraction_prompt, markdown)
+        optimized_prompt, optimized_markdown = self._optimize_prompts_for_llama(extraction_prompt, markdown, max_input_length)
 
         # Try primary strategy first
         result = await self._try_llama_extraction_strategy(
@@ -395,7 +415,7 @@ class LlamaLLMClient:
 
         return result
 
-    def _optimize_prompts_for_llama(self, extraction_prompt: str, markdown: str) -> tuple[str, str]:
+    def _optimize_prompts_for_llama(self, extraction_prompt: str, markdown: str, max_markdown_length: int = 128000) -> tuple[str, str]:
         """Optimize prompts and content for Llama to prevent hallucination."""
 
         # Simplify extraction prompt - remove complex few-shot examples that cause issues
@@ -414,8 +434,7 @@ class LlamaLLMClient:
         else:
             optimized_prompt = extraction_prompt
 
-        # Truncate markdown if too long (Llama context limits)
-        max_markdown_length = 15000  # Conservative limit
+        # Truncate markdown if too long (configurable Llama context limits)
         if len(markdown) > max_markdown_length:
             # Try to truncate at a reasonable boundary
             truncated = markdown[:max_markdown_length]
@@ -430,7 +449,7 @@ class LlamaLLMClient:
             optimized_markdown = markdown
 
         print(f"[LLMService] Optimized prompt length: {len(optimized_prompt)} (was {len(extraction_prompt)})")
-        print(f"[LLMService] Optimized markdown length: {len(optimized_markdown)} (was {len(markdown)})")
+        print(f"[LLMService] Optimized markdown length: {len(optimized_markdown)} (was {len(markdown)}, limit: {max_markdown_length})")
 
         return optimized_prompt, optimized_markdown
 
@@ -448,10 +467,12 @@ class LlamaLLMClient:
     ) -> Dict[str, Any]:
         """Try the primary extraction strategy with optimized prompts."""
 
-        # Simplified system message for Llama (less prone to hallucination)
+        # System message for Llama with explicit reference format instructions
         system_message = """You are a data extraction assistant. Extract information and return valid JSON only.
 
-Response format: {"answer": "extracted info", "references": [{"text": "quote"}]}"""
+IMPORTANT: For references, provide actual text excerpts from the document that support your answer. Each reference should be a direct quote or specific text span from the document content that contains the information you're referencing.
+
+Response format: {"answer": "extracted info", "references": [{"text": "exact text excerpt from document"}]}"""
 
         # Simplified user message
         user_message = f"""Task: {extraction_prompt}
@@ -465,8 +486,8 @@ Return JSON only:"""
             {"role": "user", "content": user_message},
         ]
 
-        # Call with JSON mode and lower max_tokens to prevent runaway generation
-        safe_max_tokens = min(max_tokens, 2048)  # Conservative limit
+        # Call with JSON mode and max_tokens matching other models
+        safe_max_tokens = min(max_tokens, 8048)  # Match Azure/Gemini limits
 
         response = await self._call_llama_api(
             model_name,
@@ -673,8 +694,27 @@ Text: {essential_markdown}"""
         region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
     ) -> Dict[str, Any]:
-        # Default Llama model
+        # Default to available Llama model (only Llama 4 models work in this Vertex AI project)
         used_model_name = model_name or "meta/llama-4-maverick-17b-128e-instruct-maas"
+
+        # Validate that only supported models are used and set correct regions
+        model_region_map = {
+            "meta/llama-4-maverick-17b-128e-instruct-maas": "us-east5",
+            "meta/llama-4-scout-17b-16e-instruct-maas": "us-east5",
+            "meta/llama-3.3-70b-instruct-maas": "us-central1",
+            "meta/llama-3.1-405b-instruct-maas": "us-central1",
+        }
+
+        if used_model_name not in model_region_map:
+            return {
+                "success": False,
+                "error": f"Model '{used_model_name}' is not available in this Vertex AI project. "
+                        f"Available Llama models: {', '.join(model_region_map.keys())}. "
+                        f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1."
+            }
+
+        # Override region for this specific model
+        region_override = model_region_map[used_model_name]
 
         # System message for paragraph generation
         system_message = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
