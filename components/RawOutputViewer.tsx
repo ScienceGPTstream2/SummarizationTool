@@ -4,6 +4,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Code, AlertCircle, Download } from "lucide-react";
 import { Button } from "./ui/button";
+import { getValidToken } from "../utils/authUtils";
 
 interface RawOutputViewerProps {
   conversionId: string | null;
@@ -26,7 +27,7 @@ export function RawOutputViewer({
       }
 
       try {
-        const token = localStorage.getItem("token");
+        const token = await getValidToken();
         const response = await fetch(`/api/documents/${conversionId}/content`, {
           headers: { Authorization: `Bearer ${token}` },
         });

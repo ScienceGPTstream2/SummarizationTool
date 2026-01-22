@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 // import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
 import { Table as TableIcon, ZoomIn, Loader2 } from "lucide-react";
+import { getValidToken } from "../utils/authUtils";
 
 // Component to lazy load and display table HTML
 function TablePreview({
@@ -35,7 +36,7 @@ function TablePreview({
     const fetchTable = async () => {
       try {
         const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-        const token = localStorage.getItem("token");
+        const token = await getValidToken();
         const url = `${apiBase}/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
 
         const response = await fetch(url, {
@@ -156,7 +157,7 @@ function TableDisplay({
     const fetchTable = async () => {
       try {
         const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-        const token = localStorage.getItem("token");
+        const token = await getValidToken();
         const url = `${apiBase}/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
 
         const response = await fetch(url, {

@@ -70,3 +70,5 @@ backend/uploads/
 /backend/.deepeval/.deepeval_telemetry.txt
 /backend/tests/
 /files/
+supabase-docker
+/backend/files/

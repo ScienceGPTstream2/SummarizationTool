@@ -7,15 +7,17 @@ import { EntityExtractionPage } from "./components/EntityExtractionPage";
 import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
+import { SessionHistoryPage } from "./components/SessionHistoryPage";
+
 
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
-import { Briefcase, LogOut } from "lucide-react";
+import { Briefcase, LogOut, Clock } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { supabase, Session } from "./lib/supabase";
 import { signOut, getCurrentUser } from "./utils/authUtils";
-import { Toaster } from "./components/ui/sonner";
+import { Toaster, toast } from "./components/ui/sonner";
 
 export type Step =
   | "login"
@@ -25,8 +27,9 @@ export type Step =
   | "study_selection"
   | "extraction"
   | "evaluation"
-  | "evaluation"
-  | "executive";
+
+  | "executive"
+  | "history";
 
 export interface DocumentData {
   file: File | null;
@@ -127,6 +130,7 @@ export interface DocumentData {
     selectedParser?: string;
     summaryPrompt?: string;
   }>;
+  sessionId?: string;
 }
 
 // User info from Supabase session
@@ -229,8 +233,88 @@ export default function App() {
     setCurrentStep("login");
   }, []);
 
-  const handleStepComplete = (step: Step, data: Partial<DocumentData>) => {
-    setDocumentData((prev) => ({ ...prev, ...data }));
+  const handleStepComplete = async (step: Step, data: Partial<DocumentData>) => {
+    let updatedData = { ...data };
+
+    if (step === "upload" && data.uploadedFiles && data.uploadedFiles.length > 0) {
+      // Create a session immediately after upload
+      try {
+        const token = await import("./utils/authUtils").then(m => m.getValidToken());
+        if (token && userInfo) {
+          const firstFile = data.uploadedFiles[0];
+          const sessionName = `${firstFile.file.name.substring(0, 30)}... Session`;
+
+          const response = await fetch("/api/sessions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              user_id: userInfo.id,
+              name: sessionName,
+              configuration: {
+                // Initialize with defaults, will be updated in later steps
+                study_type: "",
+                selected_models: [],
+                entities: [],
+                temperature: 0.0
+              },
+              documents: data.uploadedFiles.map(f => ({
+                file_hash: f.fileId,
+                filename: f.file.name
+              }))
+            }),
+          });
+
+          if (response.ok) {
+            const sessionData = await response.json();
+            updatedData.sessionId = sessionData.session_id;
+            console.log("✅ Early session created:", sessionData.session_id);
+            toast.success("Session created");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to create early session:", error);
+        // Continue anyway, we can retry later or fallback to lazy creation
+      }
+    } else if (step === "study_selection" && documentData.sessionId) {
+      // Update session with study type and models
+      try {
+        const token = await import("./utils/authUtils").then(m => m.getValidToken());
+        if (token && userInfo) {
+          // We need to merge existing config with new updates
+          // For now, just sending what we know
+          await fetch(`/api/sessions/${documentData.sessionId}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              user_id: userInfo.id,
+              status: "in_progress",
+              configuration: {
+                study_type: data.studyType || documentData.studyType || data.uploadedFiles?.[0]?.studyType || "",
+                selected_models: data.selectedModels || documentData.selectedModels || [],
+                // Preserve existing entities if any, or initialize empty
+                entities: documentData.entities.map(e => ({
+                  name: e.name,
+                  prompt: e.prompt
+                })),
+                temperature: 0.0
+              }
+            }),
+          });
+          console.log("✅ Session updated with study selection");
+        }
+      } catch (error) {
+        console.error("Failed to update session:", error);
+      }
+    }
+
+    setDocumentData((prev) => ({ ...prev, ...updatedData }));
+
     if (step === "upload") {
       setCurrentStep("processing");
     } else if (step === "processing") {
@@ -259,8 +343,108 @@ export default function App() {
       setCurrentStep("extraction");
     } else if (currentStep === "executive") {
       setCurrentStep("upload");
+    } else if (currentStep === "history") {
+      setCurrentStep("upload");
     }
   };
+
+  const handleRestoreSession = async (sessionId: string) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/sessions/${sessionId}?user_id=${userInfo?.id}`);
+      if (!response.ok) throw new Error("Failed to fetch session");
+
+      const sessionData = await response.json();
+
+      // Map session back to DocumentData
+      const restoredData: Partial<DocumentData> = {
+        studyType: sessionData.configuration.study_type || "",
+        sessionId: sessionData.session_id,
+        selectedModel: sessionData.configuration.selected_models[0] || "",
+        selectedModels: sessionData.configuration.selected_models,
+        summaryPrompt: sessionData.configuration.summary_prompt || "",
+
+        // Restore uploaded files with proper processing status
+        uploadedFiles: sessionData.documents.map((doc: any) => ({
+          file: new File([""], doc.filename, { type: "application/pdf" }),
+          fileId: doc.file_hash,
+          // Reconstruct processing result enough for UI to look up file
+          processingResult: {
+            conversionId: doc.file_hash,
+            fileHash: doc.file_hash,
+            markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
+            processorUsed: "azure_doc_intelligence" // Default assumption if not stored
+          },
+          studyType: sessionData.configuration.study_type || "",
+          summaryPrompt: sessionData.configuration.summary_prompt || "",
+          selectedModels: sessionData.configuration.selected_models || [],
+          status: "completed" as const,
+          entities: sessionData.configuration.entities.map((e: any) => {
+            // Find result for this entity
+            const result = sessionData.extraction_results?.find(
+              (r: any) => r.entity_name === e.name
+            );
+
+            return {
+              name: e.name,
+              prompt: e.prompt,
+              systemPrompt: e.system_prompt,
+              extracted: result?.extracted_text || "",
+              references: result?.references || [],
+              extractionsByModel: sessionData.extraction_results
+                ?.filter((r: any) => r.entity_name === e.name)
+                .reduce((acc: any, r: any) => {
+                  acc[r.model_id] = {
+                    extracted: r.extracted_text,
+                    references: r.references || []
+                  };
+                  return acc;
+                }, {})
+            };
+          })
+        })),
+
+        // Legacy compatibility for single file reference
+        fileId: sessionData.documents[0]?.file_hash || "",
+        conversionId: sessionData.documents[0]?.file_hash || "",
+        file: new File([""], sessionData.documents[0]?.filename || "Restored Document", { type: "application/pdf" }),
+        entities: sessionData.configuration.entities.map((e: any) => {
+          const result = sessionData.extraction_results?.find(
+            (r: any) => r.entity_name === e.name
+          );
+          return {
+            name: e.name,
+            prompt: e.prompt,
+            extracted: result?.extracted_text || "",
+            extractionsByModel: sessionData.extraction_results
+              ?.filter((r: any) => r.entity_name === e.name)
+              .reduce((acc: any, r: any) => {
+                acc[r.model_id] = { extracted: r.extracted_text };
+                return acc;
+              }, {})
+          };
+        }),
+      };
+
+      setDocumentData(prev => ({ ...prev, ...restoredData }));
+      toast.success("Session restored successfully");
+
+      // Smart routing: Go to Study Selection if not configured, otherwise Extraction
+      if (restoredData.studyType) {
+        setCurrentStep("extraction");
+      } else {
+        console.log("Session has no study type, redirecting to Study Selection");
+        setCurrentStep("study_selection");
+      }
+    } catch (error) {
+      console.error("Error restoring session:", error);
+      toast.error("Failed to restore session");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
 
   const renderStep = () => {
     switch (currentStep) {
@@ -269,6 +453,14 @@ export default function App() {
           <AuthCallback
             onSuccess={handleAuthSuccess}
             onError={handleAuthError}
+          />
+        );
+      case "history":
+        return (
+          <SessionHistoryPage
+            userId={userInfo?.id || ""}
+            onRestoreSession={handleRestoreSession}
+            onBack={handleBack}
           />
         );
       case "executive":
@@ -366,6 +558,18 @@ export default function App() {
                     Executive Mode
                   </RainbowButton>
                 )}
+
+                {currentStep !== "history" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentStep("history")}
+                  >
+                    <Clock className="h-4 w-4 mr-2" />
+                    History
+                  </Button>
+                )}
+
 
                 <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
                   {userInfo?.avatar && (

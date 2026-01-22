@@ -53,6 +53,7 @@ from api import (
     server,
     paragraphgenerator,
     evaluations,
+    sessions,
 )
 
 
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(evaluations.router)
     app.include_router(server.router)
     app.include_router(paragraphgenerator.router)
+    app.include_router(sessions.router)
 
     return app
 
@@ -89,11 +91,11 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
-    # uvicorn main:app --reload --port 8000 --host 0.0.0.0
+    # uvicorn main:app --reload --port 8001 --host 0.0.0.0
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         reload=True,
         limit_max_request_size=25 * 1024 * 1024,  # 25MB limit
     )

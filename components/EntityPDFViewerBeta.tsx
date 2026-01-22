@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import { getValidToken } from "../utils/authUtils";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Checkbox } from "./ui/checkbox";
@@ -280,7 +281,7 @@ function EntityPDFViewerBetaComponent({
       }
 
       try {
-        const token = localStorage.getItem("token");
+        const token = await getValidToken();
         const response = await fetch(
           `/api/documents/${conversionId}/analysis`,
           {
@@ -368,7 +369,7 @@ function EntityPDFViewerBetaComponent({
           let loadingTaskPromise = pdfLoadingPromiseCache.get(fileId);
 
           if (!loadingTaskPromise) {
-            const token = localStorage.getItem("token");
+            const token = await getValidToken();
             const loadingTask = pdfjsLib.getDocument({
               url: `/api/files/${fileId}`,
               httpHeaders: { Authorization: `Bearer ${token}` },
@@ -1028,13 +1029,12 @@ function EntityPDFViewerBetaComponent({
         )}
 
         <div
-          className={`inline-block min-w-max ${
-            canPan
+          className={`inline-block min-w-max ${canPan
               ? isPanning
                 ? "cursor-grabbing"
                 : "cursor-grab"
               : "cursor-default"
-          }`}
+            }`}
           onMouseDown={handleMouseDown}
         >
           <canvas

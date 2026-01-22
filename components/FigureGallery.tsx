@@ -17,6 +17,7 @@ import {
 // import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
 import { Image as ImageIcon, ZoomIn, FileImage, Loader2 } from "lucide-react";
+import { getValidToken } from "../utils/authUtils";
 
 // Component to lazy load images with authentication
 function FigureImage({
@@ -134,7 +135,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
     const filename = imagePath.split("/").pop();
     const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-    const token = localStorage.getItem("token");
+    const token = await getValidToken();
     if (!token) {
       throw new Error("No authentication token found");
     }
@@ -295,7 +296,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
             <div className="space-y-4">
               {/* Full Size Image */}
               {selectedFigure.image_path &&
-              !imageErrors.has(selectedFigure.id) ? (
+                !imageErrors.has(selectedFigure.id) ? (
                 <div className="bg-muted rounded-lg p-8 flex items-center justify-center min-h-[500px]">
                   <FigureImage
                     imagePath={selectedFigure.image_path}
