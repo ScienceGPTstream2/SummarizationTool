@@ -291,7 +291,8 @@ async def get_available_models():
     # service_account_path is already checked above for Gemini
 
     if llama_project_id and llama_location and llama_region and service_account_path:
-        # Add Llama models
+        # Add all available Llama models with correct region assignments
+        # Llama 4 models work in us-east5, Llama 3.x models work in us-central1
         llama_models = [
             {
                 "id": "meta/llama-4-maverick-17b-128e-instruct-maas",
@@ -299,17 +300,17 @@ async def get_available_models():
                 "provider": "Meta Llama",
                 "description": "Reasoning",
                 "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
+                "location": "us-east5",  # Llama 4 models available in us-east5
+                "region": "us-east5",
             },
             {
-                "id": "meta/llama-4-scout-17b-16e-instruct-mass",
+                "id": "meta/llama-4-scout-17b-16e-instruct-maas",
                 "name": "Llama 4 Scout 17B",
                 "provider": "Meta Llama",
                 "description": "Fast",
                 "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
+                "location": "us-east5",  # Llama 4 models available in us-east5
+                "region": "us-east5",
             },
             {
                 "id": "meta/llama-3.3-70b-instruct-maas",
@@ -317,8 +318,8 @@ async def get_available_models():
                 "provider": "Meta Llama",
                 "description": "Powerful",
                 "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
+                "location": "us-central1",  # Llama 3.x models available in us-central1
+                "region": "us-central1",
             },
             {
                 "id": "meta/llama-3.1-405b-instruct-maas",
@@ -326,29 +327,15 @@ async def get_available_models():
                 "provider": "Meta Llama",
                 "description": "Powerful",
                 "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
+                "location": "us-central1",  # Llama 3.x models available in us-central1
+                "region": "us-central1",
             },
-            {
-                "id": "meta/llama-3.1-70b-instruct-maas",
-                "name": "Llama 3.1 70B",
-                "provider": "Meta Llama",
-                "description": "Free",
-                "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
-            },
-            {
-                "id": "meta/llama-3.1-8b-instruct-maas",
-                "name": "Llama 3.1 8B",
-                "provider": "Meta Llama",
-                "description": "Free",
-                "project_id": llama_project_id,
-                "location": llama_location,
-                "region": llama_region,
-            },
+            # NOTE: Llama 3.1 70B and 8B models were tested but are not available
+            # in either us-central1 or us-east5 regions for this project
+            # - meta/llama-3.1-70b-instruct-maas (not available)
+            # - meta/llama-3.1-8b-instruct-maas (not available)
         ]
         models.extend(llama_models)
-        print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration")
+        print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration (region-specific availability)")
 
     return JSONResponse(status_code=200, content=models)

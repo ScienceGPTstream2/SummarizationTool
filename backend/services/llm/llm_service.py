@@ -111,6 +111,7 @@ class LLMService:
         max_tokens: int = 8048,
         temperature: float = 0.0,
         system_message: Optional[str] = None,  # Custom system prompt
+        max_input_length: int = 128000,  # Max input length for Llama (128K tokens ≈ 96K chars)
     ) -> Dict[str, Any]:
         """
         Extract entities from markdown using the specified LLM.
@@ -175,6 +176,7 @@ class LLMService:
                         model_id,
                         max_tokens,
                         temperature,
+                        max_input_length,
                     )
                 )
             else:
