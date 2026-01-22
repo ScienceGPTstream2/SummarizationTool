@@ -65,7 +65,7 @@ export function ProcessingPage({
   documentData,
 }: ProcessingPageProps) {
   // Initialize files from documentData
-  const [files] = useState<FileStatus[]>(() => {
+  const [files, setFiles] = useState<FileStatus[]>(() => {
     if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
       return documentData.uploadedFiles.map((f) => ({
         ...f,
@@ -293,6 +293,16 @@ export function ProcessingPage({
                         processorUsed={
                           selectedFile.processingResult.processorUsed || ""
                         }
+                        onContentUpdate={() => {
+                          // Refresh the file data to show updated figure summaries
+                          setFiles(prevFiles =>
+                            prevFiles.map(file =>
+                              file.fileId === selectedFileId
+                                ? { ...file, refreshTrigger: Date.now() }
+                                : file
+                            )
+                          );
+                        }}
                       />
                     </div>
                   </div>
