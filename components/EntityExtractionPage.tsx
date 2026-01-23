@@ -445,6 +445,8 @@ export function EntityExtractionPage({
 
   // Parallel Batch Processing
   const startBatchProcessing = async () => {
+    // Ensure session exists
+    await createSession();
     setIsBatchRunning(true);
     const pendingFiles = files.filter((f) => f.studyType && !f.finalSummary);
 
@@ -544,7 +546,9 @@ export function EntityExtractionPage({
             conversionId,
             modelsToUse,
             token,
-            file.processingResult?.processorUsed || documentData.processorUsed
+            file.processingResult?.processorUsed || documentData.processorUsed,
+            undefined, // signal
+            sessionIdRef.current || undefined
           );
 
         // Determine primary result for display/storage
@@ -889,7 +893,8 @@ export function EntityExtractionPage({
     },
     token: string,
     processorUsed?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sessionId?: string
   ) => {
     const resp = await fetch("/api/extract", {
       method: "POST",
@@ -913,6 +918,7 @@ export function EntityExtractionPage({
         max_tokens: 4096,
         temperature: 0.0,
         processor_used: processorUsed,
+        session_id: sessionId,
       }),
       signal,
     });
@@ -954,7 +960,8 @@ export function EntityExtractionPage({
     selectedModelIds: string[],
     token: string,
     processorUsed?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sessionId?: string
   ) => {
     // Run ALL selected models concurrently
     const modelPromises = selectedModelIds.map(async (modelId) => {
@@ -992,7 +999,8 @@ export function EntityExtractionPage({
           modelConfig,
           token,
           processorUsed,
-          signal
+          signal,
+          sessionId
         );
         return { modelId, result };
       } catch (error: any) {
@@ -1056,7 +1064,8 @@ export function EntityExtractionPage({
           token,
           currentFile.processingResult?.processorUsed ||
           documentData.processorUsed,
-          signal
+          signal,
+          sessionIdRef.current || undefined
         );
 
       // Use the currently selected model's result as the main display

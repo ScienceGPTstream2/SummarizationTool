@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
 
-from services.storage.supabase_storage_service import get_supabase_service
+from services.database import get_db_service, SupabaseDBService
 
 
 class OrganizedFileService:
@@ -53,15 +53,15 @@ class OrganizedFileService:
         self.global_path.mkdir(parents=True, exist_ok=True)
         self.users_path.mkdir(parents=True, exist_ok=True)
         
-        # Supabase service for database tracking
-        self._supabase = None
+        # Database servoce
+        self._db = None
 
     @property
-    def supabase(self):
-        """Lazy-load Supabase service."""
-        if self._supabase is None:
-            self._supabase = get_supabase_service()
-        return self._supabase
+    def db(self):
+        """Lazy-load DB service."""
+        if self._db is None:
+            self._db = get_db_service()
+        return self._db
 
     # ==================== File Hash Utilities ====================
 
@@ -130,22 +130,21 @@ class OrganizedFileService:
             async with aiofiles.open(metadata_path, "w") as f:
                 await f.write(json.dumps(metadata, indent=2))
             
-            # Register in Supabase if configured
-            if self.supabase.is_configured:
-                try:
-                    await self.supabase.register_global_file(
-                        file_hash=file_hash,
-                        original_filename=filename,
-                        file_size=len(content),
-                        storage_path=str(file_dir.relative_to(self.base_path)),
-                        mime_type=metadata["mime_type"]
-                    )
-                except Exception as e:
-                    print(f"Warning: Failed to register file in Supabase: {e}")
+
         
-        # Associate with user if provided
+        # Register in database if user provided
         if user_id:
-            await self._associate_file_with_user(file_hash, user_id)
+            try:
+                # Create a document record in PostgreSQL
+                # This replaces the old filesystem-based association
+                self.db.create_document(
+                    user_id=user_id,
+                    file_hash=file_hash,
+                    filename=filename,
+                    session_id=None  # Library file, not associated with a session initially
+                )
+            except Exception as e:
+                print(f"Warning: Failed to register file in database: {e}")
         
         return {
             "file_hash": file_hash,
@@ -157,70 +156,7 @@ class OrganizedFileService:
             "file_size": len(content)
         }
 
-    async def _associate_file_with_user(self, file_hash: str, user_id: str) -> None:
-        """
-        Associate a file with a user.
-        Creates a user-specific document directory with symlinks to global storage
-        for visibility while maintaining deduplication.
-        """
-        global_dir = self.get_global_file_path(file_hash)
-        user_doc_path = self.get_user_document_path(user_id, file_hash)
-        
-        # 1. Create directory structure
-        if not user_doc_path.exists():
-            user_doc_path.mkdir(parents=True, exist_ok=True)
-            (user_doc_path / "prompts").mkdir(exist_ok=True)
-            (user_doc_path / "extractions").mkdir(exist_ok=True)
-            (user_doc_path / "reports").mkdir(exist_ok=True)
-            
-        # 2. Add symlinks to global storage for easier visibility in the filesystem
-        # Use relative symlinks so the structure remains valid if moved
-        try:
-            # Point to original file(s)
-            for global_file in global_dir.glob("original.*"):
-                user_link = user_doc_path / global_file.name
-                if not user_link.exists():
-                    # Calculate relative path from user_doc_path to global_file
-                    rel_path = os.path.relpath(global_file, user_doc_path)
-                    os.symlink(rel_path, user_link)
-            
-            # Point to processed output
-            global_processed = global_dir / "processed"
-            user_processed_link = user_doc_path / "processed"
-            if global_processed.exists() and not user_processed_link.exists():
-                rel_path = os.path.relpath(global_processed, user_doc_path)
-                os.symlink(rel_path, user_processed_link)
-                
-            # Create a simple mapping file for quick identification
-            mapping_file = user_doc_path / "file_info.json"
-            if not mapping_file.exists():
-                global_meta = await self.get_file_metadata(file_hash)
-                info = {
-                    "user_id": user_id,
-                    "file_hash": file_hash,
-                    "original_filename": global_meta.get("original_filename") if global_meta else "unknown",
-                    "associated_at": datetime.now().isoformat()
-                }
-                async with aiofiles.open(mapping_file, "w") as f:
-                    await f.write(json.dumps(info, indent=2))
-                    
-        except Exception as e:
-            print(f"Warning: Failed to create symlinks for user visibility: {e}")
 
-        # 3. Register in Supabase
-        if self.supabase.is_configured:
-            try:
-                # Get global file ID
-                global_file = await self.supabase.get_file_by_hash(file_hash)
-                if global_file:
-                    # Check if user already has this file
-                    if not await self.supabase.user_has_file(user_id, global_file["id"]):
-                        await self.supabase.add_user_file(user_id, global_file["id"])
-                    else:
-                        # Update last accessed
-                        await self.supabase.update_user_file_access(user_id, global_file["id"])
-            except Exception as e:
-                print(f"Warning: Failed to associate file with user in Supabase: {e}")
 
     # ==================== Processing Output Paths ====================
 
@@ -337,17 +273,7 @@ class OrganizedFileService:
         async with aiofiles.open(prompt_file, "w") as f:
             await f.write(json.dumps(prompt_data, indent=2))
         
-        # Also save to Supabase if configured
-        if self.supabase.is_configured:
-            try:
-                await self.supabase.save_user_prompt(
-                    user_id=user_id,
-                    name=prompt_name,
-                    prompt_type=prompt_type,
-                    content=prompt_content
-                )
-            except Exception as e:
-                print(f"Warning: Failed to save prompt to Supabase: {e}")
+
         
         return prompt_file
 
@@ -421,33 +347,47 @@ class OrganizedFileService:
 
     async def list_user_files(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        List all files associated with a user.
+        List all files associated with a user using the database.
         
         Returns list of file info including hash, metadata, and processing status.
         """
-        user_docs_path = self.users_path / user_id / "documents"
-        if not user_docs_path.exists():
+        try:
+            # Fetch documents from PostgreSQL
+            db_docs = self.db.list_user_documents(user_id)
+        except Exception as e:
+            print(f"Error fetching user documents from DB: {e}")
             return []
-        
+            
         files = []
-        for file_hash_dir in user_docs_path.iterdir():
-            if file_hash_dir.is_dir():
-                file_hash = file_hash_dir.name
-                metadata = await self.get_file_metadata(file_hash)
-                if metadata:
-                    # Check processing status
-                    is_processed_azure = await self.is_file_processed(file_hash, "azure_doc_intelligence")
-                    is_processed_docling = await self.is_file_processed(file_hash, "docling")
-                    
-                    files.append({
-                        **metadata,
-                        "file_hash": file_hash,
-                        "processed": {
-                            "azure_doc_intelligence": is_processed_azure,
-                            "docling": is_processed_docling
-                        }
-                    })
+        for doc in db_docs:
+            file_hash = doc["file_hash"]
+            
+            # Fetch global metadata from disk (sanity check)
+            metadata = await self.get_file_metadata(file_hash)
+            
+            # If metadata missing (file deleted from disk?), check if we should show it
+            if not metadata:
+                # Construct basic metadata from DB record
+                metadata = {
+                    "original_filename": doc["filename"],
+                    "created_at": doc["created_at"],
+                    "file_hash": file_hash
+                }
+            
+            # Check processing status
+            is_processed_azure = await self.is_file_processed(file_hash, "azure_doc_intelligence")
+            is_processed_docling = await self.is_file_processed(file_hash, "docling")
+            
+            files.append({
+                **metadata,
+                "file_hash": file_hash,
+                "processed": {
+                    "azure_doc_intelligence": is_processed_azure,
+                    "docling": is_processed_docling
+                }
+            })
         
+        # Sort by creation time
         return sorted(files, key=lambda x: x.get("created_at", ""), reverse=True)
 
     # ==================== Utility Methods ====================

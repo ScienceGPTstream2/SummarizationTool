@@ -1,9 +1,12 @@
-"""Session service for managing user extraction sessions"""
+"""
+Session service for managing user extraction sessions
+
+This service now uses Supabase PostgreSQL for storage instead of JSON files.
+"""
 
 import os
-import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from schemas.sessions import (
@@ -16,214 +19,400 @@ from schemas.sessions import (
     UpdateSessionRequest,
     SessionSummary,
 )
+from services.database import get_db_service, SupabaseDBService
 
 
 class SessionService:
-    """Service for managing user sessions with file-based storage"""
+    """Service for managing user sessions with database storage"""
     
-    def __init__(self, base_path: str = None):
-        if base_path is None:
-            # Default to backend/files/users
-            self.base_path = Path(__file__).parent.parent.parent / "files" / "users"
-        else:
-            self.base_path = Path(base_path)
+    def __init__(self):
+        self.db: SupabaseDBService = get_db_service()
+        # Cache for document lookups to avoid repeated queries
+        self._doc_cache: Dict[str, List[Dict[str, Any]]] = {}
     
-    def _get_user_sessions_dir(self, user_id: str) -> Path:
-        """Get the sessions directory for a user"""
-        return self.base_path / user_id / "sessions"
-    
-    def _get_session_path(self, user_id: str, session_id: str) -> Path:
-        """Get the path to a session's JSON file"""
-        return self._get_user_sessions_dir(user_id) / session_id / "session.json"
-    
-    def _ensure_session_dir(self, user_id: str, session_id: str) -> Path:
-        """Ensure the session directory exists"""
-        session_dir = self._get_user_sessions_dir(user_id) / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
-        return session_dir
+    def _parse_timestamp(self, ts_str: Optional[str]) -> datetime:
+        """Parse timestamp string with variable microsecond precision"""
+        if not ts_str:
+            return datetime.utcnow()
+            
+        try:
+            # Try standard parsing first
+            return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except ValueError:
+            # Manual Fix for variable precision
+            if ts_str.endswith("+00:00"):
+                main_part = ts_str[:-6]
+                timezone = "+00:00"
+            elif ts_str.endswith("Z"):
+                main_part = ts_str[:-1]
+                timezone = "+00:00"
+            else:
+                main_part = ts_str
+                timezone = ""
+            
+            # Pad microseconds to 6 digits if present
+            if "." in main_part:
+                date_part, micro_part = main_part.split(".")
+                if len(micro_part) < 6:
+                    micro_part = micro_part.ljust(6, "0")
+                elif len(micro_part) > 6:
+                    micro_part = micro_part[:6]
+                main_part = f"{date_part}.{micro_part}"
+            
+            try:
+                return datetime.fromisoformat(f"{main_part}{timezone}")
+            except ValueError:
+                # Fallback to UTC now if parsing fails completely
+                print(f"Warning: Failed to parse timestamp {ts_str}, defaulting to utcnow")
+                return datetime.utcnow()
     
     def create_session(self, request: CreateSessionRequest) -> Session:
         """Create a new session for a user"""
-        # Create session with defaults
-        session = Session(
+        # Prepare configuration as dict
+        config_dict = {}
+        if request.configuration:
+            config_dict = request.configuration.model_dump()
+        
+        # Create in database
+        db_session = self.db.create_session(
             user_id=request.user_id,
             name=request.name or "Untitled Session",
-            configuration=request.configuration or SessionConfiguration(),
-            documents=request.documents or [],
+            configuration=config_dict
         )
         
-        # Ensure directory exists
-        self._ensure_session_dir(request.user_id, session.session_id)
+        # Create documents if provided
+        documents = []
+        if request.documents:
+            for doc in request.documents:
+                db_doc = self.db.create_document(
+                    session_id=db_session["id"],
+                    user_id=request.user_id,
+                    file_hash=doc.file_hash,
+                    filename=doc.filename
+                )
+                documents.append(SessionDocument(**{
+                    "file_hash": db_doc["file_hash"],
+                    "filename": db_doc["filename"]
+                }))
         
-        # Save session
-        self._save_session(session)
-        
-        return session
+        # Convert to Session model
+        return Session(
+            session_id=db_session["id"],
+            user_id=request.user_id,
+            name=db_session["name"],
+            status=db_session["status"],
+            created_at=self._parse_timestamp(db_session["created_at"]),
+            updated_at=self._parse_timestamp(db_session["updated_at"]),
+            configuration=SessionConfiguration(**config_dict) if config_dict else SessionConfiguration(),
+            documents=documents,
+            extraction_results=[],
+            evaluation_results=[]
+        )
     
     def get_session(self, user_id: str, session_id: str) -> Optional[Session]:
-        """Get a session by ID"""
-        session_path = self._get_session_path(user_id, session_id)
+        """Get a session by ID with all related data"""
+        db_session = self.db.get_session(session_id, user_id)
         
-        if not session_path.exists():
+        if not db_session:
             return None
         
-        try:
-            with open(session_path, "r") as f:
-                data = json.load(f)
-            return Session(**data)
-        except Exception as e:
-            print(f"Error loading session {session_id}: {e}")
-            return None
+        return self._db_to_session(db_session)
     
     def list_sessions(self, user_id: str) -> List[SessionSummary]:
         """List all sessions for a user"""
-        sessions_dir = self._get_user_sessions_dir(user_id)
-        
-        if not sessions_dir.exists():
-            return []
+        db_sessions = self.db.list_sessions(user_id)
         
         summaries = []
-        for session_dir in sessions_dir.iterdir():
-            if session_dir.is_dir():
-                session_file = session_dir / "session.json"
-                if session_file.exists():
-                    try:
-                        with open(session_file, "r") as f:
-                            data = json.load(f)
-                        
-                        summary = SessionSummary(
-                            session_id=data.get("session_id", session_dir.name),
-                            name=data.get("name", "Untitled"),
-                            status=data.get("status", "draft"),
-                            created_at=datetime.fromisoformat(data.get("created_at", datetime.utcnow().isoformat())),
-                            updated_at=datetime.fromisoformat(data.get("updated_at", datetime.utcnow().isoformat())),
-                            document_count=len(data.get("documents", [])),
-                            extraction_count=len(data.get("extraction_results", [])),
-                            evaluation_count=len(data.get("evaluation_results", [])),
-                        )
-                        summaries.append(summary)
-                    except Exception as e:
-                        print(f"Error loading session {session_dir.name}: {e}")
+        for db_session in db_sessions:
+            summary = SessionSummary(
+                session_id=db_session["id"],
+                name=db_session["name"],
+                status=db_session["status"],
+                created_at=self._parse_timestamp(db_session["created_at"]),
+                updated_at=self._parse_timestamp(db_session["updated_at"]),
+                document_count=db_session.get("document_count", 0),
+                extraction_count=db_session.get("extraction_count", 0),
+                evaluation_count=0  # TODO: Add evaluation count query
+            )
+            summaries.append(summary)
         
-        # Sort by updated_at descending (most recent first)
-        summaries.sort(key=lambda x: x.updated_at, reverse=True)
         return summaries
     
-    def update_session(self, user_id: str, session_id: str, request: UpdateSessionRequest) -> Optional[Session]:
+    def update_session(
+        self,
+        user_id: str,
+        session_id: str,
+        request: UpdateSessionRequest
+    ) -> Optional[Session]:
         """Update an existing session"""
-        session = self.get_session(user_id, session_id)
+        updates = {}
         
-        if session is None:
-            return None
-        
-        # Update fields if provided
         if request.name is not None:
-            session.name = request.name
+            updates["name"] = request.name
         if request.status is not None:
-            session.status = request.status
+            updates["status"] = request.status
         if request.configuration is not None:
-            session.configuration = request.configuration
+            updates["configuration"] = request.configuration.model_dump()
+        
+        if updates:
+            self.db.update_session(session_id, user_id, updates)
+        
+        # Handle document updates
         if request.documents is not None:
-            session.documents = request.documents
+            # Get existing documents
+            existing_docs = self.db.get_documents_by_session(session_id)
+            existing_hashes = {d["file_hash"] for d in existing_docs}
+            
+            # Add new documents
+            for doc in request.documents:
+                if doc.file_hash not in existing_hashes:
+                    self.db.create_document(
+                        session_id=session_id,
+                        user_id=user_id,
+                        file_hash=doc.file_hash,
+                        filename=doc.filename
+                    )
+        
+        # Handle extraction results updates
         if request.extraction_results is not None:
-            session.extraction_results = request.extraction_results
+            # Get document mapping (file_hash -> document_id)
+            docs = self.db.get_documents_by_session(session_id)
+            # For now, use session_id for extractions without specific document
+            for result in request.extraction_results:
+                # Find matching document if possible
+                doc_id = None
+                if docs:
+                    doc_id = docs[0]["id"]  # Default to first document
+                
+                self.db.upsert_extraction_result(
+                    session_id=session_id,
+                    document_id=doc_id,
+                    entity_name=result.entity_name,
+                    model_id=result.model_id,
+                    extracted_text=result.extracted_text,
+                    bbox_references=result.references,
+                    status=result.status,
+                    error_message=result.error_message
+                )
+        
+        # Handle evaluation results updates
         if request.evaluation_results is not None:
-            session.evaluation_results = request.evaluation_results
+            # Get extraction results mapping
+            extractions = self.db.get_extraction_results_by_session(session_id)
+            extraction_map = {
+                (e["entity_name"], e["model_id"]): e["id"]
+                for e in extractions
+            }
+            
+            for eval_result in request.evaluation_results:
+                extraction_id = extraction_map.get(
+                    (eval_result.entity_name, eval_result.model_id)
+                )
+                if extraction_id:
+                    for score in eval_result.scores:
+                        self.db.upsert_evaluation_result(
+                            extraction_result_id=extraction_id,
+                            metric=score.metric,
+                            score=score.score,
+                            reasoning=score.reasoning,
+                            judge_model=score.judge_model,
+                            human_score=eval_result.human_score,
+                            ground_truth=eval_result.ground_truth
+                        )
         
-        # Update timestamp
-        session.updated_at = datetime.utcnow()
-        
-        # Save updated session
-        self._save_session(session)
-        
-        return session
+        # Return updated session
+        return self.get_session(user_id, session_id)
     
     def delete_session(self, user_id: str, session_id: str) -> bool:
-        """Delete a session and its directory"""
-        session_dir = self._get_user_sessions_dir(user_id) / session_id
-        
-        if not session_dir.exists():
-            return False
-        
-        try:
-            # Remove all files in the session directory
-            import shutil
-            shutil.rmtree(session_dir)
-            return True
-        except Exception as e:
-            print(f"Error deleting session {session_id}: {e}")
-            return False
+        """Delete a session (cascades to all related data)"""
+        return self.db.delete_session(session_id, user_id)
     
     def add_extraction_result(
-        self, 
-        user_id: str, 
-        session_id: str, 
-        result: ExtractionResult
+        self,
+        user_id: str,
+        session_id: str,
+        result: ExtractionResult,
+        document_id: Optional[str] = None
     ) -> Optional[Session]:
         """Add or update an extraction result in a session"""
-        session = self.get_session(user_id, session_id)
-        
-        if session is None:
+        # Use fast insert then return session
+        success = self.add_extraction_result_fast(
+            user_id, session_id, result, document_id
+        )
+        if not success:
             return None
+        return self.get_session(user_id, session_id)
+    
+    def add_extraction_result_fast(
+        self,
+        user_id: str,
+        session_id: str,
+        result: ExtractionResult,
+        document_id: Optional[str] = None
+    ) -> bool:
+        """Fast upsert extraction result without returning full session"""
+        # If no document_id provided, try to find one from cache or session
+        if not document_id:
+            # Check cache first
+            if session_id in self._doc_cache:
+                docs = self._doc_cache[session_id]
+            else:
+                docs = self.db.get_documents_by_session(session_id)
+                self._doc_cache[session_id] = docs
+            
+            if docs:
+                document_id = docs[0]["id"]
         
-        # Check if result already exists (update) or is new (add)
-        existing_idx = None
-        for idx, existing in enumerate(session.extraction_results):
-            if existing.entity_name == result.entity_name and existing.model_id == result.model_id:
-                existing_idx = idx
-                break
+        if not document_id:
+            print(f"Warning: No document found for session {session_id}")
+            return False
         
-        if existing_idx is not None:
-            session.extraction_results[existing_idx] = result
-        else:
-            session.extraction_results.append(result)
+        self.db.upsert_extraction_result(
+            session_id=session_id,
+            document_id=document_id,
+            entity_name=result.entity_name,
+            model_id=result.model_id,
+            extracted_text=result.extracted_text,
+            bbox_references=result.references,
+            status=result.status,
+            error_message=result.error_message
+        )
         
-        session.updated_at = datetime.utcnow()
-        self._save_session(session)
-        
-        return session
+        return True
     
     def add_evaluation_result(
-        self, 
-        user_id: str, 
-        session_id: str, 
+        self,
+        user_id: str,
+        session_id: str,
         result: EvaluationResult
     ) -> Optional[Session]:
         """Add or update an evaluation result in a session"""
-        session = self.get_session(user_id, session_id)
-        
-        if session is None:
+        success = self.add_evaluation_result_fast(user_id, session_id, result)
+        if not success:
             return None
+        return self.get_session(user_id, session_id)
+    
+    def add_evaluation_result_fast(
+        self,
+        user_id: str,
+        session_id: str,
+        result: EvaluationResult
+    ) -> bool:
+        """Fast upsert evaluation result without returning full session"""
+        # Find the extraction result
+        extractions = self.db.get_extraction_results_by_session(session_id)
+        extraction_id = None
         
-        # Check if result already exists (update) or is new (add)
-        existing_idx = None
-        for idx, existing in enumerate(session.evaluation_results):
-            if existing.entity_name == result.entity_name and existing.model_id == result.model_id:
-                existing_idx = idx
+        for ext in extractions:
+            if ext["entity_name"] == result.entity_name and ext["model_id"] == result.model_id:
+                extraction_id = ext["id"]
                 break
         
-        if existing_idx is not None:
-            session.evaluation_results[existing_idx] = result
-        else:
-            session.evaluation_results.append(result)
+        if not extraction_id:
+            print(f"Warning: No extraction found for {result.entity_name}/{result.model_id}")
+            return False
         
-        session.updated_at = datetime.utcnow()
-        self._save_session(session)
+        # Add each score as a separate evaluation result
+        for score in result.scores:
+            self.db.upsert_evaluation_result(
+                extraction_result_id=extraction_id,
+                metric=score.metric,
+                score=score.score,
+                reasoning=score.reasoning,
+                judge_model=score.judge_model,
+                human_score=result.human_score,
+                ground_truth=result.ground_truth
+            )
         
-        return session
+        return True
     
-    def _save_session(self, session: Session) -> None:
-        """Save a session to disk"""
-        session_path = self._get_session_path(session.user_id, session.session_id)
+    def clear_cache(self, session_id: Optional[str] = None):
+        """Clear document cache for a session or all sessions"""
+        if session_id:
+            self._doc_cache.pop(session_id, None)
+        else:
+            self._doc_cache.clear()
+    
+    def _db_to_session(self, db_session: Dict[str, Any]) -> Session:
+        """Convert database session to Session model"""
+        # Parse configuration
+        config_data = db_session.get("configuration", {})
+        configuration = SessionConfiguration(**config_data) if config_data else SessionConfiguration()
         
-        # Ensure directory exists
-        session_path.parent.mkdir(parents=True, exist_ok=True)
+        # Parse documents
+        documents = []
+        for doc in db_session.get("documents", []):
+            documents.append(SessionDocument(
+                file_hash=doc["file_hash"],
+                filename=doc["filename"]
+            ))
         
-        # Convert to dict with datetime handling
-        data = session.model_dump(mode="json")
+        # Parse extraction results
+        extraction_results = []
+        for ext in db_session.get("extraction_results", []):
+            extraction_results.append(ExtractionResult(
+                entity_name=ext["entity_name"],
+                model_id=ext["model_id"],
+                extracted_text=ext.get("extracted_text"),
+                references=ext.get("bbox_references"),
+                status=ext.get("status", "pending"),
+                error_message=ext.get("error_message"),
+                extracted_at=self._parse_timestamp(ext["extracted_at"]) if ext.get("extracted_at") else None
+            ))
         
-        with open(session_path, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+        # Parse evaluation results (group by entity_name + model_id)
+        eval_by_extraction = {}
+        for eval_res in db_session.get("evaluation_results", []):
+            # Find the matching extraction
+            for ext in db_session.get("extraction_results", []):
+                if ext["id"] == eval_res["extraction_result_id"]:
+                    key = (ext["entity_name"], ext["model_id"])
+                    if key not in eval_by_extraction:
+                        eval_by_extraction[key] = {
+                            "entity_name": ext["entity_name"],
+                            "model_id": ext["model_id"],
+                            "ground_truth": eval_res.get("ground_truth"),
+                            "human_score": eval_res.get("human_score"),
+                            "evaluated_at": eval_res.get("evaluated_at"),
+                            "scores": []
+                        }
+                    eval_by_extraction[key]["scores"].append({
+                        "metric": eval_res["metric"],
+                        "score": eval_res.get("score"),
+                        "reasoning": eval_res.get("reasoning"),
+                        "judge_model": eval_res.get("judge_model")
+                    })
+                    break
+        
+        evaluation_results = []
+        for data in eval_by_extraction.values():
+            from schemas.sessions import EvaluationScore
+            scores = [EvaluationScore(**s) for s in data["scores"]]
+            evaluation_results.append(EvaluationResult(
+                entity_name=data["entity_name"],
+                model_id=data["model_id"],
+                ground_truth=data.get("ground_truth"),
+                scores=scores,
+                human_score=data.get("human_score"),
+                evaluated_at=self._parse_timestamp(data["evaluated_at"]) if data.get("evaluated_at") else None
+            ))
+        
+        # Parse timestamps
+        created_at = self._parse_timestamp(db_session.get("created_at"))
+        updated_at = self._parse_timestamp(db_session.get("updated_at"))
+        
+        return Session(
+            session_id=db_session["id"],
+            user_id=db_session["user_id"],
+            name=db_session["name"],
+            status=db_session["status"],
+            created_at=created_at,
+            updated_at=updated_at,
+            configuration=configuration,
+            documents=documents,
+            extraction_results=extraction_results,
+            evaluation_results=evaluation_results
+        )
 
 
 # Singleton instance

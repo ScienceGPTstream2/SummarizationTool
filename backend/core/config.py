@@ -151,16 +151,5 @@ def load_config():
                 if supabase_anon_key:
                     os.environ.setdefault("SUPABASE_ANON_KEY", supabase_anon_key)
 
-                # Security configuration (JWT) - legacy, kept for backward compatibility
-                security_cfg = cfg.get("security", {}) or {}
-                jwt_secret = security_cfg.get("jwt_secret")
-                jwt_expiration_hours = security_cfg.get("jwt_expiration_hours")
-                if jwt_secret:
-                    os.environ.setdefault("JWT_SECRET", jwt_secret)
-                if jwt_expiration_hours:
-                    os.environ.setdefault(
-                        "JWT_EXPIRATION_HOURS", str(jwt_expiration_hours)
-                    )
-
     except Exception:
         pass

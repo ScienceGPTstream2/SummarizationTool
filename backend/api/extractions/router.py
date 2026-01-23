@@ -17,13 +17,20 @@ from services.document.processors.docling.bounding_box_matcher import (
 
 router = APIRouter(prefix="/api", tags=["extractions"])
 
+from services.session.session_service import SessionService, get_session_service
+from schemas.sessions import ExtractionResult
+
 # Initialize services
 document_service = DocumentService()
 llm_service = LLMService()
+session_service = get_session_service()
 
 
 @router.post("/extract", dependencies=[Depends(get_current_user)])
-async def extract_entities(request: ExtractRequest):
+async def extract_entities(
+    request: ExtractRequest,
+    user_model = Depends(get_current_user)
+):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
     """
@@ -134,6 +141,50 @@ async def extract_entities(request: ExtractRequest):
         tasks = [run_extraction(entity) for entity in request.entities]
         extracted_entities = await asyncio.gather(*tasks)
 
+        # Persist results if session_id and user_id are available
+        if request.session_id and user_model:
+            try:
+                user_id = str(user_model.id)
+                document_id = None
+                session_docs = session_service.db.get_documents_by_session(request.session_id)
+                for doc in session_docs:
+                    if doc["file_hash"] == request.conversion_id:
+                        document_id = doc["id"]
+                        break
+                
+                # If found, save all successful extractions
+                if document_id:
+                    for entity_res in extracted_entities:
+                        # Skip if error string
+                        if isinstance(entity_res.get("extracted"), str) and entity_res["extracted"].startswith("Error:"):
+                            continue
+                            
+                        # Convert to ExtractionResult schema
+                        result_obj = ExtractionResult(
+                            entity_name=entity_res["name"],
+                            model_id=request.model_id or request.deployment or "unknown-model",
+                            extracted_text=entity_res["extracted"],
+                            references=entity_res.get("references"),
+                            status="completed",
+                            extracted_at=None # will happen in add_extraction_result
+                        )
+                        
+                        # Save to DB
+                        session_service.add_extraction_result(
+                            user_id=user_id,
+                            session_id=request.session_id,
+                            result=result_obj,
+                            document_id=document_id
+                        )
+                        print(f"Persisted extraction for {entity_res['name']} to session {request.session_id}")
+                else:
+                    print(f"Warning: Could not find document with hash {request.conversion_id} in session {request.session_id}")
+
+            except Exception as e:
+                print(f"Error persisting extractions: {e}")
+                # Don't fail the request if persistence fails, just log it
+
+
         return JSONResponse(
             status_code=200,
             content={
@@ -141,6 +192,7 @@ async def extract_entities(request: ExtractRequest):
                 "extracted_entities": extracted_entities,
             },
         )
+
     except HTTPException:
         raise
     except Exception as e:
