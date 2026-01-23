@@ -238,6 +238,42 @@ export async function generateExecutiveSummary(
         text: getEntityValue(documentData, "Results Presented"),
       })
     );
+
+    sections.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Fetal/Offspring Effects Reported by Study Authors: ",
+            bold: true,
+          }),
+          new TextRun({
+            text: getEntityValue(
+              documentData,
+              "Fetal/Offspring Effects Reported by Study Authors"
+            ),
+          }),
+        ],
+        spacing: { before: 200 },
+      })
+    );
+
+    sections.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Maternal Effects Reported by Study Authors: ",
+            bold: true,
+          }),
+          new TextRun({
+            text: getEntityValue(
+              documentData,
+              "Maternal Effects Reported by Study Authors"
+            ),
+          }),
+        ],
+        spacing: { before: 200 },
+      })
+    );
   } else if (
     documentData.studyType === "epidemiology-level-1" ||
     documentData.studyType.includes("epidemiology")
