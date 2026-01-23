@@ -74,11 +74,13 @@ export const level1InVivoNoShotTemplate = {
     },
     {
       name: "Fetal/Offspring Effects Reported by Study Authors",
-      prompt: "Describe the key toxicological effects observed in fetuses or offspring according to the study authors. This includes potential fetal effects on body weight, reproductive parameters, viability, external examination, visceral examination, and skeletal examination. Additionally, include effects reported in offspring such as post-natal changes in body weight, body weight gain, deaths, or developmental parameters."
+      prompt:
+        "Describe the key toxicological effects observed in fetuses or offspring according to the study authors. This includes potential fetal effects on body weight, reproductive parameters, viability, external examination, visceral examination, and skeletal examination. Additionally, include effects reported in offspring such as post-natal changes in body weight, body weight gain, deaths, or developmental parameters.",
     },
     {
       name: "Maternal Effects Reported by Study Authors",
-      prompt: "Describe the key toxicological effects observed in maternal animals according to the study authors. This includes effects on clinical signs, body weight, body weight gain, food consumption, organ weights, gross pathology, and mortality. Include only effects explicitly attributed to treatment by the study authors."
-    }
+      prompt:
+        "Describe the key toxicological effects observed in maternal animals according to the study authors. This includes effects on clinical signs, body weight, body weight gain, food consumption, organ weights, gross pathology, and mortality. Include only effects explicitly attributed to treatment by the study authors.",
+    },
   ],
 };
