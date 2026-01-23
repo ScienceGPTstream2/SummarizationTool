@@ -3,6 +3,7 @@
 Test script for Azure Document Intelligence
 Tests the Azure Document Intelligence service with a local PDF file
 """
+
 import asyncio
 import sys
 from pathlib import Path
