@@ -422,13 +422,17 @@ class GeminiLLMClient:
         contents = [
             {
                 "role": "user",
-                "parts": [{"text": f"""<markdown study>
+                "parts": [
+                    {
+                        "text": f"""<markdown study>
 {markdown}
 </markdown study>
 
 Prompt:
 {extraction_prompt}
-"""}],
+"""
+                    }
+                ],
             }
         ]
 

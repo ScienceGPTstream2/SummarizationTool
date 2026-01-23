@@ -5,6 +5,7 @@ from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
 import toml
 
+
 # The load_secrets_to_env function is moved to backend/main.py to ensure early loading.
 # def load_secrets_to_env(secrets_path: str = "Summarization_tool/backend/core/secrets.toml"):
 #     """Loads secrets from a TOML file into environment variables."""
