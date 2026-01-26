@@ -1029,12 +1029,13 @@ function EntityPDFViewerBetaComponent({
         )}
 
         <div
-          className={`inline-block min-w-max ${canPan
+          className={`inline-block min-w-max ${
+            canPan
               ? isPanning
                 ? "cursor-grabbing"
                 : "cursor-grab"
               : "cursor-default"
-            }`}
+          }`}
           onMouseDown={handleMouseDown}
         >
           <canvas

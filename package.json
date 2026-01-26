@@ -8,8 +8,8 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format": "prettier --write \"{components,contexts,lib,styles,templates,types,utils}/**/*.{ts,tsx,css,json,md}\" \"*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"{components,contexts,lib,styles,templates,types,utils}/**/*.{ts,tsx,css,json,md}\" \"*.{ts,tsx,json,md}\""
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.1.2",

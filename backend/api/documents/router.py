@@ -49,64 +49,73 @@ async def process_uploaded_file(
 ):
     """
     Process an uploaded file to markdown using specified or auto-selected processor.
-    
+
     If the file has already been processed with the same processor, returns cached results.
-    
+
     Args:
         file_id: Can be either file_hash (new) or legacy file_id
     """
     try:
         # file_id is now the file_hash in the new system
         file_hash = file_id
-        
+
         # Get file path from organized file service
         file_path = await file_service.get_original_file_path(file_hash)
         if not file_path:
             raise HTTPException(status_code=404, detail="File not found")
 
         # Get processor name
-        processor_name = request.processor if hasattr(request, 'processor') else "azure_doc_intelligence"
-        
+        processor_name = (
+            request.processor
+            if hasattr(request, "processor")
+            else "azure_doc_intelligence"
+        )
+
         # Check if already processed with this processor (CACHE CHECK)
         is_processed = await file_service.is_file_processed(file_hash, processor_name)
         output_dir = file_service.get_processing_output_path(file_hash, processor_name)
-        
+
         if is_processed:
             # Return cached results
-            print(f"[PROCESS] ✅ Using cached results for {file_hash} ({processor_name})")
-            
+            print(
+                f"[PROCESS] ✅ Using cached results for {file_hash} ({processor_name})"
+            )
+
             # Read cached metadata and content
             import json
             import aiofiles
-            
+
             metadata_path = output_dir / "metadata.json"
             markdown_path = output_dir / "document.md"
-            
+
             cached_metadata = {}
             markdown_content_length = 0
-            
+
             if metadata_path.exists():
-                async with aiofiles.open(metadata_path, 'r') as f:
+                async with aiofiles.open(metadata_path, "r") as f:
                     cached_metadata = json.loads(await f.read())
-            
+
             if markdown_path.exists():
-                async with aiofiles.open(markdown_path, 'r') as f:
+                async with aiofiles.open(markdown_path, "r") as f:
                     markdown_content_length = len(await f.read())
-            
-            return JSONResponse(status_code=200, content={
-                "message": "Document already processed (cached)",
-                "conversion_id": cached_metadata.get("conversion_id", file_hash),
-                "file_hash": file_hash,
-                "markdown_path": str(markdown_path),
-                "content_length": markdown_content_length,
-                "conversion_time": cached_metadata.get("conversion_time", "cached"),
-                "processor_used": processor_name,
-                "cached": True,
-                "figures_found": cached_metadata.get("figures_found", 0),
-                "figures": cached_metadata.get("figures", []),
-                "tables_found": cached_metadata.get("tables_found", 0),
-            })
-        
+
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "message": "Document already processed (cached)",
+                    "conversion_id": cached_metadata.get("conversion_id", file_hash),
+                    "file_hash": file_hash,
+                    "markdown_path": str(markdown_path),
+                    "content_length": markdown_content_length,
+                    "conversion_time": cached_metadata.get("conversion_time", "cached"),
+                    "processor_used": processor_name,
+                    "cached": True,
+                    "figures_found": cached_metadata.get("figures_found", 0),
+                    "figures": cached_metadata.get("figures", []),
+                    "tables_found": cached_metadata.get("tables_found", 0),
+                },
+            )
+
         # Not cached, process the file
         print(f"[PROCESS] Processing {file_hash} -> {output_dir}")
 
@@ -169,28 +178,33 @@ async def get_document_content(document_id: str, processor_used: str = None):
     """
     try:
         import aiofiles
-        
+
         # Check organized file structure
-        processors_to_check = [processor_used] if processor_used else ["azure_doc_intelligence", "docling"]
-        
+        processors_to_check = (
+            [processor_used]
+            if processor_used
+            else ["azure_doc_intelligence", "docling"]
+        )
+
         for proc in processors_to_check:
             if proc is None:
                 continue
             output_dir = file_service.get_processing_output_path(document_id, proc)
             markdown_path = output_dir / "document.md"
-            
+
             if markdown_path.exists():
-                async with aiofiles.open(markdown_path, 'r', encoding='utf-8') as f:
+                async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
                     markdown_content = await f.read()
-                
+
                 return JSONResponse(
                     status_code=200,
-                    content={"document_id": document_id, "markdown_content": markdown_content},
+                    content={
+                        "document_id": document_id,
+                        "markdown_content": markdown_content,
+                    },
                 )
-        
-        raise HTTPException(
-            status_code=404, detail="Document processing not found"
-        )
+
+        raise HTTPException(status_code=404, detail="Document processing not found")
 
     except HTTPException:
         raise
@@ -272,17 +286,17 @@ async def get_document_analysis(document_id: str):
     try:
         import json
         import aiofiles
-        
+
         # Check organized file structure
         processors_to_check = ["azure_doc_intelligence", "docling"]
         analysis_result = None
-        
+
         for proc in processors_to_check:
             output_dir = file_service.get_processing_output_path(document_id, proc)
             raw_analysis_path = output_dir / "raw_analysis.json"
-            
+
             if raw_analysis_path.exists():
-                async with aiofiles.open(raw_analysis_path, 'r', encoding='utf-8') as f:
+                async with aiofiles.open(raw_analysis_path, "r", encoding="utf-8") as f:
                     analysis_result = json.loads(await f.read())
                 break
 
@@ -338,8 +352,14 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
         # Organized file structure only (file_hash based)
         possible_paths = [
-            file_service.get_processing_output_path(document_id, "azure_doc_intelligence") / "figures" / figure_filename,
-            file_service.get_processing_output_path(document_id, "docling") / "figures" / figure_filename,
+            file_service.get_processing_output_path(
+                document_id, "azure_doc_intelligence"
+            )
+            / "figures"
+            / figure_filename,
+            file_service.get_processing_output_path(document_id, "docling")
+            / "figures"
+            / figure_filename,
         ]
 
         print(f"[FIGURE] Attempting to serve figure: {document_id}/{figure_filename}")
@@ -399,8 +419,14 @@ async def get_table_html(document_id: str, table_filename: str):
         # Try organized file structure first (new), then output directories
         # Organized file structure only (file_hash based)
         possible_paths = [
-            file_service.get_processing_output_path(document_id, "azure_doc_intelligence") / "tables" / table_filename,
-            file_service.get_processing_output_path(document_id, "docling") / "tables" / table_filename,
+            file_service.get_processing_output_path(
+                document_id, "azure_doc_intelligence"
+            )
+            / "tables"
+            / table_filename,
+            file_service.get_processing_output_path(document_id, "docling")
+            / "tables"
+            / table_filename,
         ]
 
         print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")

@@ -1,0 +1,21 @@
+# Supabase Docker - Git Ignore
+
+# Docker volumes - contains runtime data (database, storage, logs)
+# These are generated when running docker-compose up
+volumes/
+
+# Environment file (contains secrets)
+# Keep a .env.example but not the actual .env
+# .env
+
+# Docker overrides (local development customizations)
+docker-compose.override.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~

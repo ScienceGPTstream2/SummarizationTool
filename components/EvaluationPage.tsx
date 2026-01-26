@@ -357,7 +357,7 @@ export function EvaluationPage({
     Record<string, string[]>
   >(
     documentData.evaluationConfig?.customEvaluationSteps ||
-    DEFAULT_EVALUATION_STEPS
+      DEFAULT_EVALUATION_STEPS
   );
 
   // Dialog state for viewing/editing evaluation prompts
@@ -388,7 +388,7 @@ export function EvaluationPage({
     isOpen: false,
     title: "",
     description: "",
-    action: () => { },
+    action: () => {},
   });
 
   // Validation dialog state
@@ -493,11 +493,11 @@ export function EvaluationPage({
     const currentConfig = documentData.evaluationConfig;
     const hasChanged =
       JSON.stringify(currentConfig?.selectedMetrics) !==
-      JSON.stringify(selectedMetrics) ||
+        JSON.stringify(selectedMetrics) ||
       JSON.stringify(currentConfig?.selectedProviders) !==
-      JSON.stringify(selectedProviders) ||
+        JSON.stringify(selectedProviders) ||
       JSON.stringify(currentConfig?.customEvaluationSteps) !==
-      JSON.stringify(customEvaluationSteps);
+        JSON.stringify(customEvaluationSteps);
 
     if (hasChanged) {
       setDocumentData({
@@ -547,8 +547,8 @@ export function EvaluationPage({
       // Also update legacy fields for backward compatibility if single file
       ...(files.length === 1
         ? {
-          entities: files[0].entities,
-        }
+            entities: files[0].entities,
+          }
         : {}),
     }));
   }, [files]);
@@ -584,6 +584,152 @@ export function EvaluationPage({
       [entityName]: value,
     }));
   };
+
+  // Helper to save evaluation result to PostgreSQL
+  const saveEvaluationResult = async (
+    entityName: string,
+    modelId: string,
+    groundTruth: string | undefined,
+    evaluationResults: Array<{
+      provider: string;
+      model: string;
+      metrics: Array<{
+        metric_name: string;
+        score: number;
+        threshold: number;
+        success: boolean;
+        reason: string;
+      }>;
+      aggregate_score: number;
+      all_passed: boolean;
+      evaluation_time: number;
+    }>,
+    humanScore?: number
+  ) => {
+    const sessionId = documentData.sessionId;
+    if (!sessionId) {
+      console.log("[Eval Persist] No session ID, skipping save");
+      return;
+    }
+
+    try {
+      const token = await getValidToken();
+      if (!token) return;
+
+      const { getCurrentUser } = await import("../utils/authUtils");
+      const user = await getCurrentUser();
+      if (!user) return;
+
+      // Transform evaluation results to backend schema format
+      const scores = evaluationResults.flatMap((result) =>
+        result.metrics.map((metric) => ({
+          metric: metric.metric_name,
+          score: metric.score,
+          reasoning: metric.reason,
+          judge_model: result.model,
+        }))
+      );
+
+      const response = await fetch(
+        `/api/sessions/${sessionId}/evaluations?user_id=${user.id}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            entity_name: entityName,
+            model_id: modelId,
+            ground_truth: groundTruth,
+            scores: scores,
+            human_score: humanScore,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        console.log(
+          `[Eval Persist] Saved evaluation for ${entityName}/${modelId}`
+        );
+      } else {
+        console.error(
+          `[Eval Persist] Failed to save evaluation: ${response.status}`
+        );
+      }
+    } catch (error) {
+      console.error("[Eval Persist] Error saving evaluation:", error);
+    }
+  };
+
+  // Debounced auto-save for ground truth changes
+  const groundTruthSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const saveGroundTruthToSession = async (
+    entityName: string,
+    groundTruth: string
+  ) => {
+    const sessionId = documentData.sessionId;
+    if (!sessionId || !groundTruth.trim()) return;
+
+    try {
+      const token = await getValidToken();
+      if (!token) return;
+
+      const { getCurrentUser } = await import("../utils/authUtils");
+      const user = await getCurrentUser();
+      if (!user) return;
+
+      // Find the model ID for this entity (use first available)
+      const entity = currentFile?.entities?.find(
+        (e: any) => e.name === entityName
+      );
+      const modelId = entity?.extractionsByModel
+        ? Object.keys(entity.extractionsByModel)[0]
+        : currentFile?.selectedModel || "unknown";
+
+      await fetch(`/api/sessions/${sessionId}/evaluations?user_id=${user.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entity_name: entityName,
+          model_id: modelId,
+          ground_truth: groundTruth,
+          scores: [], // Just saving ground truth, no scores yet
+        }),
+      });
+      console.log(`[Eval Persist] Saved ground truth for ${entityName}`);
+    } catch (error) {
+      console.error("[Eval Persist] Error saving ground truth:", error);
+    }
+  };
+
+  // Auto-save ground truth with debounce
+  useEffect(() => {
+    if (groundTruthSaveTimeoutRef.current) {
+      clearTimeout(groundTruthSaveTimeoutRef.current);
+    }
+
+    groundTruthSaveTimeoutRef.current = setTimeout(() => {
+      // Save all non-empty ground truths
+      Object.entries(entityGroundTruths).forEach(
+        ([entityName, groundTruth]) => {
+          if (groundTruth.trim()) {
+            saveGroundTruthToSession(entityName, groundTruth);
+          }
+        }
+      );
+    }, 2000); // 2 second debounce
+
+    return () => {
+      if (groundTruthSaveTimeoutRef.current) {
+        clearTimeout(groundTruthSaveTimeoutRef.current);
+      }
+    };
+  }, [entityGroundTruths, documentData.sessionId]);
 
   const toggleMetric = (metricId: string) => {
     setSelectedMetrics((prev) =>
@@ -667,7 +813,7 @@ export function EvaluationPage({
       ...prev,
       [metricId]:
         DEFAULT_EVALUATION_STEPS[
-        metricId as keyof typeof DEFAULT_EVALUATION_STEPS
+          metricId as keyof typeof DEFAULT_EVALUATION_STEPS
         ] || [],
     }));
   };
@@ -781,16 +927,18 @@ export function EvaluationPage({
               );
 
               // Add the new result
+              const newResult = {
+                provider: result.provider,
+                model: result.model,
+                metrics: result.metrics,
+                aggregate_score: result.aggregate_score,
+                all_passed: result.all_passed,
+                evaluation_time: result.evaluation_time,
+              };
+
               newEntities[targetIndex].evaluationResults = [
                 ...filteredResults,
-                {
-                  provider: result.provider,
-                  model: result.model,
-                  metrics: result.metrics,
-                  aggregate_score: result.aggregate_score,
-                  all_passed: result.all_passed,
-                  evaluation_time: result.evaluation_time,
-                },
+                newResult,
               ];
 
               // Update ground truth if provided
@@ -798,6 +946,20 @@ export function EvaluationPage({
                 newEntities[targetIndex].groundTruth =
                   entityGroundTruths[entity.name];
               }
+
+              // Persist to PostgreSQL
+              // Use the source model from the entity's extraction
+              const sourceModelId =
+                currentFile?.selectedModel ||
+                (entity.extractionsByModel
+                  ? Object.keys(entity.extractionsByModel)[0]
+                  : "unknown");
+              saveEvaluationResult(
+                entity.name,
+                sourceModelId,
+                entityGroundTruths[entity.name],
+                [newResult]
+              );
             }
 
             return {
@@ -1380,6 +1542,15 @@ export function EvaluationPage({
                 };
               })
             );
+
+            // Persist to PostgreSQL
+            saveEvaluationResult(
+              task.entityName,
+              task.sourceModel,
+              task.groundTruth,
+              [result]
+            );
+
             completedCount++;
             // Update progress immediately after each task completes
             setEvaluationProgress(
@@ -2305,12 +2476,13 @@ export function EvaluationPage({
                             <Card
                               key={index}
                               id={`entity-card-${entity.name}`}
-                              className={`border-2 transition-all duration-300 ${isEvaluating
-                                ? "border-blue-400 shadow-lg"
-                                : isCompleted
-                                  ? "border-green-400"
-                                  : ""
-                                }`}
+                              className={`border-2 transition-all duration-300 ${
+                                isEvaluating
+                                  ? "border-blue-400 shadow-lg"
+                                  : isCompleted
+                                    ? "border-green-400"
+                                    : ""
+                              }`}
                             >
                               <CardHeader className="pb-3">
                                 <CardTitle className="text-lg flex items-center gap-2">
@@ -2380,7 +2552,7 @@ export function EvaluationPage({
                                           singleModeSourceModel &&
                                           entity.extractionsByModel &&
                                           !entity.extractionsByModel[
-                                          singleModeSourceModel
+                                            singleModeSourceModel
                                           ]
                                         ) {
                                           return (
@@ -2425,10 +2597,10 @@ export function EvaluationPage({
                                         m === "correctness" ||
                                         m === "completeness"
                                     ) && (
-                                        <span className="ml-2 text-xs text-orange-600 font-normal">
-                                          (required for Correctness/Completeness)
-                                        </span>
-                                      )}
+                                      <span className="ml-2 text-xs text-orange-600 font-normal">
+                                        (required for Correctness/Completeness)
+                                      </span>
+                                    )}
                                   </Label>
                                   <Textarea
                                     id={`ground-truth-${index}`}
@@ -2463,26 +2635,26 @@ export function EvaluationPage({
                                             {resolvedEvaluationResults.length}{" "}
                                             model
                                             {resolvedEvaluationResults.length >
-                                              1
+                                            1
                                               ? "s"
                                               : ""}
                                             )
                                             {resolvedEvaluationResults.length >
                                               1 && (
-                                                <span className="ml-2 text-sm font-semibold text-primary">
-                                                  Avg:{" "}
-                                                  {(
-                                                    (resolvedEvaluationResults.reduce(
-                                                      (sum: number, r: any) =>
-                                                        sum + r.aggregate_score,
-                                                      0
-                                                    ) /
-                                                      resolvedEvaluationResults.length) *
-                                                    100
-                                                  ).toFixed(1)}
-                                                  %
-                                                </span>
-                                              )}
+                                              <span className="ml-2 text-sm font-semibold text-primary">
+                                                Avg:{" "}
+                                                {(
+                                                  (resolvedEvaluationResults.reduce(
+                                                    (sum: number, r: any) =>
+                                                      sum + r.aggregate_score,
+                                                    0
+                                                  ) /
+                                                    resolvedEvaluationResults.length) *
+                                                  100
+                                                ).toFixed(1)}
+                                                %
+                                              </span>
+                                            )}
                                             {isCompleted && !isEvaluating && (
                                               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -2504,7 +2676,7 @@ export function EvaluationPage({
                                             </DialogTitle>
                                             <DialogDescription>
                                               {resolvedEvaluationResults.length >
-                                                1 ? (
+                                              1 ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                   <span>
                                                     Compare how different LLM
@@ -2602,7 +2774,7 @@ export function EvaluationPage({
                                                         <p className="text-sm text-blue-800 leading-relaxed">
                                                           {
                                                             metricDefinitions[
-                                                            metricName
+                                                              metricName
                                                             ]
                                                           }
                                                         </p>
@@ -2643,7 +2815,7 @@ export function EvaluationPage({
                                                                         "Entity Extraction ",
                                                                         ""
                                                                       ) ===
-                                                                      metricName ||
+                                                                        metricName ||
                                                                       m.metric_name
                                                                         .toLowerCase()
                                                                         .includes(
@@ -2684,36 +2856,39 @@ export function EvaluationPage({
 
                                                         return (
                                                           <div
-                                                            className={`border rounded-lg p-4 ${avgPercentage >=
+                                                            className={`border rounded-lg p-4 ${
+                                                              avgPercentage >=
                                                               70
-                                                              ? "bg-green-50 border-green-200"
-                                                              : avgPercentage >=
-                                                                50
-                                                                ? "bg-yellow-50 border-yellow-200"
-                                                                : "bg-red-50 border-red-200"
-                                                              }`}
+                                                                ? "bg-green-50 border-green-200"
+                                                                : avgPercentage >=
+                                                                    50
+                                                                  ? "bg-yellow-50 border-yellow-200"
+                                                                  : "bg-red-50 border-red-200"
+                                                            }`}
                                                           >
                                                             <div className="flex items-center justify-between">
                                                               <div className="flex items-center gap-2">
                                                                 <BarChart3
-                                                                  className={`h-5 w-5 ${avgPercentage >=
+                                                                  className={`h-5 w-5 ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-600"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-600"
-                                                                      : "text-red-600"
-                                                                    }`}
+                                                                      ? "text-green-600"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-600"
+                                                                        : "text-red-600"
+                                                                  }`}
                                                                 />
                                                                 <span
-                                                                  className={`font-semibold ${avgPercentage >=
+                                                                  className={`font-semibold ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-900"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-900"
-                                                                      : "text-red-900"
-                                                                    }`}
+                                                                      ? "text-green-900"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-900"
+                                                                        : "text-red-900"
+                                                                  }`}
                                                                 >
                                                                   Average{" "}
                                                                   {metricName}{" "}
@@ -2722,14 +2897,15 @@ export function EvaluationPage({
                                                                 </span>
                                                               </div>
                                                               <span
-                                                                className={`text-2xl font-bold ${avgPercentage >=
+                                                                className={`text-2xl font-bold ${
+                                                                  avgPercentage >=
                                                                   70
-                                                                  ? "text-green-700"
-                                                                  : avgPercentage >=
-                                                                    50
-                                                                    ? "text-yellow-700"
-                                                                    : "text-red-700"
-                                                                  }`}
+                                                                    ? "text-green-700"
+                                                                    : avgPercentage >=
+                                                                        50
+                                                                      ? "text-yellow-700"
+                                                                      : "text-red-700"
+                                                                }`}
                                                               >
                                                                 {avgPercentage.toFixed(
                                                                   1
@@ -2738,14 +2914,15 @@ export function EvaluationPage({
                                                               </span>
                                                             </div>
                                                             <p
-                                                              className={`text-xs mt-2 ${avgPercentage >=
+                                                              className={`text-xs mt-2 ${
+                                                                avgPercentage >=
                                                                 70
-                                                                ? "text-green-700"
-                                                                : avgPercentage >=
-                                                                  50
-                                                                  ? "text-yellow-700"
-                                                                  : "text-red-700"
-                                                                }`}
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                      50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                              }`}
                                                             >
                                                               Based on
                                                               evaluations from{" "}
@@ -2754,7 +2931,7 @@ export function EvaluationPage({
                                                               }{" "}
                                                               model
                                                               {metricScores.length >
-                                                                1
+                                                              1
                                                                 ? "s"
                                                                 : ""}
                                                             </p>

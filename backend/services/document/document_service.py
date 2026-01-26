@@ -84,7 +84,6 @@ class DocumentService:
 
         return result
 
-
     def _auto_select_processor(self, source: str, source_type: str) -> ProcessorType:
         """
         Automatically select the best processor for the document
@@ -160,13 +159,13 @@ class DocumentService:
         org_service = get_organized_file_service()
         # get_file_metadata will check the global file path which includes metadata.json
         # However, for conversion specific metadata we might need to check processed output
-        
+
         # This part requires deeper integration with OrganizedFileService if we want full parity,
         # but for now, assuming conversion_id is file_hash:
         metadata = await org_service.get_file_metadata(conversion_id)
         if metadata:
-             return metadata
-             
+            return metadata
+
         return None
 
     async def get_markdown_content(
@@ -183,20 +182,25 @@ class DocumentService:
         # Try OrganizedFileService first (New Structure)
         # Note: conversion_id is treated as file_hash in the new structure
         org_service = get_organized_file_service()
-        
+
         if processor_used:
             # Try specific processor
-            content = await org_service.get_processed_content(conversion_id, processor_used)
+            content = await org_service.get_processed_content(
+                conversion_id, processor_used
+            )
             if content:
                 return content
         else:
             # Try Azure then Docling
-            content = await org_service.get_processed_content(conversion_id, ProcessorType.AZURE_DOC_INTELLIGENCE)
+            content = await org_service.get_processed_content(
+                conversion_id, ProcessorType.AZURE_DOC_INTELLIGENCE
+            )
             if content:
                 return content
-                
-                
-            content = await org_service.get_processed_content(conversion_id, ProcessorType.DOCLING)
+
+            content = await org_service.get_processed_content(
+                conversion_id, ProcessorType.DOCLING
+            )
             if content:
                 return content
 
@@ -218,14 +222,18 @@ class DocumentService:
         """
         # Try OrganizedFileService first
         org_service = get_organized_file_service()
-        
+
         # Helper to check organized storage for figures
         async def check_organized_figures(processor):
             try:
-                path = org_service.get_processing_output_path(conversion_id, processor) / "metadata.json"
+                path = (
+                    org_service.get_processing_output_path(conversion_id, processor)
+                    / "metadata.json"
+                )
                 if path.exists():
                     import json
                     import aiofiles
+
                     async with aiofiles.open(path, "r") as f:
                         data = json.loads(await f.read())
                         if "figures" in data:
@@ -238,7 +246,7 @@ class DocumentService:
         figures = await check_organized_figures(ProcessorType.AZURE_DOC_INTELLIGENCE)
         if figures is not None:
             return figures
-            
+
         figures = await check_organized_figures(ProcessorType.DOCLING)
         if figures is not None:
             return figures
@@ -276,15 +284,19 @@ class DocumentService:
         """
         # Try OrganizedFileService first
         org_service = get_organized_file_service()
-        
+
         # Helper to check organized storage for raw analysis
         async def check_organized_analysis(processor):
             try:
                 # Azure stores as raw_analysis.json, Docling might differ but let's assume raw_analysis.json standard
-                path = org_service.get_processing_output_path(conversion_id, processor) / "raw_analysis.json"
+                path = (
+                    org_service.get_processing_output_path(conversion_id, processor)
+                    / "raw_analysis.json"
+                )
                 if path.exists():
                     import json
                     import aiofiles
+
                     async with aiofiles.open(path, "r", encoding="utf-8") as f:
                         return json.loads(await f.read())
             except Exception:
@@ -295,7 +307,7 @@ class DocumentService:
         result = await check_organized_analysis(ProcessorType.AZURE_DOC_INTELLIGENCE)
         if result:
             return result
-            
+
         result = await check_organized_analysis(ProcessorType.DOCLING)
         if result:
             return result

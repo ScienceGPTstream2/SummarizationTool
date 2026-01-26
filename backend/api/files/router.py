@@ -40,7 +40,7 @@ def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
     """Extract user ID from Authorization header."""
     if not authorization:
         return None
-    
+
     try:
         token = authorization.replace("Bearer ", "")
         if auth_service.is_configured:
@@ -54,16 +54,16 @@ def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
 ):
     """
     Upload and store a PDF file with deduplication.
-    
+
     If the same file (by hash) was uploaded before, returns existing file info.
     Associates the file with the authenticated user if a valid token is provided.
     """
     print(f"[UPLOAD] Request headers: {request.headers}")
-    
+
     # Check content-length header
     if "content-length" in request.headers:
         content_length = int(request.headers["content-length"])
@@ -76,7 +76,9 @@ async def upload_file(
             )
 
     try:
-        print(f"[UPLOAD] Received file: {file.filename}, content_type: {file.content_type}")
+        print(
+            f"[UPLOAD] Received file: {file.filename}, content_type: {file.content_type}"
+        )
 
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
@@ -109,9 +111,7 @@ async def upload_file(
 
         # Save with deduplication
         result = await file_service.save_uploaded_file(
-            filename=file.filename,
-            content=content,
-            user_id=user_id
+            filename=file.filename, content=content, user_id=user_id
         )
 
         # Check processing status
@@ -121,10 +121,12 @@ async def upload_file(
             ),
             "docling": await file_service.is_file_processed(
                 result["file_hash"], "docling"
-            )
+            ),
         }
 
-        print(f"[UPLOAD] ✅ PDF saved: {result['file_hash']} (deduplicated: {result['deduplicated']})")
+        print(
+            f"[UPLOAD] ✅ PDF saved: {result['file_hash']} (deduplicated: {result['deduplicated']})"
+        )
 
         return JSONResponse(
             status_code=200,
@@ -136,7 +138,7 @@ async def upload_file(
                 "file_size": result["file_size"],
                 "is_new": result["is_new"],
                 "deduplicated": result["deduplicated"],
-                "processed": processed
+                "processed": processed,
             },
         )
 
@@ -152,10 +154,10 @@ async def list_user_files(authorization: Optional[str] = Header(None)):
     user_id = get_user_id_from_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     try:
         files = await file_service.list_user_files(user_id)
-        
+
         return JSONResponse(
             status_code=200,
             content={
@@ -167,11 +169,11 @@ async def list_user_files(authorization: Optional[str] = Header(None)):
                         "file_size": f.get("file_size", 0),
                         "mime_type": f.get("mime_type", "application/pdf"),
                         "created_at": f.get("created_at", ""),
-                        "processed": f.get("processed", {})
+                        "processed": f.get("processed", {}),
                     }
                     for f in files
                 ]
-            }
+            },
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -186,21 +188,29 @@ async def download_file(file_id: str, authorization: Optional[str] = Header(None
     try:
         # Treat file_id as file_hash in new system
         file_hash = file_id
-        
+
         content = await file_service.get_file_content(file_hash)
         if not content:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         metadata = await file_service.get_file_metadata(file_hash)
-        mime_type = metadata.get("mime_type", "application/pdf") if metadata else "application/pdf"
-        filename = metadata.get("original_filename", "document.pdf") if metadata else "document.pdf"
-        
+        mime_type = (
+            metadata.get("mime_type", "application/pdf")
+            if metadata
+            else "application/pdf"
+        )
+        filename = (
+            metadata.get("original_filename", "document.pdf")
+            if metadata
+            else "document.pdf"
+        )
+
         return Response(
             content=content,
             media_type=mime_type,
-            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -215,20 +225,18 @@ async def get_file_info(file_id: str, authorization: Optional[str] = Header(None
     """
     try:
         file_hash = file_id
-        
+
         metadata = await file_service.get_file_metadata(file_hash)
         if not metadata:
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         processed = {
             "azure_doc_intelligence": await file_service.is_file_processed(
                 file_hash, "azure_doc_intelligence"
             ),
-            "docling": await file_service.is_file_processed(
-                file_hash, "docling"
-            )
+            "docling": await file_service.is_file_processed(file_hash, "docling"),
         }
-        
+
         return JSONResponse(
             status_code=200,
             content={
@@ -239,14 +247,16 @@ async def get_file_info(file_id: str, authorization: Optional[str] = Header(None
                 "mime_type": metadata.get("mime_type", "application/pdf"),
                 "created_at": metadata.get("created_at"),
                 "upload_time": metadata.get("created_at"),  # For backward compatibility
-                "processed": processed
-            }
+                "processed": processed,
+            },
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving file info: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving file info: {str(e)}"
+        )
 
 
 @router.delete("/files/{file_id}")
@@ -260,9 +270,8 @@ async def delete_file(file_id: str, authorization: Optional[str] = Header(None))
         # For now, return success - actual implementation would need
         # to remove user association in Supabase
         return JSONResponse(
-            status_code=200,
-            content={"message": "File deleted successfully"}
+            status_code=200, content={"message": "File deleted successfully"}
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")

@@ -60,8 +60,11 @@ class DoclingService:
         self.executor = ThreadPoolExecutor(max_workers=50)
 
     async def convert_document_to_markdown(
-        self, source: Union[str, Path], source_type: str = "file", 
-        output_dir: Optional[Path] = None, **kwargs
+        self,
+        source: Union[str, Path],
+        source_type: str = "file",
+        output_dir: Optional[Path] = None,
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Convert a document to markdown using Docling

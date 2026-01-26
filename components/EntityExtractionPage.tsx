@@ -122,12 +122,12 @@ interface Entity {
 
 type FileStatus = {
   status:
-  | "idle"
-  | "queued"
-  | "processing"
-  | "generating_summary"
-  | "completed"
-  | "error";
+    | "idle"
+    | "queued"
+    | "processing"
+    | "generating_summary"
+    | "completed"
+    | "error";
   currentEntityIndex: number;
   totalEntities: number;
   currentEntityName?: string;
@@ -147,6 +147,13 @@ export function EntityExtractionPage({
   setDocumentData,
 }: EntityExtractionPageProps) {
   const sessionIdRef = useRef<string | null>(documentData.sessionId || null);
+
+  // Ensure ref stays in sync if documentData updates
+  useEffect(() => {
+    if (documentData.sessionId) {
+      sessionIdRef.current = documentData.sessionId;
+    }
+  }, [documentData.sessionId]);
 
   const [files, setFiles] = useState<any[]>(() => {
     if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
@@ -198,7 +205,7 @@ export function EntityExtractionPage({
   );
   const [paragraphSystemPrompt, setParagraphSystemPrompt] = useState(
     currentFile?.paragraphSystemPrompt ||
-    "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy."
+      "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy."
   );
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -231,10 +238,14 @@ export function EntityExtractionPage({
     if (sessionIdRef.current) return sessionIdRef.current;
 
     try {
-      const user = await import("../utils/authUtils").then(m => m.getCurrentUser());
+      const user = await import("../utils/authUtils").then((m) =>
+        m.getCurrentUser()
+      );
       if (!user) return null;
 
-      const token = await import("../utils/authUtils").then(m => m.getValidToken());
+      const token = await import("../utils/authUtils").then((m) =>
+        m.getValidToken()
+      );
       if (!token) return null;
 
       const response = await fetch("/api/sessions", {
@@ -248,19 +259,27 @@ export function EntityExtractionPage({
           name: `${currentFile.file?.name || "Extraction"} Session`,
           configuration: {
             study_type: selectedStudyType,
-            selected_models: availableModels.filter(m => currentFile.selectedModels?.includes(m.id) || m.id === selectedModel).map(m => m.id),
-            entities: entities.map(e => ({
+            selected_models: availableModels
+              .filter(
+                (m) =>
+                  currentFile.selectedModels?.includes(m.id) ||
+                  m.id === selectedModel
+              )
+              .map((m) => m.id),
+            entities: entities.map((e) => ({
               name: e.name,
               prompt: e.prompt,
-              system_prompt: e.systemPrompt
+              system_prompt: e.systemPrompt,
             })),
             summary_prompt: summaryPrompt,
-            temperature: 0.0
+            temperature: 0.0,
           },
-          documents: [{
-            file_hash: currentFile.fileId, // Using fileId as hash for now based on file_info structure
-            filename: currentFile.file?.name || "Document"
-          }]
+          documents: [
+            {
+              file_hash: currentFile.fileId, // Using fileId as hash for now based on file_info structure
+              filename: currentFile.file?.name || "Document",
+            },
+          ],
         }),
       });
 
@@ -278,10 +297,14 @@ export function EntityExtractionPage({
   // Helper to save result
   const saveExtractionResult = async (sessionId: string, entity: Entity) => {
     try {
-      const user = await import("../utils/authUtils").then(m => m.getCurrentUser());
+      const user = await import("../utils/authUtils").then((m) =>
+        m.getCurrentUser()
+      );
       if (!user) return;
 
-      const token = await import("../utils/authUtils").then(m => m.getValidToken());
+      const token = await import("../utils/authUtils").then((m) =>
+        m.getValidToken()
+      );
       if (!token) return;
 
       // Find which model produced the result
@@ -290,8 +313,33 @@ export function EntityExtractionPage({
 
       // If we have extractionsByModel, save each
       if (entity.extractionsByModel) {
-        for (const [modelId, data] of Object.entries(entity.extractionsByModel)) {
-          await fetch(`/api/sessions/${sessionId}/extractions?user_id=${user.id}`, {
+        for (const [modelId, data] of Object.entries(
+          entity.extractionsByModel
+        )) {
+          await fetch(
+            `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                entity_name: entity.name,
+                model_id: modelId,
+                extracted_text: data.extracted,
+                references: data.references || [],
+                status: "completed",
+                extracted_at: new Date().toISOString(),
+              }),
+            }
+          );
+        }
+      } else {
+        // Legacy/Single fallback
+        await fetch(
+          `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
+          {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -299,37 +347,19 @@ export function EntityExtractionPage({
             },
             body: JSON.stringify({
               entity_name: entity.name,
-              model_id: modelId,
-              extracted_text: data.extracted,
-              references: data.references || [],
+              model_id: selectedModel, // Best guess
+              extracted_text: entity.extracted,
+              references: entity.references || [],
               status: "completed",
-              extracted_at: new Date().toISOString()
+              extracted_at: new Date().toISOString(),
             }),
-          });
-        }
-      } else {
-        // Legacy/Single fallback
-        await fetch(`/api/sessions/${sessionId}/extractions?user_id=${user.id}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            entity_name: entity.name,
-            model_id: selectedModel, // Best guess
-            extracted_text: entity.extracted,
-            references: entity.references || [],
-            status: "completed",
-            extracted_at: new Date().toISOString()
-          }),
-        });
+          }
+        );
       }
     } catch (error) {
       console.error("Error saving extraction result:", error);
     }
   };
-
 
   // Sync state when selected file changes
   useEffect(() => {
@@ -395,7 +425,8 @@ export function EntityExtractionPage({
       pendingFiles.length,
       "files"
     );
-    const token = await import("../utils/authUtils").then(m => m.getValidToken()) || "";
+    const token =
+      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
 
     // Import PDF.js dynamically
     // @ts-ignore
@@ -517,7 +548,8 @@ export function EntityExtractionPage({
       (m) => m.id === primaryModelId
     );
 
-    const token = await import("../utils/authUtils").then(m => m.getValidToken()) || "";
+    const token =
+      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
     const updatedEntities = [...(file.entities || [])];
 
     // Process entities for this file
@@ -568,6 +600,11 @@ export function EntityExtractionPage({
 
         updatedEntities[i] = updatedEntity;
 
+        // Save result to session if we have one
+        if (sessionIdRef.current) {
+          await saveExtractionResult(sessionIdRef.current, updatedEntity);
+        }
+
         // Update files state incrementally to show progress
         setFiles((prev) =>
           prev.map((f) =>
@@ -608,6 +645,7 @@ export function EntityExtractionPage({
           model_id: primaryModelObj?.id,
           deployment: primaryModelObj?.deployment,
           api_version: primaryModelObj?.api_version,
+          session_id: sessionIdRef.current, // Pass session ID for backend persistence
         }),
       });
 
@@ -617,10 +655,10 @@ export function EntityExtractionPage({
           prev.map((f) =>
             f.fileId === file.fileId
               ? {
-                ...f,
-                entities: updatedEntities,
-                finalSummary: summaryData.summary,
-              }
+                  ...f,
+                  entities: updatedEntities,
+                  finalSummary: summaryData.summary,
+                }
               : f
           )
         );
@@ -631,10 +669,10 @@ export function EntityExtractionPage({
           uploadedFiles: prev.uploadedFiles?.map((f) =>
             f.fileId === file.fileId
               ? {
-                ...f,
-                entities: updatedEntities,
-                finalSummary: summaryData.summary,
-              }
+                  ...f,
+                  entities: updatedEntities,
+                  finalSummary: summaryData.summary,
+                }
               : f
           ),
         }));
@@ -728,13 +766,43 @@ export function EntityExtractionPage({
       } = loadStudyTypeTemplate(selectedStudyType);
       setEntities(templateEntities);
       setSummaryPrompt(templateSummaryPrompt);
+
+      // Sync to backend if session active to ensure configuration is saved
+      if (sessionIdRef.current) {
+        updateSessionConfiguration(
+          sessionIdRef.current,
+          templateEntities,
+          undefined,
+          templateSummaryPrompt,
+          "" // Default paragraph system prompt
+        );
+      }
     }
   }, [selectedStudyType, entities.length, currentFile]);
+
+  // Auto-save prompts when they change (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (sessionIdRef.current && (summaryPrompt || paragraphSystemPrompt)) {
+        updateSessionConfiguration(
+          sessionIdRef.current,
+          entities,
+          undefined,
+          summaryPrompt,
+          paragraphSystemPrompt
+        );
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [summaryPrompt, paragraphSystemPrompt]);
 
   const updateSessionConfiguration = async (
     sessionId: string,
     currentEntities: Entity[],
-    overrideStudyType?: string
+    overrideStudyType?: string,
+    currentSummaryPrompt?: string,
+    currentParagraphSystemPrompt?: string
   ) => {
     try {
       const user = await import("../utils/authUtils").then((m) =>
@@ -761,19 +829,31 @@ export function EntityExtractionPage({
           user_id: user.id,
           configuration: {
             study_type: studyTypeToSave,
-            selected_models: availableModels
-              .filter(
-                (m) =>
-                  currentFile.selectedModels?.includes(m.id) ||
-                  m.id === selectedModel
-              )
-              .map((m) => m.id),
+            selected_models:
+              availableModels.length > 0
+                ? availableModels
+                    .filter(
+                      (m) =>
+                        currentFile.selectedModels?.includes(m.id) ||
+                        m.id === selectedModel
+                    )
+                    .map((m) => m.id)
+                : (currentFile.selectedModels || [selectedModel]).filter(
+                    Boolean
+                  ),
             entities: currentEntities.map((e) => ({
               name: e.name,
               prompt: e.prompt,
               system_prompt: e.systemPrompt,
             })),
-            summary_prompt: summaryPrompt,
+            summary_prompt:
+              currentSummaryPrompt !== undefined
+                ? currentSummaryPrompt
+                : summaryPrompt,
+            paragraph_system_prompt:
+              currentParagraphSystemPrompt !== undefined
+                ? currentParagraphSystemPrompt
+                : paragraphSystemPrompt,
             temperature: 0.0,
           },
         }),
@@ -801,11 +881,11 @@ export function EntityExtractionPage({
       prev.map((f) =>
         f.fileId === selectedFileId
           ? {
-            ...f,
-            studyType: value,
-            entities: templateEntities,
-            summaryPrompt: templateSummaryPrompt,
-          }
+              ...f,
+              studyType: value,
+              entities: templateEntities,
+              summaryPrompt: templateSummaryPrompt,
+            }
           : f
       )
     );
@@ -823,9 +903,7 @@ export function EntityExtractionPage({
     // Update files state
     setFiles((prev) =>
       prev.map((f) =>
-        f.fileId === selectedFileId
-          ? { ...f, entities: updated }
-          : f
+        f.fileId === selectedFileId ? { ...f, entities: updated } : f
       )
     );
 
@@ -841,9 +919,7 @@ export function EntityExtractionPage({
     // Update files state
     setFiles((prev) =>
       prev.map((f) =>
-        f.fileId === selectedFileId
-          ? { ...f, entities: updated }
-          : f
+        f.fileId === selectedFileId ? { ...f, entities: updated } : f
       )
     );
 
@@ -1063,7 +1139,7 @@ export function EntityExtractionPage({
           selectedModelIds,
           token,
           currentFile.processingResult?.processorUsed ||
-          documentData.processorUsed,
+            documentData.processorUsed,
           signal,
           sessionIdRef.current || undefined
         );
@@ -1232,7 +1308,9 @@ export function EntityExtractionPage({
         );
       }
 
-      const token = await import("../utils/authUtils").then(m => m.getValidToken()) || "";
+      const token =
+        (await import("../utils/authUtils").then((m) => m.getValidToken())) ||
+        "";
 
       // Get pre-selected models
       const preSelectedModels =
@@ -1273,7 +1351,6 @@ export function EntityExtractionPage({
         }
       }
 
-
       // Update parent state with the new entity
       // Update parent state with the new entity
       // (removed legacy setDocumentData call)
@@ -1283,11 +1360,11 @@ export function EntityExtractionPage({
         prev.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              entities: entities.map((e, i) =>
-                i === index ? updatedEntity : e
-              ),
-            }
+                ...f,
+                entities: entities.map((e, i) =>
+                  i === index ? updatedEntity : e
+                ),
+              }
             : f
         )
       );
@@ -1298,11 +1375,11 @@ export function EntityExtractionPage({
         uploadedFiles: files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              entities: entities.map((e, i) =>
-                i === index ? updatedEntity : e
-              ),
-            }
+                ...f,
+                entities: entities.map((e, i) =>
+                  i === index ? updatedEntity : e
+                ),
+              }
             : f
         ),
       });
@@ -1319,7 +1396,8 @@ export function EntityExtractionPage({
   // NEW: Generate summary only (without extraction)
   const generateSummaryOnly = async () => {
     setIsGeneratingParagraph(true);
-    const token = await import("../utils/authUtils").then(m => m.getValidToken()) || "";
+    const token =
+      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
 
     try {
       const modelObj = availableModels.find((m) => m.id === selectedModel);
@@ -1343,6 +1421,7 @@ export function EntityExtractionPage({
           model_id: modelObj?.id,
           deployment: modelObj?.deployment,
           api_version: modelObj?.api_version,
+          session_id: sessionIdRef.current, // Pass session ID for backend persistence
         }),
       });
 
@@ -1353,11 +1432,23 @@ export function EntityExtractionPage({
       const summaryData = await summaryResp.json();
       const finalSummary = summaryData.summary;
 
+      // Persistence: Save specific CONFIGURATION (prompts) to DB
+      // The summary text itself is now saved by the backend during generation
+      if (sessionIdRef.current) {
+        await updateSessionConfiguration(
+          sessionIdRef.current,
+          entities,
+          undefined,
+          summaryPrompt,
+          paragraphSystemPrompt
+        );
+      }
+
       // Update state
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt }
+            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
             : f
         )
       );
@@ -1365,7 +1456,7 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt }
+            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
             : f
         ),
       }));
@@ -1439,16 +1530,15 @@ export function EntityExtractionPage({
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
-
-
-      const token = await import("../utils/authUtils").then(m => m.getValidToken()) || "";
+      const token =
+        (await import("../utils/authUtils").then((m) => m.getValidToken())) ||
+        "";
 
       // Create session if not exists
       if (!sessionIdRef.current) {
         await createSession();
       }
       const activeSessionId = sessionIdRef.current;
-
 
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
@@ -1555,7 +1645,6 @@ export function EntityExtractionPage({
             if (activeSessionId) {
               saveExtractionResult(activeSessionId, updatedEntity);
             }
-
           } catch (err: any) {
             if (err.name === "AbortError") throw err;
             // Continue to next entity if one fails (unless aborted)
@@ -1599,6 +1688,7 @@ export function EntityExtractionPage({
           model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
+          session_id: sessionIdRef.current, // Pass session ID for backend persistence
         }),
         signal,
       });
@@ -1621,13 +1711,13 @@ export function EntityExtractionPage({
       const updatedFiles = files.map((f) =>
         f.fileId === selectedFileId
           ? {
-            ...f,
-            studyType: selectedStudyType,
-            selectedModel: selectedModel,
-            entities: updatedEntities,
-            summaryPrompt: summaryPrompt,
-            finalSummary,
-          }
+              ...f,
+              studyType: selectedStudyType,
+              selectedModel: selectedModel,
+              entities: updatedEntities,
+              summaryPrompt: summaryPrompt,
+              finalSummary,
+            }
           : f
       );
       setFiles(updatedFiles);
@@ -1644,12 +1734,12 @@ export function EntityExtractionPage({
         const updatedFiles = files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              studyType: selectedStudyType,
-              selectedModel: selectedModel,
-              entities: updatedEntities,
-              summaryPrompt: summaryPrompt,
-            }
+                ...f,
+                studyType: selectedStudyType,
+                selectedModel: selectedModel,
+                entities: updatedEntities,
+                summaryPrompt: summaryPrompt,
+              }
             : f
         );
         setFiles(updatedFiles);
@@ -1666,12 +1756,12 @@ export function EntityExtractionPage({
         const updatedFiles = files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              studyType: selectedStudyType,
-              selectedModel: selectedModel,
-              entities: updatedEntities,
-              summaryPrompt: summaryPrompt,
-            }
+                ...f,
+                studyType: selectedStudyType,
+                selectedModel: selectedModel,
+                entities: updatedEntities,
+                summaryPrompt: summaryPrompt,
+              }
             : f
         );
         setFiles(updatedFiles);
@@ -2002,8 +2092,8 @@ export function EntityExtractionPage({
                     const filteredModels =
                       preSelectedModels.length > 0
                         ? availableModels.filter((m) =>
-                          preSelectedModels.includes(m.id)
-                        )
+                            preSelectedModels.includes(m.id)
+                          )
                         : availableModels;
 
                     return filteredModels.map((model) => (
@@ -2098,12 +2188,13 @@ export function EntityExtractionPage({
                     <div
                       key={index}
                       id={`entity - card - ${index} `}
-                      className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${isExtracting
-                        ? "border-blue-300 bg-blue-50/40 shadow-md"
-                        : isCompleted
-                          ? "border-emerald-200 bg-emerald-50/30"
-                          : "border-gray-200 bg-white"
-                        } `}
+                      className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${
+                        isExtracting
+                          ? "border-blue-300 bg-blue-50/40 shadow-md"
+                          : isCompleted
+                            ? "border-emerald-200 bg-emerald-50/30"
+                            : "border-gray-200 bg-white"
+                      } `}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -2159,7 +2250,7 @@ export function EntityExtractionPage({
                             }
                           >
                             {isExtracting &&
-                              extractingEntities.has(entity.name) ? (
+                            extractingEntities.has(entity.name) ? (
                               <Sparkles className="h-3.5 w-3.5 animate-spin" />
                             ) : entity.extracted ? (
                               <RefreshCw className="h-3.5 w-3.5" />
@@ -2333,16 +2424,17 @@ export function EntityExtractionPage({
                                             const refColor = `hsl(${(refIdx * 60) % 360}, 70%, 50%)`;
                                             const isActive =
                                               focusedReferenceByEntity[
-                                              index
+                                                index
                                               ] === refIdx;
 
                                             return (
                                               <div
                                                 key={refIdx}
-                                                className={`text - xs bg - white p - 3 rounded border - 2 transition - all cursor - pointer ${isActive
-                                                  ? "border-blue-500 shadow-sm bg-blue-50/60"
-                                                  : "border-gray-200 hover:border-blue-400"
-                                                  } `}
+                                                className={`text - xs bg - white p - 3 rounded border - 2 transition - all cursor - pointer ${
+                                                  isActive
+                                                    ? "border-blue-500 shadow-sm bg-blue-50/60"
+                                                    : "border-gray-200 hover:border-blue-400"
+                                                } `}
                                                 style={{
                                                   borderLeftColor: refColor,
                                                   borderLeftWidth: "4px",
@@ -2435,7 +2527,7 @@ export function EntityExtractionPage({
                               </span>
                             </div>
                             {documentData.fileId &&
-                              documentData.conversionId ? (
+                            documentData.conversionId ? (
                               <div id={`pdf - viewer - ${index} `}>
                                 <EntityPDFViewerBeta
                                   key={`${currentFile.fileId} -${index} `}
@@ -2580,10 +2672,11 @@ export function EntityExtractionPage({
                           !selectedModel ||
                           availableModels.length === 0
                         }
-                        className={`flex-1 transition-all duration-300 ${isExtracting || isGeneratingParagraph
-                          ? "bg-blue-50 border-blue-300 shadow-lg"
-                          : ""
-                          }`}
+                        className={`flex-1 transition-all duration-300 ${
+                          isExtracting || isGeneratingParagraph
+                            ? "bg-blue-50 border-blue-300 shadow-lg"
+                            : ""
+                        }`}
                         size="lg"
                       >
                         {isExtracting || isGeneratingParagraph ? (
@@ -2735,7 +2828,7 @@ export function EntityExtractionPage({
                                                 {/* References */}
                                                 {result.references &&
                                                   result.references.length >
-                                                  0 && (
+                                                    0 && (
                                                     <div className="pl-4 border-l-2 border-gray-200">
                                                       <p className="text-xs font-semibold text-gray-500 mb-2">
                                                         Sources:
@@ -2818,7 +2911,7 @@ export function EntityExtractionPage({
                         </div>
                       ) : isGeneratingParagraph ||
                         fileProcessingStatus[selectedFileId]?.status ===
-                        "generating_summary" ? (
+                          "generating_summary" ? (
                         <div className="flex flex-col items-center justify-center h-full text-purple-600 animate-pulse">
                           <Sparkles className="h-8 w-8 mb-2 animate-spin" />
                           <p className="font-medium">Generating Summary...</p>

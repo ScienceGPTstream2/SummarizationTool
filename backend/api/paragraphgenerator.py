@@ -6,6 +6,8 @@ from typing import List, Dict, Optional
 
 from core.dependencies import get_current_user
 from services.llm.llm_service import LLMService
+from services.session.session_service import get_session_service
+from schemas.sessions import ExtractionResult
 
 router = APIRouter(prefix="/api", tags=["paragraph_generator"])
 llm_service = LLMService()
@@ -14,6 +16,7 @@ llm_service = LLMService()
 class ParagraphGenerationRequest(BaseModel):
     entities: List[Dict]
     summary_prompt: str
+    session_id: Optional[str] = None  # Added for persistence
     system_prompt: Optional[str] = None  # Custom system prompt
     model_type: Optional[str] = "azure"  # New field for model type
     model_id: Optional[str] = None  # New field for Gemini model ID
@@ -28,8 +31,10 @@ class ParagraphGenerationRequest(BaseModel):
     temperature: float = 0.0  # Added temperature
 
 
-@router.post("/generate_paragraph", dependencies=[Depends(get_current_user)])
-async def generate_paragraph(request: ParagraphGenerationRequest):
+@router.post("/generate_paragraph")
+async def generate_paragraph(
+    request: ParagraphGenerationRequest, user: Dict = Depends(get_current_user)
+):
     """
     Generate a paragraph from a list of extracted entities.
     """
@@ -70,7 +75,40 @@ async def generate_paragraph(request: ParagraphGenerationRequest):
         )
 
         if result.get("success"):
-            return {"summary": result.get("content"), "meta": result.get("meta")}
+            summary_text = result.get("content")
+
+            # Persist to database if session_id is provided
+            print(
+                f"[Summarize] Persistence requested. Session ID: {request.session_id}, User ID: {user.get('id')}"
+            )
+            if request.session_id:
+                try:
+                    session_service = get_session_service()
+                    user_id = user.get("id")
+
+                    if user_id:
+                        # Create extraction result object
+                        summary_result = ExtractionResult(
+                            entity_name="__paragraph_summary__",
+                            model_id=request.model_id or "summary-generator",
+                            extracted_text=summary_text,
+                            status="completed",
+                        )
+
+                        # Save using the service
+                        session_service.add_extraction_result_fast(
+                            user_id=user_id,
+                            session_id=request.session_id,
+                            result=summary_result,
+                        )
+                        print(
+                            f"Successfully saved generated summary for session {request.session_id}"
+                        )
+                except Exception as db_err:
+                    print(f"Error saving summary to DB: {db_err}")
+                    # We log but don't fail the request
+
+            return {"summary": summary_text, "meta": result.get("meta")}
         else:
             raise HTTPException(
                 status_code=500,

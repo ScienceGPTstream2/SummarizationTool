@@ -146,6 +146,26 @@ export async function authenticatedFetch(
 }
 
 /**
+ * Record a login event in the history
+ */
+export async function recordLoginEvent(): Promise<void> {
+  try {
+    if (import.meta.env.VITE_API_URL) {
+      const apiUrl = import.meta.env.VITE_API_URL;
+      await authenticatedFetch(`${apiUrl}/auth/history`, {
+        method: "POST",
+      });
+      console.log("Login event recorded successfully");
+    } else {
+      console.warn("VITE_API_URL not defined, skipping login recording");
+    }
+  } catch (error) {
+    // Silently fail - analytics should not block user flow
+    console.error("Failed to record login event:", error);
+  }
+}
+
+/**
  * Check if user is authenticated (has valid session)
  */
 export async function isAuthenticated(): Promise<boolean> {

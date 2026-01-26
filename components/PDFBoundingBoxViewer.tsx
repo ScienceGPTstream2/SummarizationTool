@@ -807,8 +807,9 @@ export function PDFBoundingBoxViewer({
             ref={containerRef}
           >
             <div
-              className={`p-8 min-h-full ${canPan ? "" : "flex justify-center items-start"
-                }`}
+              className={`p-8 min-h-full ${
+                canPan ? "" : "flex justify-center items-start"
+              }`}
             >
               {loading ? (
                 <div className="flex items-center justify-center h-96">
@@ -821,12 +822,13 @@ export function PDFBoundingBoxViewer({
                 </div>
               ) : (
                 <div
-                  className={`inline-block min-w-max ${canPan
+                  className={`inline-block min-w-max ${
+                    canPan
                       ? isPanning
                         ? "cursor-grabbing"
                         : "cursor-grab"
                       : "cursor-default"
-                    }`}
+                  }`}
                   onMouseDown={handleMouseDown}
                 >
                   <canvas

@@ -296,7 +296,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
             <div className="space-y-4">
               {/* Full Size Image */}
               {selectedFigure.image_path &&
-                !imageErrors.has(selectedFigure.id) ? (
+              !imageErrors.has(selectedFigure.id) ? (
                 <div className="bg-muted rounded-lg p-8 flex items-center justify-center min-h-[500px]">
                   <FigureImage
                     imagePath={selectedFigure.image_path}

@@ -23,7 +23,7 @@ session_service = get_session_service()
 async def create_session(request: CreateSessionRequest):
     """
     Create a new extraction session for a user.
-    
+
     Sessions store the full configuration (models, entities, prompts) along with
     extraction and evaluation results.
     """
@@ -35,10 +35,12 @@ async def create_session(request: CreateSessionRequest):
 
 
 @router.get("", response_model=SessionListResponse)
-async def list_sessions(user_id: str = Query(..., description="User ID to list sessions for")):
+async def list_sessions(
+    user_id: str = Query(..., description="User ID to list sessions for")
+):
     """
     List all sessions for a user.
-    
+
     Returns session summaries ordered by most recently updated.
     """
     try:
@@ -50,17 +52,16 @@ async def list_sessions(user_id: str = Query(..., description="User ID to list s
 
 @router.get("/{session_id}", response_model=Session)
 async def get_session(
-    session_id: str,
-    user_id: str = Query(..., description="User ID")
+    session_id: str, user_id: str = Query(..., description="User ID")
 ):
     """
     Get a session by ID with full details including extraction and evaluation results.
     """
     session = session_service.get_session(user_id, session_id)
-    
+
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
+
     return session
 
 
@@ -68,30 +69,29 @@ async def get_session(
 async def update_session(session_id: str, request: UpdateSessionRequest):
     """
     Update a session's name, status, configuration, or results.
-    
+
     Only provided fields will be updated.
     """
     session = session_service.update_session(request.user_id, session_id, request)
-    
+
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
+
     return session
 
 
 @router.delete("/{session_id}")
 async def delete_session(
-    session_id: str,
-    user_id: str = Query(..., description="User ID")
+    session_id: str, user_id: str = Query(..., description="User ID")
 ):
     """
     Delete a session and all its data.
     """
     success = session_service.delete_session(user_id, session_id)
-    
+
     if not success:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
+
     return {"message": f"Session {session_id} deleted successfully"}
 
 
@@ -99,18 +99,18 @@ async def delete_session(
 async def add_extraction_result(
     session_id: str,
     result: ExtractionResult,
-    user_id: str = Query(..., description="User ID")
+    user_id: str = Query(..., description="User ID"),
 ):
     """
     Add or update an extraction result in a session.
-    
+
     If a result for the same entity and model already exists, it will be updated.
     """
     session = session_service.add_extraction_result(user_id, session_id, result)
-    
+
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
+
     return session
 
 
@@ -118,16 +118,16 @@ async def add_extraction_result(
 async def add_evaluation_result(
     session_id: str,
     result: EvaluationResult,
-    user_id: str = Query(..., description="User ID")
+    user_id: str = Query(..., description="User ID"),
 ):
     """
     Add or update an evaluation result in a session.
-    
+
     If a result for the same entity and model already exists, it will be updated.
     """
     session = session_service.add_evaluation_result(user_id, session_id, result)
-    
+
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
+
     return session

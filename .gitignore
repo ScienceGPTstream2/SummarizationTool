@@ -70,5 +70,8 @@ backend/uploads/
 /backend/.deepeval/.deepeval_telemetry.txt
 /backend/tests/
 /files/
-supabase-docker
+
+# Supabase Docker - track config files but not runtime data
+supabase-docker/volumes/
+
 /backend/files/

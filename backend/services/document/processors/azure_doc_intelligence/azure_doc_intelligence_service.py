@@ -131,12 +131,15 @@ class AzureDocIntelligenceService:
         return result, result_id
 
     async def convert_document_to_markdown(
-        self, source: str, source_type: str = "file", extract_figures: bool = True,
-        output_dir: Optional[Path] = None
+        self,
+        source: str,
+        source_type: str = "file",
+        extract_figures: bool = True,
+        output_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """
         Convert document to markdown using Azure Document Intelligence (Non-blocking)
-        
+
         Args:
             source: File path or URL to the document
             source_type: Type of source ("file" or "url")
@@ -145,16 +148,23 @@ class AzureDocIntelligenceService:
                         If None, uses legacy UUID-based path in output/azure_doc_intelligence/
         """
         return await asyncio.to_thread(
-            self._convert_document_sync, source, source_type, extract_figures, output_dir
+            self._convert_document_sync,
+            source,
+            source_type,
+            extract_figures,
+            output_dir,
         )
 
     def _convert_document_sync(
-        self, source: str, source_type: str = "file", extract_figures: bool = True,
-        output_dir: Optional[Path] = None
+        self,
+        source: str,
+        source_type: str = "file",
+        extract_figures: bool = True,
+        output_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """
         Synchronous implementation of document conversion
-        
+
         Args:
             output_dir: If provided, save output directly to this directory.
                         If None, uses legacy UUID-based path.

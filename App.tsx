@@ -9,7 +9,6 @@ import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SessionHistoryPage } from "./components/SessionHistoryPage";
 
-
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
 import { Briefcase, LogOut, Clock } from "lucide-react";
@@ -27,7 +26,6 @@ export type Step =
   | "study_selection"
   | "extraction"
   | "evaluation"
-
   | "executive"
   | "history";
 
@@ -233,13 +231,22 @@ export default function App() {
     setCurrentStep("login");
   }, []);
 
-  const handleStepComplete = async (step: Step, data: Partial<DocumentData>) => {
+  const handleStepComplete = async (
+    step: Step,
+    data: Partial<DocumentData>
+  ) => {
     let updatedData = { ...data };
 
-    if (step === "upload" && data.uploadedFiles && data.uploadedFiles.length > 0) {
+    if (
+      step === "upload" &&
+      data.uploadedFiles &&
+      data.uploadedFiles.length > 0
+    ) {
       // Create a session immediately after upload
       try {
-        const token = await import("./utils/authUtils").then(m => m.getValidToken());
+        const token = await import("./utils/authUtils").then((m) =>
+          m.getValidToken()
+        );
         if (token && userInfo) {
           const firstFile = data.uploadedFiles[0];
           const sessionName = `${firstFile.file.name.substring(0, 30)}... Session`;
@@ -258,12 +265,12 @@ export default function App() {
                 study_type: "",
                 selected_models: [],
                 entities: [],
-                temperature: 0.0
+                temperature: 0.0,
               },
-              documents: data.uploadedFiles.map(f => ({
+              documents: data.uploadedFiles.map((f) => ({
                 file_hash: f.fileId,
-                filename: f.file.name
-              }))
+                filename: f.file.name,
+              })),
             }),
           });
 
@@ -281,7 +288,9 @@ export default function App() {
     } else if (step === "study_selection" && documentData.sessionId) {
       // Update session with study type and models
       try {
-        const token = await import("./utils/authUtils").then(m => m.getValidToken());
+        const token = await import("./utils/authUtils").then((m) =>
+          m.getValidToken()
+        );
         if (token && userInfo) {
           // We need to merge existing config with new updates
           // For now, just sending what we know
@@ -295,15 +304,20 @@ export default function App() {
               user_id: userInfo.id,
               status: "in_progress",
               configuration: {
-                study_type: data.studyType || documentData.studyType || data.uploadedFiles?.[0]?.studyType || "",
-                selected_models: data.selectedModels || documentData.selectedModels || [],
+                study_type:
+                  data.studyType ||
+                  documentData.studyType ||
+                  data.uploadedFiles?.[0]?.studyType ||
+                  "",
+                selected_models:
+                  data.selectedModels || documentData.selectedModels || [],
                 // Preserve existing entities if any, or initialize empty
-                entities: documentData.entities.map(e => ({
+                entities: documentData.entities.map((e) => ({
                   name: e.name,
-                  prompt: e.prompt
+                  prompt: e.prompt,
                 })),
-                temperature: 0.0
-              }
+                temperature: 0.0,
+              },
             }),
           });
           console.log("✅ Session updated with study selection");
@@ -351,10 +365,52 @@ export default function App() {
   const handleRestoreSession = async (sessionId: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/sessions/${sessionId}?user_id=${userInfo?.id}`);
+      const response = await fetch(
+        `/api/sessions/${sessionId}?user_id=${userInfo?.id}`
+      );
       if (!response.ok) throw new Error("Failed to fetch session");
 
       const sessionData = await response.json();
+
+      // RECOVERY: If configuration entities are missing but results exist, reconstruct them
+      let configEntities = sessionData.configuration.entities || [];
+      if (
+        configEntities.length === 0 &&
+        sessionData.extraction_results?.length > 0
+      ) {
+        console.warn(
+          "Session has results but no entity config. reconstructing..."
+        );
+
+        // Try to load template prompts if study type is available
+        const studyType = sessionData.configuration.study_type;
+        let templateEntities: any[] = [];
+        if (studyType) {
+          try {
+            const { loadStudyTypeTemplate } = await import(
+              "./components/TemplateLoader"
+            );
+            templateEntities = loadStudyTypeTemplate(studyType).entities;
+          } catch (e) {
+            console.warn("Failed to load template for recovery:", e);
+          }
+        }
+
+        const uniqueNames: string[] = Array.from(
+          new Set(sessionData.extraction_results.map((r: any) => r.entity_name))
+        );
+        configEntities = uniqueNames.map((name) => {
+          // Try to find matching prompt from template
+          const templateEntity = templateEntities.find(
+            (te) => te.name === name
+          );
+          return {
+            name,
+            prompt: templateEntity?.prompt || "Restored from extraction result",
+            system_prompt: "",
+          };
+        });
+      }
 
       // Map session back to DocumentData
       const restoredData: Partial<DocumentData> = {
@@ -373,16 +429,84 @@ export default function App() {
             conversionId: doc.file_hash,
             fileHash: doc.file_hash,
             markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
-            processorUsed: "azure_doc_intelligence" // Default assumption if not stored
+            processorUsed: "azure_doc_intelligence", // Default assumption if not stored
           },
           studyType: sessionData.configuration.study_type || "",
           summaryPrompt: sessionData.configuration.summary_prompt || "",
+          paragraphSystemPrompt:
+            sessionData.configuration.paragraph_system_prompt || "",
+
+          // Restore finalSummary from special hidden entity
+          finalSummary:
+            sessionData.extraction_results?.find(
+              (r: any) => r.entity_name === "__paragraph_summary__"
+            )?.extracted_text || "",
+
           selectedModels: sessionData.configuration.selected_models || [],
           status: "completed" as const,
-          entities: sessionData.configuration.entities.map((e: any) => {
-            // Find result for this entity
+          entities: configEntities.map((e: any) => {
+            // Find extraction result for this entity
             const result = sessionData.extraction_results?.find(
               (r: any) => r.entity_name === e.name
+            );
+
+            // Find evaluation results for this entity
+            const entityEvaluations =
+              sessionData.evaluation_results?.filter(
+                (ev: any) => ev.entity_name === e.name
+              ) || [];
+
+            // Extract ground truth from evaluation results (they all have the same ground truth)
+            const groundTruth =
+              entityEvaluations.find((ev: any) => ev.ground_truth)
+                ?.ground_truth || "";
+
+            // Group evaluation scores by model for reconstructing evaluationResults
+            const evaluationsByJudge = entityEvaluations.reduce(
+              (acc: any, ev: any) => {
+                const key = ev.judge_model || "unknown";
+                if (!acc[key]) {
+                  acc[key] = {
+                    provider: ev.judge_model?.includes("gemini")
+                      ? "vertex_ai"
+                      : "azure_openai",
+                    model: ev.judge_model,
+                    metrics: [],
+                    aggregate_score: 0,
+                    all_passed: true,
+                    evaluation_time: 0,
+                  };
+                }
+                if (ev.metric && ev.score !== null) {
+                  acc[key].metrics.push({
+                    metric_name: ev.metric,
+                    score: ev.score,
+                    threshold: 0.7,
+                    success: ev.score >= 0.7,
+                    reason: ev.reasoning || "",
+                  });
+                }
+                return acc;
+              },
+              {}
+            );
+
+            // Calculate aggregate scores
+            const evaluationResults = Object.values(evaluationsByJudge).map(
+              (evalResult: any) => {
+                const avgScore =
+                  evalResult.metrics.length > 0
+                    ? evalResult.metrics.reduce(
+                        (sum: number, m: any) => sum + m.score,
+                        0
+                      ) / evalResult.metrics.length
+                    : 0;
+                return {
+                  ...evalResult,
+                  aggregate_score: avgScore,
+                  all_passed: evalResult.metrics.every((m: any) => m.success),
+                };
+              }
             );
 
             return {
@@ -391,49 +515,123 @@ export default function App() {
               systemPrompt: e.system_prompt,
               extracted: result?.extracted_text || "",
               references: result?.references || [],
+              groundTruth: groundTruth,
+              evaluationResults: evaluationResults,
               extractionsByModel: sessionData.extraction_results
                 ?.filter((r: any) => r.entity_name === e.name)
                 .reduce((acc: any, r: any) => {
                   acc[r.model_id] = {
                     extracted: r.extracted_text,
-                    references: r.references || []
+                    references: r.references || [],
+                    // Also add evaluations to extractionsByModel
+                    evaluationResults: evaluationResults,
                   };
                   return acc;
-                }, {})
+                }, {}),
             };
-          })
+          }),
         })),
 
         // Legacy compatibility for single file reference
         fileId: sessionData.documents[0]?.file_hash || "",
         conversionId: sessionData.documents[0]?.file_hash || "",
-        file: new File([""], sessionData.documents[0]?.filename || "Restored Document", { type: "application/pdf" }),
-        entities: sessionData.configuration.entities.map((e: any) => {
+        file: new File(
+          [""],
+          sessionData.documents[0]?.filename || "Restored Document",
+          { type: "application/pdf" }
+        ),
+        entities: configEntities.map((e: any) => {
           const result = sessionData.extraction_results?.find(
             (r: any) => r.entity_name === e.name
           );
+
+          // Find evaluation results for this entity (reuse logic from above)
+          const entityEvaluations =
+            sessionData.evaluation_results?.filter(
+              (ev: any) => ev.entity_name === e.name
+            ) || [];
+          const groundTruth =
+            entityEvaluations.find((ev: any) => ev.ground_truth)
+              ?.ground_truth || "";
+
+          // Group and reconstruct evaluation results
+          const evaluationsByJudge = entityEvaluations.reduce(
+            (acc: any, ev: any) => {
+              const key = ev.judge_model || "unknown";
+              if (!acc[key]) {
+                acc[key] = {
+                  provider: ev.judge_model?.includes("gemini")
+                    ? "vertex_ai"
+                    : "azure_openai",
+                  model: ev.judge_model,
+                  metrics: [],
+                  aggregate_score: 0,
+                  all_passed: true,
+                  evaluation_time: 0,
+                };
+              }
+              if (ev.metric && ev.score !== null) {
+                acc[key].metrics.push({
+                  metric_name: ev.metric,
+                  score: ev.score,
+                  threshold: 0.7,
+                  success: ev.score >= 0.7,
+                  reason: ev.reasoning || "",
+                });
+              }
+              return acc;
+            },
+            {}
+          );
+
+          const evaluationResults = Object.values(evaluationsByJudge).map(
+            (evalResult: any) => {
+              const avgScore =
+                evalResult.metrics.length > 0
+                  ? evalResult.metrics.reduce(
+                      (sum: number, m: any) => sum + m.score,
+                      0
+                    ) / evalResult.metrics.length
+                  : 0;
+              return {
+                ...evalResult,
+                aggregate_score: avgScore,
+                all_passed: evalResult.metrics.every((m: any) => m.success),
+              };
+            }
+          );
+
           return {
             name: e.name,
             prompt: e.prompt,
             extracted: result?.extracted_text || "",
+            references: result?.references || [],
+            groundTruth: groundTruth,
+            evaluationResults: evaluationResults,
             extractionsByModel: sessionData.extraction_results
               ?.filter((r: any) => r.entity_name === e.name)
               .reduce((acc: any, r: any) => {
-                acc[r.model_id] = { extracted: r.extracted_text };
+                acc[r.model_id] = {
+                  extracted: r.extracted_text,
+                  references: r.references || [],
+                  evaluationResults: evaluationResults,
+                };
                 return acc;
-              }, {})
+              }, {}),
           };
         }),
       };
 
-      setDocumentData(prev => ({ ...prev, ...restoredData }));
+      setDocumentData((prev) => ({ ...prev, ...restoredData }));
       toast.success("Session restored successfully");
 
       // Smart routing: Go to Study Selection if not configured, otherwise Extraction
       if (restoredData.studyType) {
         setCurrentStep("extraction");
       } else {
-        console.log("Session has no study type, redirecting to Study Selection");
+        console.log(
+          "Session has no study type, redirecting to Study Selection"
+        );
         setCurrentStep("study_selection");
       }
     } catch (error) {
@@ -443,8 +641,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
-
 
   const renderStep = () => {
     switch (currentStep) {
@@ -569,7 +765,6 @@ export default function App() {
                     History
                   </Button>
                 )}
-
 
                 <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
                   {userInfo?.avatar && (

@@ -31,7 +31,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>(
     documentData.uploadedFiles?.map((f) => f.file) ||
-    (documentData.file ? [documentData.file] : [])
+      (documentData.file ? [documentData.file] : [])
   );
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [uploadResults, setUploadResults] = useState<Record<string, any>>(
@@ -39,9 +39,9 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
       (acc, curr) => ({ ...acc, [curr.file.name]: curr.uploadResult }),
       {}
     ) ||
-    (documentData.file && documentData.uploadResult
-      ? { [documentData.file.name]: documentData.uploadResult }
-      : {})
+      (documentData.file && documentData.uploadResult
+        ? { [documentData.file.name]: documentData.uploadResult }
+        : {})
   );
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -425,10 +425,11 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           </div>
 
           <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ease-in-out cursor-pointer hover:shadow-md hover:scale-[1.01] ${dragActive
-              ? "border-primary bg-primary/5 scale-[1.02]"
-              : "border-gray-300 hover:border-primary"
-              }`}
+            className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ease-in-out cursor-pointer hover:shadow-md hover:scale-[1.01] ${
+              dragActive
+                ? "border-primary bg-primary/5 scale-[1.02]"
+                : "border-gray-300 hover:border-primary"
+            }`}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
@@ -470,10 +471,11 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 <div
                   key={file.name}
                   onClick={() => setActiveFileId(file.name)}
-                  className={`flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer ${activeFileId === file.name
-                    ? "bg-blue-50 border-blue-200 ring-1 ring-blue-200"
-                    : "bg-gray-50 border-gray-100 hover:border-gray-200"
-                    }`}
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer ${
+                    activeFileId === file.name
+                      ? "bg-blue-50 border-blue-200 ring-1 ring-blue-200"
+                      : "bg-gray-50 border-gray-100 hover:border-gray-200"
+                  }`}
                 >
                   <div className="flex items-center flex-1 min-w-0">
                     <FileIcon
@@ -619,7 +621,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           {/* Process All Button */}
           {/* Process All / Proceed Button */}
           {selectedFiles.length > 0 &&
-            Object.keys(processedFiles).length === selectedFiles.length ? (
+          Object.keys(processedFiles).length === selectedFiles.length ? (
             <Button
               onClick={handleProceed}
               className="w-full mb-6 bg-green-600 hover:bg-green-700"
@@ -645,51 +647,51 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           {/* Processing Status */}
           {(processingFiles.size > 0 ||
             Object.keys(processedFiles).length > 0) && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Processing Status:</p>
-                {selectedFiles.map((file) => {
-                  const isProcessing = processingFiles.has(file.name);
-                  const isProcessed = processedFiles[file.name];
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Processing Status:</p>
+              {selectedFiles.map((file) => {
+                const isProcessing = processingFiles.has(file.name);
+                const isProcessed = processedFiles[file.name];
 
-                  return (
-                    <div
-                      key={file.name}
-                      className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded"
-                    >
-                      <span className="truncate flex-1 mr-2">{file.name}</span>
-                      {isProcessing && (
-                        <span className="flex items-center text-blue-600">
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                          Processing...
+                return (
+                  <div
+                    key={file.name}
+                    className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded"
+                  >
+                    <span className="truncate flex-1 mr-2">{file.name}</span>
+                    {isProcessing && (
+                      <span className="flex items-center text-blue-600">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Processing...
+                      </span>
+                    )}
+                    {isProcessed && !isProcessing && (
+                      <span className="flex items-center text-green-600">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Completed
+                      </span>
+                    )}
+                    {!isProcessing &&
+                      !isProcessed &&
+                      processingErrors[file.name] && (
+                        <span
+                          className="flex items-center text-red-600"
+                          title={processingErrors[file.name]}
+                        >
+                          <XCircle className="h-3 w-3 mr-1" />
+                          Failed
                         </span>
                       )}
-                      {isProcessed && !isProcessing && (
-                        <span className="flex items-center text-green-600">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Completed
-                        </span>
+                    {!isProcessing &&
+                      !isProcessed &&
+                      !processingErrors[file.name] && (
+                        <span className="text-gray-400">Pending</span>
                       )}
-                      {!isProcessing &&
-                        !isProcessed &&
-                        processingErrors[file.name] && (
-                          <span
-                            className="flex items-center text-red-600"
-                            title={processingErrors[file.name]}
-                          >
-                            <XCircle className="h-3 w-3 mr-1" />
-                            Failed
-                          </span>
-                        )}
-                      {!isProcessing &&
-                        !isProcessed &&
-                        !processingErrors[file.name] && (
-                          <span className="text-gray-400">Pending</span>
-                        )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
 

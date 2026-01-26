@@ -38,6 +38,12 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
         if (session) {
           console.log("Auth successful, user:", session.user.email);
           setStatus("success");
+
+          // Record login history (async, don't await blocking the UI)
+          import("../utils/authUtils").then(({ recordLoginEvent }) => {
+            recordLoginEvent();
+          });
+
           // Small delay to show success state
           setTimeout(() => {
             onSuccess();
