@@ -1,6 +1,6 @@
 """Document processing API endpoints"""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 from pathlib import Path
 from typing import Dict, Any, List
@@ -47,7 +47,7 @@ def transform_keys_to_snake_case(data: Any) -> Any:
 
 @router.post("/process/file/{file_id}", dependencies=[Depends(get_current_user)])
 async def process_uploaded_file(
-    file_id: str, request: ProcessFileRequest = ProcessFileRequest()
+    file_id: str, request: ProcessFileRequest = ProcessFileRequest(), http_request: Request = None
 ):
     """
     Process an uploaded file to markdown using specified or auto-selected processor
@@ -66,6 +66,23 @@ async def process_uploaded_file(
             processor=request.processor,
             extract_figures=request.extract_figures,
         )
+
+        try:
+            from services.telemetry.cost_tracker import cost_tracker
+
+            session_id = http_request.headers.get("X-Session-Id") if http_request else None
+            metadata = result.get("metadata", {})
+            cost_tracker.record_call(
+                session_id=session_id,
+                provider="azure",
+                model=result.get("processor_used", "unknown"),
+                prompt_tokens=0,
+                completion_tokens=0,
+                duration=metadata.get("conversion_time") or 0.0,
+                page_count=metadata.get("page_count") or 0,
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to record document processing metrics: {e}")
 
         if not result["success"]:
             raise HTTPException(
@@ -589,6 +606,7 @@ async def generate_figure_summary(
     document_id: str,
     figure_id: str,
     request: Dict[str, Any],
+    http_request: Request,
 ):
     """
     Generate a structured scientific summary from a specific figure using vision models.
@@ -653,6 +671,7 @@ async def generate_figure_summary(
         temperature = request.get("temperature", 0.0)
 
         # Generate structured summary with retry logic for truncation
+        session_id = http_request.headers.get("X-Session-Id") if http_request else None
         result = await _generate_figure_summary_with_retry(
             image_path=str(image_path),
             figure_id=figure_id,
@@ -661,6 +680,21 @@ async def generate_figure_summary(
             max_tokens=max_tokens,
             temperature=temperature,
         )
+        try:
+            from services.telemetry.cost_tracker import cost_tracker
+
+            meta = result.get("meta", {}) if isinstance(result, dict) else {}
+            model_used = meta.get("model") or model_id or "unknown"
+            cost_tracker.record_call(
+                session_id=session_id,
+                provider="gcp" if model_type == "gemini" else "azure",
+                model=model_used,
+                prompt_tokens=meta.get("prompt_tokens"),
+                completion_tokens=meta.get("completion_tokens"),
+                duration=meta.get("duration"),
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to record figure summary metrics: {e}")
 
         if not result["success"]:
             raise HTTPException(
@@ -786,12 +820,13 @@ async def extract_figure_content(
     document_id: str,
     figure_id: str,
     request: Dict[str, Any],
+    http_request: Request,
 ):
     """
     Legacy endpoint - redirects to new generate-summary endpoint
     """
     # Redirect to the new summary endpoint
-    return await generate_figure_summary(document_id, figure_id, request)
+    return await generate_figure_summary(document_id, figure_id, request, http_request)
 
 
 @router.get(

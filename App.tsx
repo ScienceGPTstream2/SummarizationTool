@@ -14,6 +14,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { getValidToken } from "./utils/authUtils";
 import { Toaster } from "./components/ui/sonner";
+import { SessionMetrics } from "./components/SessionMetrics";
 
 export type Step =
   | "login"
@@ -288,7 +289,7 @@ export default function App() {
               )}
             </div>
             {currentStep !== "settings" && currentStep !== "executive" && (
-              <div className="flex items-center gap-4 mt-2">
+              <div className="flex flex-wrap items-center gap-4 mt-2">
                 <div
                   className={`flex items-center gap-2 ${currentStep === "upload" ? "text-foreground" : "text-muted-foreground"}`}
                 >
@@ -329,6 +330,11 @@ export default function App() {
                   />
                   <span className="text-sm">Evaluation</span>
                 </div>
+              </div>
+            )}
+            {currentStep !== "settings" && currentStep !== "executive" && (
+              <div className="mt-4">
+                <SessionMetrics />
               </div>
             )}
           </div>

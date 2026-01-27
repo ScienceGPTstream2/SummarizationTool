@@ -1,7 +1,7 @@
 """Server configuration API endpoints"""
 
 import os
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from core.dependencies import get_current_user
@@ -339,3 +339,52 @@ async def get_available_models():
         print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration (region-specific availability)")
 
     return JSONResponse(status_code=200, content=models)
+
+
+@router.get("/server/session-metrics", dependencies=[Depends(get_current_user)])
+async def get_session_metrics(http_request: Request):
+    session_id = http_request.headers.get("X-Session-Id")
+    if not session_id:
+        return JSONResponse(status_code=200, content={"message": "No session id", "metrics": None})
+
+    from services.telemetry.cost_tracker import cost_tracker
+
+    metrics = cost_tracker.get_session_metrics(session_id)
+    if not metrics:
+        return JSONResponse(status_code=200, content={"session_id": session_id, "metrics": None})
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "session_id": session_id,
+            "metrics": {
+                "total_cost": round(metrics.total_cost, 6),
+                "total_latency": round(metrics.total_latency, 3),
+                "total_calls": metrics.total_calls,
+                "calls": [
+                    {
+                        "provider": call.provider,
+                        "model": call.model,
+                        "prompt_tokens": call.prompt_tokens,
+                        "completion_tokens": call.completion_tokens,
+                        "duration": call.duration,
+                        "cost": round(call.cost, 6),
+                        "timestamp": call.timestamp,
+                    }
+                    for call in metrics.calls
+                ],
+            },
+        },
+    )
+
+
+@router.delete("/server/session-metrics", dependencies=[Depends(get_current_user)])
+async def clear_session_metrics(http_request: Request):
+    session_id = http_request.headers.get("X-Session-Id")
+    if not session_id:
+        return JSONResponse(status_code=200, content={"message": "No session id"})
+
+    from services.telemetry.cost_tracker import cost_tracker
+
+    cost_tracker.clear_session(session_id)
+    return JSONResponse(status_code=200, content={"session_id": session_id, "cleared": True})

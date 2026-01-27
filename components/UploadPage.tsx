@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { DocumentData } from "../App";
 import { toast } from "sonner";
+import { authenticatedFetch } from "../utils/authUtils";
 import {
   Select,
   SelectContent,
@@ -198,12 +199,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     // If file was uploaded, delete from backend
     if (fileId) {
       try {
-        const token = localStorage.getItem("token");
-        await fetch(`/api/files/${fileId}`, {
+        await authenticatedFetch(`/api/files/${fileId}`, {
           method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         });
         console.log("File deleted from backend:", fileName);
       } catch (error) {
@@ -228,9 +225,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     const token = localStorage.getItem("token");
 
     try {
-      const response = await fetch("/api/upload", {
+      const response = await authenticatedFetch("/api/upload", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
@@ -304,14 +300,12 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           const parser = fileParsers[file.name] || defaultParser;
 
           try {
-            const token = localStorage.getItem("token");
-            const response = await fetch(
+            const response = await authenticatedFetch(
               `/api/documents/process/file/${fileId}`,
               {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ processor: parser }),
               }
