@@ -88,6 +88,15 @@ export async function authenticatedFetch(
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", `Bearer ${token}`);
 
+  try {
+    const { getSessionId, shouldAttachSessionHeader } = await import("./session");
+    if (shouldAttachSessionHeader(url)) {
+      headers.set("X-Session-Id", getSessionId());
+    }
+  } catch (error) {
+    console.warn("Failed to attach session header:", error);
+  }
+
   // Make the request
   const response = await fetch(url, {
     ...options,

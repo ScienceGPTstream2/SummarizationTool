@@ -78,6 +78,7 @@ import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
 import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { authenticatedFetch } from "../utils/authUtils";
 
 interface Reference {
   text: string;
@@ -288,7 +289,6 @@ export function EntityExtractionPage({
       pendingFiles.length,
       "files"
     );
-    const token = localStorage.getItem("token");
 
     // Import PDF.js dynamically
     // @ts-ignore
@@ -310,7 +310,6 @@ export function EntityExtractionPage({
         // Load through PDF.js to match EntityPDFViewerBeta's caching
         const loadingTask = pdfjsLib.getDocument({
           url: `/api/files/${file.fileId}`,
-          httpHeaders: { Authorization: `Bearer ${token}` },
           disableAutoFetch: false,
           disableStream: false,
         });
@@ -384,6 +383,7 @@ export function EntityExtractionPage({
       file.processingResult?.conversionId || documentData.conversionId;
     if (!conversionId) return;
 
+
     // Determine models to use: prefer file-specific selection, fallback to global selection
     const modelsToUse =
       file.selectedModels && file.selectedModels.length > 0
@@ -408,7 +408,6 @@ export function EntityExtractionPage({
       (m) => m.id === primaryModelId
     );
 
-    const token = localStorage.getItem("token") || "";
     const updatedEntities = [...(file.entities || [])];
 
     // Process entities for this file
@@ -436,7 +435,6 @@ export function EntityExtractionPage({
             entity,
             conversionId,
             modelsToUse,
-            token,
             file.processingResult?.processorUsed || documentData.processorUsed
           );
 
@@ -489,11 +487,10 @@ export function EntityExtractionPage({
         modelTypeToUse = "llama";
       }
 
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           entities: updatedEntities,
@@ -615,11 +612,9 @@ export function EntityExtractionPage({
       if (!currentFile.processingResult?.conversionId) return;
 
       try {
-        const token = localStorage.getItem("token");
-        const response = await fetch(
+        const response = await authenticatedFetch(
           `/api/documents/${currentFile.processingResult.conversionId}/figures`,
           {
-            headers: { Authorization: `Bearer ${token}` },
           }
         );
 
@@ -719,15 +714,13 @@ export function EntityExtractionPage({
       deployment?: string;
       apiVersion?: string;
     },
-    token: string,
     processorUsed?: string,
     signal?: AbortSignal
   ) => {
-    const resp = await fetch("/api/extract", {
+    const resp = await authenticatedFetch("/api/extract", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         conversion_id: conversionId,
@@ -784,7 +777,6 @@ export function EntityExtractionPage({
     entity: Entity,
     conversionId: string,
     selectedModelIds: string[],
-    token: string,
     processorUsed?: string,
     signal?: AbortSignal
   ) => {
@@ -824,7 +816,6 @@ export function EntityExtractionPage({
           entity,
           conversionId,
           modelConfig,
-          token,
           processorUsed,
           signal
         );
@@ -875,8 +866,7 @@ export function EntityExtractionPage({
     index: number,
     signal: AbortSignal,
     conversionId: string,
-    selectedModelIds: string[],
-    token: string
+    selectedModelIds: string[]
   ) => {
     try {
       // Mark entity as extracting
@@ -887,7 +877,6 @@ export function EntityExtractionPage({
           entity,
           conversionId,
           selectedModelIds,
-          token,
           currentFile.processingResult?.processorUsed ||
             documentData.processorUsed,
           signal
@@ -967,8 +956,7 @@ export function EntityExtractionPage({
       modelId?: string;
       deployment?: string;
       apiVersion?: string;
-    },
-    token: string
+    }
   ) => {
     try {
       // Mark entity as extracting
@@ -978,7 +966,6 @@ export function EntityExtractionPage({
         entity,
         conversionId,
         modelConfig,
-        token,
         currentFile.processingResult?.processorUsed ||
         documentData.processorUsed,
         signal
@@ -1057,7 +1044,7 @@ export function EntityExtractionPage({
         );
       }
 
-      const token = localStorage.getItem("token") || "";
+
 
       // Get pre-selected models
       const preSelectedModels =
@@ -1083,8 +1070,7 @@ export function EntityExtractionPage({
         index,
         abortControllerRef.current.signal,
         conversionId,
-        modelsToUse,
-        token
+        modelsToUse
       );
 
       // Update parent state with the new entity
@@ -1132,7 +1118,6 @@ export function EntityExtractionPage({
   // NEW: Generate summary only (without extraction)
   const generateSummaryOnly = async () => {
     setIsGeneratingParagraph(true);
-    const token = localStorage.getItem("token") || "";
 
     try {
       const modelObj = availableModels.find((m) => m.id === selectedModel);
@@ -1146,11 +1131,10 @@ export function EntityExtractionPage({
         modelTypeToUse = "llama";
       }
 
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           entities: entities,
@@ -1261,17 +1245,14 @@ export function EntityExtractionPage({
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
-      const token = localStorage.getItem("token") || "";
+
 
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
         console.log("[Pre-fetch] Caching PDF before entity extraction...");
-        const pdfResponse = await fetch(
-          `/ api / files / ${currentFile.fileId} `,
-          {
-            headers: { Authorization: `Bearer ${token} ` },
-          }
-        );
+      const pdfResponse = await authenticatedFetch(
+        `/api/files/${currentFile.fileId}`
+      );
         if (pdfResponse.ok) {
           await pdfResponse.blob(); // Force browser to cache
           console.log("[Pre-fetch] ✅ PDF cached successfully");
@@ -1359,8 +1340,7 @@ export function EntityExtractionPage({
               i,
               signal,
               conversionId,
-              modelsToUse,
-              token
+              modelsToUse
             );
             updatedEntities[i] = updatedEntity;
           } catch (err: any) {
@@ -1391,11 +1371,10 @@ export function EntityExtractionPage({
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Generate the paragraph summary after all entities are extracted
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token} `,
         },
         body: JSON.stringify({
           entities: updatedEntities,

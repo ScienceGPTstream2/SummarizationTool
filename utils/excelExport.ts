@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { DocumentData } from "../App";
+import { authenticatedFetch } from "./authUtils";
 
 // Helper to get display-friendly model name
 const getDisplayModelName = (model: string): string => {
@@ -24,6 +25,17 @@ const getMetricScore = (result: any, metricName: string): string => {
 };
 
 export async function downloadExcelReport(documentData: DocumentData) {
+  const sessionMetrics = await (async () => {
+    try {
+      const response = await authenticatedFetch("/api/server/session-metrics");
+      const data = await response.json();
+      return data.metrics || null;
+    } catch (error) {
+      console.warn("Failed to fetch session metrics for export:", error);
+      return null;
+    }
+  })();
+
   // 1. Prepare Data
   const rows: any[] = [];
 
@@ -130,6 +142,92 @@ export async function downloadExcelReport(documentData: DocumentData) {
   // 2. Create Workbook and Worksheet with ExcelJS
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Evaluation Results");
+
+  if (sessionMetrics) {
+    const metricsSheet = workbook.addWorksheet("Session Metrics");
+    metricsSheet.columns = [
+      { header: "Metric", key: "metric", width: 30 },
+      { header: "Value", key: "value", width: 30 },
+    ];
+    metricsSheet.addRows([
+      { metric: "Total Cost", value: sessionMetrics.total_cost?.toFixed(6) },
+      { metric: "Total Latency (s)", value: sessionMetrics.total_latency?.toFixed(3) },
+      { metric: "Total Calls", value: sessionMetrics.total_calls },
+    ]);
+
+    metricsSheet.addRow([]);
+    metricsSheet.addRow([{ metric: "By Provider" }]);
+    metricsSheet.addRow([
+      { metric: "Provider" },
+      { metric: "Calls" },
+      { metric: "Avg Latency (s)" },
+      { metric: "Total Cost" },
+    ]);
+
+    const providerStats = new Map<
+      string,
+      { calls: number; totalCost: number; totalLatency: number }
+    >();
+    (sessionMetrics.calls || []).forEach((call: any) => {
+      const key = call.provider || "Unknown";
+      const entry = providerStats.get(key) || {
+        calls: 0,
+        totalCost: 0,
+        totalLatency: 0,
+      };
+      entry.calls += 1;
+      entry.totalCost += call.cost || 0;
+      entry.totalLatency += call.duration || 0;
+      providerStats.set(key, entry);
+    });
+
+    providerStats.forEach((stats, provider) => {
+      metricsSheet.addRow([
+        { metric: provider },
+        { metric: stats.calls },
+        { metric: (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2) },
+        { metric: stats.totalCost.toFixed(6) },
+      ]);
+    });
+
+    metricsSheet.addRow([]);
+    metricsSheet.addRow([{ metric: "By Model" }]);
+    metricsSheet.addRow([
+      { metric: "Model" },
+      { metric: "Provider" },
+      { metric: "Calls" },
+      { metric: "Avg Latency (s)" },
+      { metric: "Total Cost" },
+    ]);
+
+    const modelStats = new Map<
+      string,
+      { provider: string; calls: number; totalCost: number; totalLatency: number }
+    >();
+    (sessionMetrics.calls || []).forEach((call: any) => {
+      const key = call.model || "Unknown";
+      const entry = modelStats.get(key) || {
+        provider: call.provider || "Unknown",
+        calls: 0,
+        totalCost: 0,
+        totalLatency: 0,
+      };
+      entry.calls += 1;
+      entry.totalCost += call.cost || 0;
+      entry.totalLatency += call.duration || 0;
+      modelStats.set(key, entry);
+    });
+
+    modelStats.forEach((stats, model) => {
+      metricsSheet.addRow([
+        { metric: model },
+        { metric: stats.provider },
+        { metric: stats.calls },
+        { metric: (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2) },
+        { metric: stats.totalCost.toFixed(6) },
+      ]);
+    });
+  }
 
   // Define Columns
   worksheet.columns = [

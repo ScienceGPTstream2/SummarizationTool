@@ -26,6 +26,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { Image as ImageIcon, ZoomIn, FileImage, Loader2, Brain, Copy, Check } from "lucide-react";
+import { authenticatedFetch } from "../utils/authUtils";
 
 // Component to lazy load images with authentication
 function FigureImage({
@@ -163,10 +164,6 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
     const filename = imagePath.split("/").pop();
     const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-    const token = localStorage.getItem("token");
-    if (!token) {
-      throw new Error("No authentication token found");
-    }
     const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
 
     console.log(`[FigureGallery] Fetching figure:`, {
@@ -175,15 +172,10 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
       filename,
       conversionId,
       url,
-      hasToken: !!token,
     });
 
     try {
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch(url);
 
       console.log(`[FigureGallery] Response:`, {
         status: response.status,
@@ -237,19 +229,13 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     setExtractingFigure(figureId);
 
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        throw new Error("No authentication token found");
-      }
-
       const apiBase = import.meta.env.VITE_API_BASE_URL || "";
       const url = `${apiBase}/api/documents/${conversionId}/figures/${figureId}/generate-summary`;
 
-      const response = await fetch(url, {
+      const response = await authenticatedFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           model_type: "gemini",

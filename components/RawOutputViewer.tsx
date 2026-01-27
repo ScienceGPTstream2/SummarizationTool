@@ -162,8 +162,8 @@ export function RawOutputViewer({
   return (
     <Card className="border-gray-200 shadow-sm">
       <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b">
-        <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between w-full gap-3">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
             <CardTitle className="flex items-center gap-2 text-lg">
               {currentView === "enhanced" ? (
                 <Sparkles className="h-5 w-5 text-purple-600" />
@@ -174,26 +174,29 @@ export function RawOutputViewer({
                 {currentView === "enhanced" ? "Enhanced Markdown" : "Base Markdown"}
               </span>
               {processorUsed && (
-                <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200">
+                <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200 whitespace-nowrap">
                   {processorUsed}
                 </span>
               )}
               {currentView === "enhanced" && hasEnhancements && (
-                <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 whitespace-nowrap">
+                <Badge
+                  variant="secondary"
+                  className="text-xs bg-green-100 text-green-800 whitespace-nowrap"
+                >
                   Figure Summaries Included
                 </Badge>
               )}
             </CardTitle>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+          <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto xl:justify-end">
             {/* View Toggle */}
-            <div className="flex rounded-md border border-gray-200 overflow-hidden">
+            <div className="flex rounded-md border border-gray-200 overflow-hidden w-full sm:w-auto">
               <Button
                 variant={currentView === "base" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => toggleView("base")}
-                className="rounded-none border-0 h-8 px-3 text-xs"
+                className="rounded-none border-0 h-8 px-3 text-xs flex-1 sm:flex-none"
               >
                 <FileText className="h-3 w-3 mr-1" />
                 Base
@@ -203,7 +206,7 @@ export function RawOutputViewer({
                 size="sm"
                 onClick={() => toggleView("enhanced")}
                 disabled={!hasEnhancements}
-                className="rounded-none border-0 h-8 px-3 text-xs"
+                className="rounded-none border-0 h-8 px-3 text-xs flex-1 sm:flex-none"
                 title={!hasEnhancements ? "No figure summaries available" : "View with figure summaries"}
               >
                 <Sparkles className="h-3 w-3 mr-1" />
@@ -213,7 +216,7 @@ export function RawOutputViewer({
 
             {/* Download Button */}
             {currentMarkdown && (
-              <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Button variant="outline" size="sm" onClick={handleDownload} className="w-full sm:w-auto">
                 <Download className="h-4 w-4 mr-2" />
                 Download MD
               </Button>
@@ -225,6 +228,7 @@ export function RawOutputViewer({
               size="sm"
               onClick={refreshContent}
               title="Refresh content (useful after generating figure summaries)"
+              className="w-full sm:w-auto"
             >
               🔄
             </Button>

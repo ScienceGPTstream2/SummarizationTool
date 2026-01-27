@@ -6,7 +6,7 @@ with support for Azure OpenAI and Vertex AI evaluation models.
 """
 
 import os
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import List
 
@@ -27,7 +27,7 @@ evaluation_service = EvaluationService()
 
 
 @router.post("/evaluate", dependencies=[Depends(get_current_user)])
-async def evaluate_extraction(request: EvaluationRequest):
+async def evaluate_extraction(request: EvaluationRequest, http_request: Request):
     """
     Evaluate a single entity extraction using G-Eval metrics
 
@@ -79,6 +79,7 @@ async def evaluate_extraction(request: EvaluationRequest):
                 "location": "global",  # Anthropic models must use 'global' location
             }
 
+        session_id = http_request.headers.get("X-Session-Id") if http_request else None
         result = await evaluation_service.evaluate_extraction(
             entity_name=request.entity_name,
             extraction_prompt=request.extraction_prompt,
@@ -90,6 +91,7 @@ async def evaluate_extraction(request: EvaluationRequest):
             threshold=request.threshold,
             strict_mode=request.strict_mode,
             custom_evaluation_steps=request.custom_evaluation_steps,
+            session_id=session_id,
             **model_kwargs,
         )
 
@@ -112,7 +114,7 @@ async def evaluate_extraction(request: EvaluationRequest):
 
 
 @router.post("/evaluate/batch", dependencies=[Depends(get_current_user)])
-async def evaluate_batch(request: BatchEvaluationRequest):
+async def evaluate_batch(request: BatchEvaluationRequest, http_request: Request):
     """
     Evaluate multiple entity extractions in batch
 
@@ -171,11 +173,13 @@ async def evaluate_batch(request: BatchEvaluationRequest):
         # Convert extractions to dict format
         extractions_list = [extraction.dict() for extraction in request.extractions]
 
+        session_id = http_request.headers.get("X-Session-Id") if http_request else None
         result = await evaluation_service.evaluate_multiple_extractions(
             extractions=extractions_list,
             provider=request.provider,
             threshold=request.threshold,
             metrics=request.metrics,
+            session_id=session_id,
             **model_kwargs,
         )
 

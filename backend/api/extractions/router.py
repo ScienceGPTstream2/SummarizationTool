@@ -4,7 +4,7 @@ import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 
 from core.dependencies import get_current_user
@@ -53,7 +53,7 @@ def log_timeout_event(operation: str, details: str, duration: float = None):
 
 
 @router.post("/extract", dependencies=[Depends(get_current_user)])
-async def extract_entities(request: ExtractRequest):
+async def extract_entities(request: ExtractRequest, http_request: Request):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
     Includes figure content for comprehensive analysis and figure referencing.
@@ -113,6 +113,7 @@ async def extract_entities(request: ExtractRequest):
                 print(f"[EXTRACTION] Prompt preview: {entity.prompt[:100]}...")
                 print(f"[EXTRACTION] Enhanced markdown length: {len(enhanced_markdown)}")
 
+                session_id = http_request.headers.get("X-Session-Id")
                 result = await llm_service.extract_entities_from_markdown(
                     markdown=enhanced_markdown,
                     extraction_prompt=entity.prompt,
@@ -128,6 +129,7 @@ async def extract_entities(request: ExtractRequest):
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
                     system_message=entity.system_prompt,
+                    session_id=session_id,
                 )
 
                 print(f"[EXTRACTION] LLM response for '{entity.name}': {result.get('content', '')[:200]}...")
