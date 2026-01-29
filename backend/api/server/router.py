@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from core.dependencies import get_current_user
 from schemas.server import ServerConfig
+from services.llm.macbook import MacbookLLMClient
 
 router = APIRouter(prefix="/api", tags=["server"])
 
@@ -96,11 +97,15 @@ async def get_server_config():
         ]
     )
 
+    macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
+    is_macbook_configured = bool(macbook_base_url)
+
     return ServerConfig(
         is_azure_openai_configured=is_azure_openai_configured,
         is_gemini_configured=is_gemini_configured,
         is_azure_document_intelligence_configured=is_azure_document_intelligence_configured,
         is_llama_configured=is_llama_configured,
+        is_macbook_configured=is_macbook_configured,
     )
 
 
@@ -337,6 +342,30 @@ async def get_available_models():
         ]
         models.extend(llama_models)
         print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration (region-specific availability)")
+
+    macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
+    if macbook_base_url:
+        macbook_client = MacbookLLMClient()
+        macbook_models = await macbook_client.fetch_available_models()
+        if not macbook_models:
+            fallback_models = sorted(macbook_client.allowed_models)
+            macbook_models = [
+                {
+                    "id": model_id,
+                    "name": model_id,
+                    "provider": "Macbook LLM",
+                }
+                for model_id in fallback_models
+            ]
+        for model in macbook_models:
+            models.append(
+                {
+                    "id": model["id"],
+                    "name": model["name"],
+                    "provider": "Macbook LLM",
+                    "description": "Self-hosted model",
+                }
+            )
 
     return JSONResponse(status_code=200, content=models)
 

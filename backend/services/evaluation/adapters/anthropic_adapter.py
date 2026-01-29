@@ -76,7 +76,7 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
 
     def _extract_usage(self, message) -> Dict[str, Any]:
         usage = getattr(message, "usage", None) or {}
-        return {
+        extracted = {
             "prompt_tokens": getattr(usage, "input_tokens", None)
             or usage.get("input_tokens")
             or usage.get("prompt_tokens"),
@@ -86,6 +86,12 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
             "total_tokens": getattr(usage, "total_tokens", None)
             or usage.get("total_tokens"),
         }
+        if not extracted.get("prompt_tokens") and not extracted.get("completion_tokens"):
+            print(
+                "[AnthropicAdapter] Missing token usage in response",
+                {"usage": usage, "model": self._model_name},
+            )
+        return extracted
 
     def load_model(self):
         """Load the Anthropic Vertex client"""

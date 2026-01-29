@@ -23,18 +23,43 @@ def load_secrets_to_env(secrets_path: str = None):
     """Loads secrets from a TOML file into environment variables."""
     if secrets_path is None:
         # Try relative path first (when running from backend directory)
-        secrets_path = "core/secrets.toml"
-        if not os.path.exists(secrets_path):
-            # Try absolute path (when running from project root)
-            secrets_path = "Summarization_tool/backend/core/secrets.toml"
+        candidates = [
+            "core/secrets.toml",
+            os.path.join(os.path.dirname(__file__), "core", "secrets.toml"),
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "core",
+                "secrets.toml",
+            ),
+        ]
+        secrets_path = None
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                secrets_path = candidate
+                break
 
     try:
+        if not secrets_path:
+            raise FileNotFoundError("No secrets.toml found in expected locations")
+
         secrets = toml.load(secrets_path)
+        if "Macbook" in secrets and isinstance(secrets.get("Macbook"), dict):
+            macbook_url = secrets["Macbook"].get("macbook_llm_base_url")
+            if macbook_url:
+                os.environ["MACBOOK_LLM_BASE_URL"] = str(macbook_url)
         for section, keys in secrets.items():
-            for key, value in keys.items():
-                env_key = f"{section.upper()}_{key.upper()}"
-                os.environ[env_key] = str(value)
+            if isinstance(keys, dict):
+                for key, value in keys.items():
+                    env_key = f"{section.upper()}_{key.upper()}"
+                    os.environ[env_key] = str(value)
+            else:
+                env_key = section.upper()
+                os.environ[env_key] = str(keys)
         print(f"Successfully loaded secrets from {secrets_path}")
+        print(
+            f"MACBOOK_LLM_BASE_URL={os.environ.get('MACBOOK_LLM_BASE_URL', '') or '(not set)'}"
+        )
     except FileNotFoundError:
         print(f"Secrets file not found at {secrets_path}. Skipping loading.")
     except Exception as e:

@@ -37,6 +37,71 @@ class CostTracker:
         with open(pricing_path, "r", encoding="utf-8") as f:
             return json.load(f).get("models", {})
 
+    def _compute_cost(
+        self,
+        provider: str,
+        model: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        page_count: Optional[int] = None,
+    ) -> float:
+        prompt_tokens = int(prompt_tokens or 0)
+        completion_tokens = int(completion_tokens or 0)
+        page_count_value = int(page_count or 0)
+
+        normalized_key = self._normalize_model_key(model, provider)
+        pricing = self._pricing.get(normalized_key, self._pricing.get(model, {}))
+        if not pricing:
+            print(
+                "[COST_TRACKER] No pricing found for model",
+                {"provider": provider, "model": model, "normalized": normalized_key},
+            )
+        if prompt_tokens == 0 and completion_tokens == 0:
+            print(
+                "[COST_TRACKER] Token usage missing or zero",
+                {
+                    "provider": provider,
+                    "model": model,
+                    "normalized": normalized_key,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+            )
+        prompt_rate = pricing.get("input_per_million") or pricing.get(
+            "prompt_cost_per_1k_tokens", 0.0
+        )
+        completion_rate = pricing.get("output_per_million") or pricing.get(
+            "completion_cost_per_1k_tokens", 0.0
+        )
+        if "input_per_million" in pricing or "output_per_million" in pricing:
+            base_cost = (prompt_tokens / 1_000_000.0) * float(prompt_rate or 0.0)
+            base_cost += (
+                (completion_tokens / 1_000_000.0) * float(completion_rate or 0.0)
+            )
+        else:
+            base_cost = (prompt_tokens / 1000.0) * float(prompt_rate or 0.0)
+            base_cost += (completion_tokens / 1000.0) * float(completion_rate or 0.0)
+
+        per_page_rate = pricing.get("cost_per_page", 0.0)
+        page_cost = page_count_value * float(per_page_rate or 0.0)
+        return base_cost + page_cost
+
+    def estimate_call_cost(
+        self,
+        provider: str,
+        model: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        page_count: Optional[int] = None,
+    ) -> float:
+        return self._compute_cost(
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            page_count=page_count,
+        )
+
     def _normalize_model_key(self, model: str, provider: Optional[str]) -> str:
         if not model:
             return ""
@@ -81,32 +146,14 @@ class CostTracker:
     ) -> None:
         if not session_id:
             return
-
-        prompt_tokens = int(prompt_tokens or 0)
-        completion_tokens = int(completion_tokens or 0)
         duration = float(duration or 0.0)
-        page_count_value = int(page_count or 0)
-
-        normalized_key = self._normalize_model_key(model, provider)
-        pricing = self._pricing.get(normalized_key, self._pricing.get(model, {}))
-        prompt_rate = pricing.get("input_per_million") or pricing.get(
-            "prompt_cost_per_1k_tokens", 0.0
+        cost = self._compute_cost(
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            page_count=page_count,
         )
-        completion_rate = pricing.get("output_per_million") or pricing.get(
-            "completion_cost_per_1k_tokens", 0.0
-        )
-        if "input_per_million" in pricing or "output_per_million" in pricing:
-            base_cost = (prompt_tokens / 1_000_000.0) * float(prompt_rate or 0.0)
-            base_cost += (
-                (completion_tokens / 1_000_000.0) * float(completion_rate or 0.0)
-            )
-        else:
-            base_cost = (prompt_tokens / 1000.0) * float(prompt_rate or 0.0)
-            base_cost += (completion_tokens / 1000.0) * float(completion_rate or 0.0)
-
-        per_page_rate = pricing.get("cost_per_page", 0.0)
-        page_cost = page_count_value * float(per_page_rate or 0.0)
-        cost = base_cost + page_cost
 
         metrics = self._sessions.get(session_id)
         if not metrics:
@@ -120,8 +167,8 @@ class CostTracker:
             CallMetric(
                 provider=provider,
                 model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+                prompt_tokens=int(prompt_tokens or 0),
+                completion_tokens=int(completion_tokens or 0),
                 duration=duration,
                 cost=cost,
                 timestamp=datetime.utcnow().isoformat(),

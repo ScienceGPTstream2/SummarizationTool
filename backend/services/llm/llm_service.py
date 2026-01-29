@@ -7,6 +7,7 @@ from .azure import AzureLLMClient
 from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
 from .llama import LlamaLLMClient
+from .macbook import MacbookLLMClient
 import toml
 
 
@@ -39,6 +40,7 @@ class LLMService:
         self.gemini_client = GeminiLLMClient()
         self.anthropic_client = AnthropicLLMClient()
         self.llama_client = LlamaLLMClient()
+        self.macbook_client = MacbookLLMClient()
 
         # Timeout logging setup
         self.timeout_log_dir = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
@@ -188,6 +190,22 @@ class LLMService:
                 )
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
+            elif model_type == "macbook":
+                if self.macbook_client.disabled:
+                    return {"success": False, "error": "Macbook LLM is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.macbook_client.extract_entities_with_macbook(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    )
+                )
+                self._record_session_metrics(session_id, "macbook", result)
+                return result
             else:
                 return {"success": False, "error": f"Unsupported model type: {model_type}"}
         except asyncio.TimeoutError:
@@ -325,6 +343,18 @@ class LLMService:
             )
             self._record_session_metrics(session_id, "gcp", result)
             return result
+        elif model_type == "macbook":
+            if self.macbook_client.disabled:
+                return {"success": False, "error": "Macbook LLM is not configured."}
+            result = await self.macbook_client.generate_paragraph_with_macbook(
+                user_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+                system_message,
+            )
+            self._record_session_metrics(session_id, "macbook", result)
+            return result
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
 
@@ -336,6 +366,16 @@ class LLMService:
 
             meta = result.get("meta", {}) if isinstance(result, dict) else {}
             model = meta.get("model") or meta.get("deployment") or "unknown"
+            if provider == "macbook":
+                cost_tracker.record_call(
+                    session_id=session_id,
+                    provider=provider,
+                    model=model,
+                    prompt_tokens=meta.get("prompt_tokens"),
+                    completion_tokens=meta.get("completion_tokens"),
+                    duration=meta.get("duration"),
+                )
+                return
             cost_tracker.record_call(
                 session_id=session_id,
                 provider=provider,
