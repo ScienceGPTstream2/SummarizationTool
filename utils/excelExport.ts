@@ -3,6 +3,44 @@ import { saveAs } from "file-saver";
 import { DocumentData } from "../App";
 import { authenticatedFetch } from "./authUtils";
 
+type EvaluationMetric = {
+  metric_name: string;
+  score: number;
+};
+
+type EvaluationResult = {
+  model?: string;
+  metrics?: EvaluationMetric[];
+  evaluation_cost?: number;
+};
+
+type ExtractionData = {
+  extracted?: string;
+  evaluationResults?: EvaluationResult[];
+};
+
+type UploadFileData = {
+  file?: { name?: string } | null;
+  fileId?: string;
+  entities?: Array<Record<string, unknown>>;
+  selectedModel?: string;
+  processorUsed?: string;
+};
+
+type SessionCallMetric = {
+  provider?: string;
+  model?: string;
+  duration?: number;
+  cost?: number;
+};
+
+type SessionMetrics = {
+  total_cost?: number;
+  total_latency?: number;
+  total_calls?: number;
+  calls?: SessionCallMetric[];
+};
+
 // Helper to get display-friendly model name
 const getDisplayModelName = (model: string): string => {
   if (model.includes("@")) {
@@ -16,19 +54,26 @@ const getDisplayModelName = (model: string): string => {
 };
 
 // Helper to safely get metric score
-const getMetricScore = (result: any, metricName: string): string => {
+const getMetricScore = (result: EvaluationResult | undefined, metricName: string): string => {
   if (!result || !result.metrics) return "";
-  const metric = result.metrics.find((m: any) =>
+  const metric = result.metrics.find((m) =>
     m.metric_name.toLowerCase().includes(metricName.toLowerCase())
   );
   return metric ? `${(metric.score * 100).toFixed(0)}%` : "";
 };
 
+const formatCost = (value: number | undefined | null): string => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "";
+  }
+  return Number(value).toFixed(6);
+};
+
 export async function downloadExcelReport(documentData: DocumentData) {
-  const sessionMetrics = await (async () => {
+  const sessionMetrics: SessionMetrics | null = await (async () => {
     try {
       const response = await authenticatedFetch("/api/server/session-metrics");
-      const data = await response.json();
+      const data: { metrics?: SessionMetrics } = await response.json();
       return data.metrics || null;
     } catch (error) {
       console.warn("Failed to fetch session metrics for export:", error);
@@ -37,10 +82,10 @@ export async function downloadExcelReport(documentData: DocumentData) {
   })();
 
   // 1. Prepare Data
-  const rows: any[] = [];
+  const rows: Record<string, string>[] = [];
 
   // Normalize file list
-  let filesToProcess: any[] = [];
+  let filesToProcess: UploadFileData[] = [];
   if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
     filesToProcess = documentData.uploadedFiles;
   } else {
@@ -62,16 +107,22 @@ export async function downloadExcelReport(documentData: DocumentData) {
     const entities = fileItem.entities || [];
 
     for (const entity of entities) {
-      const entityName = entity.name;
-      const promptTemplate = entity.prompt || "";
+      const entityName = (entity as { name?: string }).name || "";
+      const promptTemplate = (entity as { prompt?: string }).prompt || "";
       const systemPrompt =
-        entity.systemPrompt || "You are an expert toxicologist...";
-      const groundTruth = entity.groundTruth || "";
+        (entity as { systemPrompt?: string }).systemPrompt ||
+        "You are an expert toxicologist...";
+      const groundTruth = (entity as { groundTruth?: string }).groundTruth || "";
 
       // Identify Source Models
-      let sourceModels = Object.keys(entity.extractionsByModel || {});
+      const extractionsByModel = (entity as { extractionsByModel?: Record<string, ExtractionData> })
+        .extractionsByModel;
+      let sourceModels = Object.keys(extractionsByModel || {});
 
-      if (sourceModels.length === 0 && entity.extracted) {
+      if (
+        sourceModels.length === 0 &&
+        Boolean((entity as { extracted?: string }).extracted)
+      ) {
         const singleModel =
           fileItem.selectedModel ||
           documentData.selectedModel ||
@@ -80,7 +131,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
       }
 
       for (const sourceModel of sourceModels) {
-        let extractionData = entity.extractionsByModel?.[sourceModel];
+        let extractionData = extractionsByModel?.[sourceModel];
 
         // Fallback
         if (
@@ -88,8 +139,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
           sourceModel === (fileItem.selectedModel || documentData.selectedModel)
         ) {
           extractionData = {
-            extracted: entity.extracted,
-            evaluationResults: entity.evaluationResults,
+            extracted: (entity as { extracted?: string }).extracted,
+            evaluationResults: (entity as { evaluationResults?: EvaluationResult[] })
+              .evaluationResults,
           };
         }
 
@@ -132,6 +184,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
               Relevance: getMetricScore(result, "relevance"),
               Safety: getMetricScore(result, "safety"),
               "Human Eval": "",
+              Cost: formatCost(result.evaluation_cost),
             });
           }
         }
@@ -168,7 +221,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
       string,
       { calls: number; totalCost: number; totalLatency: number }
     >();
-    (sessionMetrics.calls || []).forEach((call: any) => {
+    (sessionMetrics.calls || []).forEach((call: SessionCallMetric) => {
       const key = call.provider || "Unknown";
       const entry = providerStats.get(key) || {
         calls: 0,
@@ -204,7 +257,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
       string,
       { provider: string; calls: number; totalCost: number; totalLatency: number }
     >();
-    (sessionMetrics.calls || []).forEach((call: any) => {
+    (sessionMetrics.calls || []).forEach((call: SessionCallMetric) => {
       const key = call.model || "Unknown";
       const entry = modelStats.get(key) || {
         provider: call.provider || "Unknown",
@@ -245,6 +298,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
     { header: "Relevance", key: "Relevance", width: 25 },
     { header: "Safety", key: "Safety", width: 25 },
     { header: "Human Eval", key: "Human Eval", width: 25 },
+    { header: "Cost", key: "Cost", width: 15 },
   ];
 
   // Style Header Row

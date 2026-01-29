@@ -101,7 +101,7 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
             or metadata.get("usage_metadata")
             or {}
         )
-        return {
+        usage = {
             "prompt_tokens": token_usage.get("prompt_tokens")
             or token_usage.get("input_tokens")
             or token_usage.get("promptTokenCount")
@@ -114,6 +114,12 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
             "total_tokens": token_usage.get("total_tokens")
             or token_usage.get("totalTokenCount"),
         }
+        if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
+            print(
+                "[VertexAdapter] Missing token usage in response metadata",
+                {"metadata": metadata, "model": self._model_name},
+            )
+        return usage
 
     def load_model(self):
         """Load the LangChain model"""

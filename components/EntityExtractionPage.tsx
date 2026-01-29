@@ -800,6 +800,8 @@ export function EntityExtractionPage({
         modelType = "azure";
       } else if (provider.includes("meta") || provider.includes("llama")) {
         modelType = "llama";
+      } else if (provider.includes("macbook")) {
+        modelType = "macbook";
       }
 
       const modelConfig = {
@@ -1129,6 +1131,8 @@ export function EntityExtractionPage({
         modelTypeToUse = "anthropic";
       } else if (provider.includes("meta") || provider.includes("llama")) {
         modelTypeToUse = "llama";
+      } else if (provider.includes("macbook")) {
+        modelTypeToUse = "macbook";
       }
 
       const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
@@ -1240,6 +1244,8 @@ export function EntityExtractionPage({
         modelTypeToUse = "anthropic";
       } else if (provider.includes("meta") || provider.includes("llama")) {
         modelTypeToUse = "llama";
+      } else if (provider.includes("macbook")) {
+        modelTypeToUse = "macbook";
       }
       const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
       const deploymentToUse = modelObj?.deployment; // For Azure models

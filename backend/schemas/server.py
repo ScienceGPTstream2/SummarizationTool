@@ -10,3 +10,4 @@ class ServerConfig(BaseModel):
         False  # Added for Azure Document Intelligence configuration status
     )
     is_llama_configured: bool = False  # Added for Llama configuration status
+    is_macbook_configured: bool = False  # Added for Macbook configuration status

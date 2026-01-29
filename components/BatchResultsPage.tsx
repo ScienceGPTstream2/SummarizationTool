@@ -71,6 +71,7 @@ export interface ResultRow {
   relevance: number | null;
   safety: number | null;
   humanEval: number | null; // Changed to number 0-100
+  cost: string;
 }
 
 const formatModelName = (modelId: string) => {
@@ -105,6 +106,13 @@ const getMetricScore = (result: any, metricName: string): number | null => {
     m.metric_name.toLowerCase().includes(metricName.toLowerCase())
   );
   return metric ? Math.round(metric.score * 100) : null;
+};
+
+const formatCost = (value: number | undefined | null): string => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "";
+  }
+  return Number(value).toFixed(6);
 };
 
 // Transform documentData to flat rows
@@ -187,6 +195,7 @@ export function transformToRows(documentData: any): ResultRow[] {
             relevance: null,
             safety: null,
             humanEval: null,
+            cost: "",
           });
         } else {
           for (const result of evalResults) {
@@ -206,6 +215,7 @@ export function transformToRows(documentData: any): ResultRow[] {
               relevance: getMetricScore(result, "relevance"),
               safety: getMetricScore(result, "safety"),
               humanEval: null,
+              cost: formatCost(result.evaluation_cost),
             });
           }
         }
@@ -242,6 +252,7 @@ const ALL_COLUMNS = [
   { key: "relevance", label: "Relevance", type: "score" },
   { key: "safety", label: "Safety", type: "score" },
   { key: "humanEval", label: "Human Eval", type: "label" },
+  { key: "cost", label: "Cost", type: "text" },
 ] as const;
 
 type SortDirection = "asc" | "desc" | null;
@@ -803,6 +814,11 @@ export default function BatchResultsPage({
                         placeholder="Score"
                         className="h-8 text-sm w-20 text-center"
                       />
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("cost") && (
+                    <TableCell className="text-right text-sm text-gray-600">
+                      {row.cost || "—"}
                     </TableCell>
                   )}
                   {/* Compare button removed, row is clickable */}
