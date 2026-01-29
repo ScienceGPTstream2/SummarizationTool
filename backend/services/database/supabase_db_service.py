@@ -109,7 +109,9 @@ class SupabaseDBService:
         """List all sessions for a user with counts and document names"""
         result = (
             self.client.table("sessions")
-            .select("id, name, status, last_step, configuration, evaluation_config, files_config, created_at, updated_at")
+            .select(
+                "id, name, status, last_step, configuration, evaluation_config, files_config, created_at, updated_at"
+            )
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
             .range(offset, offset + limit - 1)

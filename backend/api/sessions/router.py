@@ -129,12 +129,18 @@ async def add_evaluation_result(
         session = session_service.add_evaluation_result(user_id, session_id, result)
 
         if session is None:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found or no extraction exists for entity {result.entity_name}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found or no extraction exists for entity {result.entity_name}",
+            )
 
         return session
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error saving evaluation: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error saving evaluation: {str(e)}"
+        )

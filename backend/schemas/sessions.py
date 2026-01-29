@@ -23,8 +23,12 @@ class SessionConfiguration(BaseModel):
     summary_prompt: Optional[str] = None
     paragraph_system_prompt: Optional[str] = None
     temperature: float = 0.0
-    files_config: Optional[Dict[str, Any]] = Field(default_factory=dict) # Per-file configurations
-    evaluation_config: Optional[Dict[str, Any]] = Field(default_factory=dict) # Evaluation settings (metrics, models, prompts)
+    files_config: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Per-file configurations
+    evaluation_config: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Evaluation settings (metrics, models, prompts)
 
 
 class SessionDocument(BaseModel):
@@ -63,7 +67,9 @@ class EvaluationResult(BaseModel):
     """Evaluation result for an extraction"""
 
     document_id: Optional[str] = None  # Links to specific document for per-doc scores
-    file_hash: Optional[str] = None  # Alternative way to identify document (used by frontend)
+    file_hash: Optional[str] = (
+        None  # Alternative way to identify document (used by frontend)
+    )
     entity_name: str
     model_id: str  # Source model that produced the extraction
     ground_truth: Optional[str] = None

@@ -174,23 +174,32 @@ class SessionService:
         existing_session = None
         if request.evaluation_config is not None or request.files_config is not None:
             existing_session = self.db.get_session(session_id, user_id)
-            
+
         if request.evaluation_config is not None:
             # Merge evaluation_config with existing instead of replacing
-            existing_eval_config = existing_session.get("evaluation_config", {}) if existing_session else {}
+            existing_eval_config = (
+                existing_session.get("evaluation_config", {})
+                if existing_session
+                else {}
+            )
             merged_eval_config = {**existing_eval_config, **request.evaluation_config}
             updates["evaluation_config"] = merged_eval_config
         if request.files_config is not None:
             # Merge files_config with existing instead of replacing
             # This preserves ground_truths and other per-file configs when updating one file
-            existing_files_config = existing_session.get("files_config", {}) if existing_session else {}
-            
+            existing_files_config = (
+                existing_session.get("files_config", {}) if existing_session else {}
+            )
+
             # Deep merge: for each file, merge its config
             merged_files_config = {**existing_files_config}
             for file_id, file_config in request.files_config.items():
                 if file_id in merged_files_config:
                     # Merge with existing file config
-                    merged_files_config[file_id] = {**merged_files_config[file_id], **file_config}
+                    merged_files_config[file_id] = {
+                        **merged_files_config[file_id],
+                        **file_config,
+                    }
                 else:
                     merged_files_config[file_id] = file_config
             updates["files_config"] = merged_files_config
@@ -303,7 +312,8 @@ class SessionService:
                 # If file_hash provided, find specific document
                 if result.file_hash:
                     matched_doc = next(
-                        (d for d in docs if d.get("file_hash") == result.file_hash), None
+                        (d for d in docs if d.get("file_hash") == result.file_hash),
+                        None,
                     )
                     if matched_doc:
                         document_id = matched_doc["id"]
@@ -349,7 +359,7 @@ class SessionService:
         # Find the extraction result
         extractions = self.db.get_extraction_results_by_session(session_id)
         extraction_id = None
-        
+
         # If file_hash is provided, look up the document_id first
         target_document_id = result.document_id
         if result.file_hash and not target_document_id:
@@ -378,8 +388,8 @@ class SessionService:
 
         if not extraction_id:
             print(
-                f"Warning: No extraction found for {result.entity_name}/{result.model_id}" +
-                (f" in document {target_document_id}" if target_document_id else "")
+                f"Warning: No extraction found for {result.entity_name}/{result.model_id}"
+                + (f" in document {target_document_id}" if target_document_id else "")
             )
             return False
 
@@ -387,16 +397,18 @@ class SessionService:
         if result.scores:
             # Check if this is a human_score_update request (has judge_model but metric is human_score_update)
             is_human_score_update = any(
-                score.metric == "human_score_update" and score.judge_model 
+                score.metric == "human_score_update" and score.judge_model
                 for score in result.scores
             )
-            
+
             if is_human_score_update and result.human_score is not None:
                 # Update human_score only for the specific judge_model
                 for score in result.scores:
                     if score.metric == "human_score_update" and score.judge_model:
                         # Find existing evaluation for this judge_model
-                        existing_evals = self.db.get_evaluation_results_by_extraction(extraction_id)
+                        existing_evals = self.db.get_evaluation_results_by_extraction(
+                            extraction_id
+                        )
                         judge_found = False
                         for eval_result in existing_evals:
                             if eval_result.get("judge_model") == score.judge_model:
@@ -408,7 +420,8 @@ class SessionService:
                                     reasoning=eval_result.get("reasoning"),
                                     judge_model=score.judge_model,
                                     human_score=result.human_score,
-                                    ground_truth=result.ground_truth or eval_result.get("ground_truth"),
+                                    ground_truth=result.ground_truth
+                                    or eval_result.get("ground_truth"),
                                 )
                                 judge_found = True
                                 break
@@ -439,7 +452,8 @@ class SessionService:
                         reasoning=eval_result.get("reasoning"),
                         judge_model=eval_result.get("judge_model"),
                         human_score=result.human_score,
-                        ground_truth=result.ground_truth or eval_result.get("ground_truth"),
+                        ground_truth=result.ground_truth
+                        or eval_result.get("ground_truth"),
                     )
             else:
                 # No existing evaluations, create a placeholder for human score
@@ -477,9 +491,11 @@ class SessionService:
         for doc in db_session.get("documents", []):
             documents.append(
                 SessionDocument(
-                    id=doc["id"],  # CRITICAL: Include ID for matching extraction results
+                    id=doc[
+                        "id"
+                    ],  # CRITICAL: Include ID for matching extraction results
                     file_hash=doc["file_hash"],
-                    filename=doc["filename"]
+                    filename=doc["filename"],
                 )
             )
 
@@ -490,7 +506,9 @@ class SessionService:
                 ExtractionResult(
                     entity_name=ext["entity_name"],
                     model_id=ext["model_id"],
-                    document_id=ext.get("document_id"),  # CRITICAL: Include document_id for multi-file sessions
+                    document_id=ext.get(
+                        "document_id"
+                    ),  # CRITICAL: Include document_id for multi-file sessions
                     extracted_text=ext.get("extracted_text"),
                     references=ext.get("bbox_references"),
                     status=ext.get("status", "pending"),
@@ -526,19 +544,27 @@ class SessionService:
                         # IMPORTANT: Update human_score and ground_truth from ANY matching eval_res
                         # to ensure we capture the most recent values (they could be on any row)
                         if eval_res.get("human_score") is not None:
-                            eval_by_extraction[key]["human_score"] = eval_res.get("human_score")
+                            eval_by_extraction[key]["human_score"] = eval_res.get(
+                                "human_score"
+                            )
                         if eval_res.get("ground_truth"):
-                            eval_by_extraction[key]["ground_truth"] = eval_res.get("ground_truth")
+                            eval_by_extraction[key]["ground_truth"] = eval_res.get(
+                                "ground_truth"
+                            )
                         if eval_res.get("evaluated_at"):
-                            eval_by_extraction[key]["evaluated_at"] = eval_res.get("evaluated_at")
-                    
+                            eval_by_extraction[key]["evaluated_at"] = eval_res.get(
+                                "evaluated_at"
+                            )
+
                     eval_by_extraction[key]["scores"].append(
                         {
                             "metric": eval_res["metric"],
                             "score": eval_res.get("score"),
                             "reasoning": eval_res.get("reasoning"),
                             "judge_model": eval_res.get("judge_model"),
-                            "human_score": eval_res.get("human_score"),  # Include per-judge human_score
+                            "human_score": eval_res.get(
+                                "human_score"
+                            ),  # Include per-judge human_score
                         }
                     )
                     break
