@@ -14,7 +14,7 @@ import { Button } from "./components/ui/button";
 import { Briefcase, LogOut, Clock } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
-import { supabase, Session } from "./lib/supabase";
+import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
 import { signOut, getCurrentUser, getValidToken } from "./utils/authUtils";
 import { Toaster, toast } from "./components/ui/sonner";
 
@@ -172,41 +172,45 @@ export default function App() {
   // Initialize Supabase auth listener
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }: { data: { session: Session | null } }) => {
+        setSession(session);
+        setLoading(false);
 
-      // If we have a session and we're on callback, redirect to main app
-      if (session && isAuthCallback) {
-        // Clean up URL
-        window.history.replaceState({}, document.title, "/");
-        setCurrentStep("upload");
-      }
-    });
+        // If we have a session and we're on callback, redirect to main app
+        if (session && isAuthCallback) {
+          // Clean up URL
+          window.history.replaceState({}, document.title, "/");
+          setCurrentStep("upload");
+        }
+      });
 
     // Listen for auth state changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        setSession(session);
 
-      if (session) {
-        // If we just logged in, go to upload
-        if (currentStep === "login" || currentStep === "auth_callback") {
-          // Clean up URL if needed
-          if (
-            window.location.pathname === "/auth/callback" ||
-            window.location.hash.includes("access_token")
-          ) {
-            window.history.replaceState({}, document.title, "/");
+        if (session) {
+          // If we just logged in, go to upload
+          if (currentStep === "login" || currentStep === "auth_callback") {
+            // Clean up URL if needed
+            if (
+              window.location.pathname === "/auth/callback" ||
+              window.location.hash.includes("access_token")
+            ) {
+              window.history.replaceState({}, document.title, "/");
+            }
+            setCurrentStep("upload");
           }
-          setCurrentStep("upload");
+        } else {
+          // Session ended, show login
+          setCurrentStep("login");
         }
-      } else {
-        // Session ended, show login
-        setCurrentStep("login");
       }
-    });
+    );
 
     return () => subscription.unsubscribe();
   }, []);
