@@ -165,7 +165,7 @@ export default function App() {
     finalSummary: "",
     uploadedFiles: [],
   });
-  
+
   // Ref to prevent duplicate session creation
   const sessionCreationInProgressRef = useRef(false);
 
@@ -225,7 +225,11 @@ export default function App() {
   // Exclude pages that shouldn't be restored to
   const nonRestorableSteps = ["login", "history", "auth_callback"];
   useEffect(() => {
-    if (documentData.sessionId && userInfo && !nonRestorableSteps.includes(currentStep)) {
+    if (
+      documentData.sessionId &&
+      userInfo &&
+      !nonRestorableSteps.includes(currentStep)
+    ) {
       const syncStep = async () => {
         try {
           const token = await getValidToken();
@@ -274,8 +278,8 @@ export default function App() {
       step === "upload" &&
       data.uploadedFiles &&
       data.uploadedFiles.length > 0 &&
-      !documentData.sessionId &&  // Only create if no session exists yet
-      !sessionCreationInProgressRef.current  // Prevent duplicate creation
+      !documentData.sessionId && // Only create if no session exists yet
+      !sessionCreationInProgressRef.current // Prevent duplicate creation
     ) {
       // Create a session immediately after upload
       sessionCreationInProgressRef.current = true;
@@ -294,9 +298,10 @@ export default function App() {
             hour12: true,
           });
           const fileCount = data.uploadedFiles.length;
-          const sessionName = fileCount === 1
-            ? `Extraction - ${dateStr}`
-            : `Batch (${fileCount} files) - ${dateStr}`;
+          const sessionName =
+            fileCount === 1
+              ? `Extraction - ${dateStr}`
+              : `Batch (${fileCount} files) - ${dateStr}`;
 
           const response = await fetch("/api/sessions", {
             method: "POST",
@@ -329,7 +334,7 @@ export default function App() {
             updatedData.sessionId = newSessionId;
 
             // CRITICAL: Update state immediately so the persistence useEffect has the ID
-            setDocumentData(prev => ({ ...prev, sessionId: newSessionId }));
+            setDocumentData((prev) => ({ ...prev, sessionId: newSessionId }));
 
             toast.success("Session created");
           }
@@ -412,27 +417,30 @@ export default function App() {
     setCurrentStep("login");
   };
 
-  const handleSessionDeleted = useCallback(async (_userId: string, sessionId: string) => {
-    // If the deleted session is the currently active one, clear the workspace
-    if (documentData.sessionId === sessionId) {
-      console.log("Current session deleted, clearing workspace");
-      setDocumentData({
-        file: null,
-        parser: "",
-        extractedText: "",
-        annotatedOutput: "",
-        studyType: "",
-        selectedModel: "",
-        entities: [],
-        finalSummary: "",
-        uploadedFiles: [],
-      });
-      // Optional: Force switch to upload if not already there or in history
-      if (currentStep !== "history") {
-        setCurrentStep("upload");
+  const handleSessionDeleted = useCallback(
+    async (_userId: string, sessionId: string) => {
+      // If the deleted session is the currently active one, clear the workspace
+      if (documentData.sessionId === sessionId) {
+        console.log("Current session deleted, clearing workspace");
+        setDocumentData({
+          file: null,
+          parser: "",
+          extractedText: "",
+          annotatedOutput: "",
+          studyType: "",
+          selectedModel: "",
+          entities: [],
+          finalSummary: "",
+          uploadedFiles: [],
+        });
+        // Optional: Force switch to upload if not already there or in history
+        if (currentStep !== "history") {
+          setCurrentStep("upload");
+        }
       }
-    }
-  }, [documentData.sessionId, currentStep]);
+    },
+    [documentData.sessionId, currentStep]
+  );
 
   const handleBack = () => {
     if (currentStep === "processing") {
@@ -486,17 +494,21 @@ export default function App() {
       const sessionData = await response.json();
       console.log("🚀 Restoring session:", sessionData.session_id);
       const config = sessionData.configuration || {};
-      const evalConfig = sessionData.evaluation_config || config.evaluation_config || {};
-      
+      const evalConfig =
+        sessionData.evaluation_config || config.evaluation_config || {};
+
       // Merge files_config from both sources:
       // - sessionData.files_config: Contains ground_truths (saved from EvaluationPage)
       // - config.files_config: Contains entities, study_type (saved from BatchStudySelectionPage)
       const topLevelFilesConfig = sessionData.files_config || {};
       const configFilesConfig = config.files_config || {};
       const filesConfig: Record<string, any> = {};
-      
+
       // Merge all keys from both sources
-      const allFileIds = new Set([...Object.keys(topLevelFilesConfig), ...Object.keys(configFilesConfig)]);
+      const allFileIds = new Set([
+        ...Object.keys(topLevelFilesConfig),
+        ...Object.keys(configFilesConfig),
+      ]);
       allFileIds.forEach((fileId) => {
         filesConfig[fileId] = {
           ...(configFilesConfig[fileId] || {}),
@@ -505,25 +517,31 @@ export default function App() {
       });
       // RECOVERY: Reconstruct entities from extraction results when config is incomplete or mismatched
       let configEntities = config.entities || [];
-      
+
       // Always check if extraction results have entities not in config
       if (sessionData.extraction_results?.length > 0) {
-        const configEntityNames = new Set(configEntities.map((e: any) => e.name));
+        const configEntityNames = new Set(
+          configEntities.map((e: any) => e.name)
+        );
         const extractionEntityNames = new Set(
           sessionData.extraction_results
             .map((r: any) => r.entity_name)
             .filter((name: string) => name !== "__paragraph_summary__")
         );
-        
+
         // Check if there are entity names in results that aren't in config
         const missingFromConfig = [...extractionEntityNames].filter(
           (name) => !configEntityNames.has(name)
         );
-        
+
         if (missingFromConfig.length > 0 || configEntities.length === 0) {
           console.warn(
             "Entity mismatch detected. Reconstructing from extraction results...",
-            { configNames: [...configEntityNames], extractionNames: [...extractionEntityNames], missing: missingFromConfig }
+            {
+              configNames: [...configEntityNames],
+              extractionNames: [...extractionEntityNames],
+              missing: missingFromConfig,
+            }
           );
 
           // Try to load template prompts if study type is available
@@ -541,19 +559,25 @@ export default function App() {
           }
 
           // Merge: keep existing config entities + add missing ones from extraction results
-          const allEntityNames = new Set([...configEntityNames, ...extractionEntityNames]);
+          const allEntityNames = new Set([
+            ...configEntityNames,
+            ...extractionEntityNames,
+          ]);
           configEntities = [...allEntityNames].map((name) => {
             // Try to find in existing config first
-            const existingEntity = configEntities.find((e: any) => e.name === name);
+            const existingEntity = configEntities.find(
+              (e: any) => e.name === name
+            );
             if (existingEntity) return existingEntity;
-            
+
             // Try to find matching prompt from template
             const templateEntity = templateEntities.find(
               (te) => te.name === name
             );
             return {
               name,
-              prompt: templateEntity?.prompt || "Restored from extraction result",
+              prompt:
+                templateEntity?.prompt || "Restored from extraction result",
               system_prompt: "",
             };
           });
@@ -570,15 +594,15 @@ export default function App() {
 
         // Restore uploaded files with proper processing status
         uploadedFiles: sessionData.documents.map((doc: any) => {
-          const fileConfig =
-            filesConfig[doc.file_hash] || {};
+          const fileConfig = filesConfig[doc.file_hash] || {};
 
           return {
             file: new File([""], doc.filename, { type: "application/pdf" }),
             fileId: doc.file_hash,
             // Restore study type and summary prompt from file config
             studyType: fileConfig.study_type || config.study_type || "",
-            summaryPrompt: fileConfig.summary_prompt || config.summary_prompt || "",
+            summaryPrompt:
+              fileConfig.summary_prompt || config.summary_prompt || "",
             // Reconstruct processing result enough for UI to look up file
             processingResult: {
               conversionId: doc.file_hash,
@@ -594,7 +618,9 @@ export default function App() {
             // Restore finalSummary from special hidden entity - MUST filter by document_id
             finalSummary:
               sessionData.extraction_results?.find(
-                (r: any) => r.entity_name === "__paragraph_summary__" && r.document_id === doc.id
+                (r: any) =>
+                  r.entity_name === "__paragraph_summary__" &&
+                  r.document_id === doc.id
               )?.extracted_text || "",
 
             selectedModels: config.selected_models || [],
@@ -603,17 +629,28 @@ export default function App() {
               // Get entity names that have extraction results for THIS document
               const docExtractionNames = new Set(
                 sessionData.extraction_results
-                  ?.filter((r: any) => r.document_id === doc.id && r.entity_name !== "__paragraph_summary__")
+                  ?.filter(
+                    (r: any) =>
+                      r.document_id === doc.id &&
+                      r.entity_name !== "__paragraph_summary__"
+                  )
                   .map((r: any) => r.entity_name) || []
               );
-              
+
               // Merge with config entities to get full list
-              const configEntityNames = new Set((fileConfig.entities || configEntities).map((e: any) => e.name));
-              const allEntityNames = new Set([...docExtractionNames, ...configEntityNames]);
-              
+              const configEntityNames = new Set(
+                (fileConfig.entities || configEntities).map((e: any) => e.name)
+              );
+              const allEntityNames = new Set([
+                ...docExtractionNames,
+                ...configEntityNames,
+              ]);
+
               // Build entity list prioritizing extraction results
               return [...allEntityNames].map((entityName) => {
-                const e = (fileConfig.entities || configEntities).find((ce: any) => ce.name === entityName) || {
+                const e = (fileConfig.entities || configEntities).find(
+                  (ce: any) => ce.name === entityName
+                ) || {
                   name: entityName,
                   prompt: "Restored from extraction result",
                   system_prompt: "",
@@ -623,14 +660,14 @@ export default function App() {
             })().map((e: any) => {
               // Find extraction result for this entity
               const result = sessionData.extraction_results?.find(
-                (r: any) =>
-                  r.entity_name === e.name && r.document_id === doc.id
+                (r: any) => r.entity_name === e.name && r.document_id === doc.id
               );
 
               // Find evaluation results for this entity - MUST filter by document_id to avoid cross-file contamination
               const entityEvaluations =
                 sessionData.evaluation_results?.filter(
-                  (ev: any) => ev.entity_name === e.name && 
+                  (ev: any) =>
+                    ev.entity_name === e.name &&
                     (ev.document_id === doc.id || !ev.document_id) // Match by document or legacy (no doc_id)
                 ) || [];
 
@@ -638,7 +675,8 @@ export default function App() {
               const groundTruth =
                 fileConfig.ground_truths?.[e.name] ||
                 entityEvaluations.find((ev: any) => ev.ground_truth)
-                  ?.ground_truth || "";
+                  ?.ground_truth ||
+                "";
 
               // Group evaluation scores by model for reconstructing evaluationResults
               const evaluationsByJudge = entityEvaluations.reduce(
@@ -646,9 +684,11 @@ export default function App() {
                   // The API returns nested scores array
                   if (ev.scores && Array.isArray(ev.scores)) {
                     ev.scores.forEach((scoreItem: any) => {
-                      const key = scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
+                      const key =
+                        scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
                       // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                      const itemHumanScore = scoreItem.human_score ?? ev.human_score;
+                      const itemHumanScore =
+                        scoreItem.human_score ?? ev.human_score;
 
                       if (!acc[key]) {
                         acc[key] = {
@@ -715,9 +755,9 @@ export default function App() {
                   const avgScore =
                     evalResult.metrics.length > 0
                       ? evalResult.metrics.reduce(
-                        (sum: number, m: any) => sum + m.score,
-                        0
-                      ) / evalResult.metrics.length
+                          (sum: number, m: any) => sum + m.score,
+                          0
+                        ) / evalResult.metrics.length
                       : 0;
                   return {
                     ...evalResult,
@@ -753,10 +793,13 @@ export default function App() {
                           ev.scores.forEach((scoreItem: any) => {
                             const key = scoreItem.judge_model || "unknown";
                             // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                            const itemHumanScore = scoreItem.human_score ?? ev.human_score;
+                            const itemHumanScore =
+                              scoreItem.human_score ?? ev.human_score;
                             if (!judgeAcc[key]) {
                               judgeAcc[key] = {
-                                provider: scoreItem.judge_model?.includes("gemini")
+                                provider: scoreItem.judge_model?.includes(
+                                  "gemini"
+                                )
                                   ? "vertex_ai"
                                   : scoreItem.judge_model?.includes("claude")
                                     ? "anthropic"
@@ -787,25 +830,29 @@ export default function App() {
                     );
 
                     // Calculate aggregate scores for this source model's evaluations
-                    const modelEvalResults = Object.values(modelEvalsByJudge).map(
-                      (evalResult: any) => {
-                        const avgScore =
-                          evalResult.metrics.length > 0
-                            ? evalResult.metrics.reduce(
-                                (sum: number, m: any) => sum + (m.score || 0),
-                                0
-                              ) / evalResult.metrics.length
-                            : 0;
-                        return {
-                          ...evalResult,
-                          aggregate_score: avgScore,
-                          all_passed: evalResult.metrics.every((m: any) => m.success),
-                        };
-                      }
-                    );
+                    const modelEvalResults = Object.values(
+                      modelEvalsByJudge
+                    ).map((evalResult: any) => {
+                      const avgScore =
+                        evalResult.metrics.length > 0
+                          ? evalResult.metrics.reduce(
+                              (sum: number, m: any) => sum + (m.score || 0),
+                              0
+                            ) / evalResult.metrics.length
+                          : 0;
+                      return {
+                        ...evalResult,
+                        aggregate_score: avgScore,
+                        all_passed: evalResult.metrics.every(
+                          (m: any) => m.success
+                        ),
+                      };
+                    });
 
                     // Get human score from evaluations for this model (legacy fallback for extraction-level human_score)
-                    const humanScore = modelEvaluations.find((ev: any) => ev.human_score != null)?.human_score;
+                    const humanScore = modelEvaluations.find(
+                      (ev: any) => ev.human_score != null
+                    )?.human_score;
 
                     acc[r.model_id] = {
                       extracted: r.extracted_text,
@@ -852,14 +899,18 @@ export default function App() {
           const docId = sessionData.documents[0]?.id;
           const entityEvaluations =
             sessionData.evaluation_results?.filter(
-              (ev: any) => ev.entity_name === e.name &&
+              (ev: any) =>
+                ev.entity_name === e.name &&
                 (ev.document_id === docId || !ev.document_id) // Match by document or legacy (no doc_id)
             ) || [];
           // Get ground truth from files_config first, fallback to evaluation results
           const groundTruth =
-            filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[e.name] ||
+            filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
+              e.name
+            ] ||
             entityEvaluations.find((ev: any) => ev.ground_truth)
-              ?.ground_truth || "";
+              ?.ground_truth ||
+            "";
 
           // Group and reconstruct evaluation results
           const evaluationsByJudge = entityEvaluations.reduce(
@@ -867,9 +918,11 @@ export default function App() {
               // The API returns nested scores array
               if (ev.scores && Array.isArray(ev.scores)) {
                 ev.scores.forEach((scoreItem: any) => {
-                  const key = scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
+                  const key =
+                    scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
                   // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                  const itemHumanScore = scoreItem.human_score ?? ev.human_score;
+                  const itemHumanScore =
+                    scoreItem.human_score ?? ev.human_score;
 
                   if (!acc[key]) {
                     acc[key] = {
@@ -935,9 +988,9 @@ export default function App() {
               const avgScore =
                 evalResult.metrics.length > 0
                   ? evalResult.metrics.reduce(
-                    (sum: number, m: any) => sum + m.score,
-                    0
-                  ) / evalResult.metrics.length
+                      (sum: number, m: any) => sum + m.score,
+                      0
+                    ) / evalResult.metrics.length
                   : 0;
               return {
                 ...evalResult,
@@ -961,8 +1014,6 @@ export default function App() {
                   r.document_id === sessionData.documents[0]?.id
               )
               .reduce((acc: any, r: any) => {
-                // Find evaluations for THIS SPECIFIC source model (r.model_id)
-                const docId = sessionData.documents[0]?.id;
                 const modelEvaluations = entityEvaluations.filter(
                   (ev: any) => ev.model_id === r.model_id
                 );
@@ -1017,13 +1068,17 @@ export default function App() {
                     return {
                       ...evalResult,
                       aggregate_score: avgScore,
-                      all_passed: evalResult.metrics.every((m: any) => m.success),
+                      all_passed: evalResult.metrics.every(
+                        (m: any) => m.success
+                      ),
                     };
                   }
                 );
 
                 // Get human score from evaluations for this model
-                const humanScore = modelEvaluations.find((ev: any) => ev.human_score != null)?.human_score;
+                const humanScore = modelEvaluations.find(
+                  (ev: any) => ev.human_score != null
+                )?.human_score;
 
                 acc[r.model_id] = {
                   extracted: r.extracted_text,
@@ -1040,20 +1095,24 @@ export default function App() {
       };
 
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
-      sessionCreationInProgressRef.current = false;  // Reset in case it was stuck
+      sessionCreationInProgressRef.current = false; // Reset in case it was stuck
       toast.success("Session restored successfully");
 
       // Determine the step to restore to
       // Skip "upload" step since restored sessions don't have actual File objects
-      const validLastStep = sessionData.last_step &&
+      const validLastStep =
+        sessionData.last_step &&
         sessionData.last_step !== "login" &&
         sessionData.last_step !== "history" &&
-        sessionData.last_step !== "upload";  // Skip upload - files are already "uploaded"
-      
+        sessionData.last_step !== "upload"; // Skip upload - files are already "uploaded"
+
       if (validLastStep) {
         console.log("Restoring to last step:", sessionData.last_step);
         setCurrentStep(sessionData.last_step as Step);
-      } else if (restoredData.uploadedFiles && restoredData.uploadedFiles.length > 0) {
+      } else if (
+        restoredData.uploadedFiles &&
+        restoredData.uploadedFiles.length > 0
+      ) {
         // We have files, go to study selection
         setCurrentStep("study_selection");
       } else {
@@ -1083,7 +1142,9 @@ export default function App() {
           <SessionHistoryPage
             userId={userInfo?.id || ""}
             onRestoreSession={handleRestoreSession}
-            onSessionDeleted={(sessionId) => handleSessionDeleted(userInfo?.id || "", sessionId)}
+            onSessionDeleted={(sessionId) =>
+              handleSessionDeleted(userInfo?.id || "", sessionId)
+            }
             onBack={handleBack}
           />
         );

@@ -172,9 +172,10 @@ export function transformToRows(documentData: any): ResultRow[] {
 
         const actualOutput = extractionData.extracted || "";
         const evalResults = extractionData.evaluationResults || [];
-        
+
         // Human score can be at extraction level or inside each evaluation result
-        const extractionHumanScore = extractionData.humanScore ?? extractionData.human_score ?? null;
+        const extractionHumanScore =
+          extractionData.humanScore ?? extractionData.human_score ?? null;
 
         if (evalResults.length === 0) {
           rows.push({
@@ -195,14 +196,21 @@ export function transformToRows(documentData: any): ResultRow[] {
             completeness: null,
             relevance: null,
             safety: null,
-            humanEval: extractionHumanScore !== null 
-              ? (typeof extractionHumanScore === 'number' ? Math.round(extractionHumanScore * 100) : extractionHumanScore) 
-              : null,
+            humanEval:
+              extractionHumanScore !== null
+                ? typeof extractionHumanScore === "number"
+                  ? Math.round(extractionHumanScore * 100)
+                  : extractionHumanScore
+                : null,
           });
         } else {
           for (const result of evalResults) {
             // Read human_score from evaluation result first, fallback to extraction level
-            const humanScore = result.human_score ?? result.humanScore ?? extractionHumanScore ?? null;
+            const humanScore =
+              result.human_score ??
+              result.humanScore ??
+              extractionHumanScore ??
+              null;
             rows.push({
               id: `row-${idCounter++}`,
               fileId: fileId,
@@ -221,7 +229,12 @@ export function transformToRows(documentData: any): ResultRow[] {
               completeness: getMetricScore(result, "completeness"),
               relevance: getMetricScore(result, "relevance"),
               safety: getMetricScore(result, "safety"),
-              humanEval: humanScore !== null ? (typeof humanScore === 'number' ? Math.round(humanScore * 100) : humanScore) : null,
+              humanEval:
+                humanScore !== null
+                  ? typeof humanScore === "number"
+                    ? Math.round(humanScore * 100)
+                    : humanScore
+                  : null,
             });
           }
         }
@@ -390,40 +403,43 @@ export default function BatchResultsPage({
   };
 
   // Update human eval score (0-100) with debounced save
-  const updateHumanEval = useCallback((rowId: string, value: number | null) => {
-    // Find the row first (before state update, to capture current values)
-    const currentRow = rows.find((r) => r.id === rowId);
+  const updateHumanEval = useCallback(
+    (rowId: string, value: number | null) => {
+      // Find the row first (before state update, to capture current values)
+      const currentRow = rows.find((r) => r.id === rowId);
 
-    // Update local state immediately
-    setRows((prev) =>
-      prev.map((r) => (r.id === rowId ? { ...r, humanEval: value } : r))
-    );
+      // Update local state immediately
+      setRows((prev) =>
+        prev.map((r) => (r.id === rowId ? { ...r, humanEval: value } : r))
+      );
 
-    // Clear any existing debounce timer for this row
-    if (saveTimersRef.current[rowId]) {
-      clearTimeout(saveTimersRef.current[rowId]);
-    }
+      // Clear any existing debounce timer for this row
+      if (saveTimersRef.current[rowId]) {
+        clearTimeout(saveTimersRef.current[rowId]);
+      }
 
-    // Debounce the save call
-    // Only save if we have a judge model - human scores are stored per (entity, source_model, judge_model)
-    if (currentRow && onSaveHumanScore && currentRow.judgeRaw) {
-      // Capture row data now to avoid stale closure
-      const saveData = {
-        fileId: currentRow.fileId,
-        entityName: currentRow.entity,
-        sourceModel: currentRow.sourceModelRaw,
-        judgeModel: currentRow.judgeRaw,
-        humanScore: value,
-        groundTruth: currentRow.groundTruth,
-      };
+      // Debounce the save call
+      // Only save if we have a judge model - human scores are stored per (entity, source_model, judge_model)
+      if (currentRow && onSaveHumanScore && currentRow.judgeRaw) {
+        // Capture row data now to avoid stale closure
+        const saveData = {
+          fileId: currentRow.fileId,
+          entityName: currentRow.entity,
+          sourceModel: currentRow.sourceModelRaw,
+          judgeModel: currentRow.judgeRaw,
+          humanScore: value,
+          groundTruth: currentRow.groundTruth,
+        };
 
-      saveTimersRef.current[rowId] = setTimeout(() => {
-        onSaveHumanScore(saveData).catch((err) => {
-          console.error("Failed to save human score:", err);
-        });
-      }, 500); // 500ms debounce
-    }
-  }, [rows, onSaveHumanScore]);
+        saveTimersRef.current[rowId] = setTimeout(() => {
+          onSaveHumanScore(saveData).catch((err) => {
+            console.error("Failed to save human score:", err);
+          });
+        }, 500); // 500ms debounce
+      }
+    },
+    [rows, onSaveHumanScore]
+  );
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -771,14 +787,18 @@ export default function BatchResultsPage({
                             e.target.value === ""
                               ? null
                               : Math.min(
-                                100,
-                                Math.max(0, parseInt(e.target.value) || 0)
-                              );
+                                  100,
+                                  Math.max(0, parseInt(e.target.value) || 0)
+                                );
                           updateHumanEval(row.id, val);
                         }}
                         placeholder={row.judgeRaw ? "Score" : "N/A"}
                         disabled={!row.judgeRaw}
-                        title={!row.judgeRaw ? "Run evaluation first to enable human scoring" : "Enter human evaluation score (0-100)"}
+                        title={
+                          !row.judgeRaw
+                            ? "Run evaluation first to enable human scoring"
+                            : "Enter human evaluation score (0-100)"
+                        }
                         className={`h-8 text-sm w-20 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
                       />
                     </TableCell>
@@ -935,9 +955,9 @@ export default function BatchResultsPage({
                           e.target.value === ""
                             ? null
                             : Math.min(
-                              100,
-                              Math.max(0, parseInt(e.target.value) || 0)
-                            );
+                                100,
+                                Math.max(0, parseInt(e.target.value) || 0)
+                              );
                         updateHumanEval(selectedRowForCompare.id, val);
                         setSelectedRowForCompare({
                           ...selectedRowForCompare,

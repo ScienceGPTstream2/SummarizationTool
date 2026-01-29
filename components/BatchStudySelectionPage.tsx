@@ -292,7 +292,7 @@ export function BatchStudySelectionPage({
           configuration: {
             selected_models: selectedModels,
           },
-          files_config: files_config,  // Top-level, not nested in configuration
+          files_config: files_config, // Top-level, not nested in configuration
         }),
       });
       if (!response.ok) {
@@ -747,8 +747,9 @@ export function BatchStudySelectionPage({
                     <span className="text-xs text-muted-foreground">
                       {/* Get file size from: uploadResult.file_size, file.file.size, or show PDF indicator */}
                       {(() => {
-                        const size = file.uploadResult?.file_size ?? file.file?.size ?? 0;
-                        return size > 0 
+                        const size =
+                          file.uploadResult?.file_size ?? file.file?.size ?? 0;
+                        return size > 0
                           ? `${(size / 1024 / 1024).toFixed(2)} MB`
                           : "PDF Document";
                       })()}

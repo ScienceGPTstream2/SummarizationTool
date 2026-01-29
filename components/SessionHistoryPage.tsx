@@ -49,9 +49,7 @@ interface SessionHistoryPageProps {
 // Helper to format study type for display
 const formatStudyType = (studyType?: string | null): string => {
   if (!studyType) return "";
-  return studyType
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return studyType.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
 // Helper to generate a display name for the session
@@ -70,7 +68,9 @@ const getDisplayName = (session: SessionSummary): string => {
       // Single file: use truncated filename
       const filename = session.document_names[0];
       const baseName = filename.replace(/\.[^/.]+$/, ""); // Remove extension
-      return baseName.length > 30 ? baseName.substring(0, 30) + "..." : baseName;
+      return baseName.length > 30
+        ? baseName.substring(0, 30) + "..."
+        : baseName;
     }
     return `Session - ${date}`;
   }
@@ -85,7 +85,9 @@ export function SessionHistoryPage({
 }: SessionHistoryPageProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(
+    new Set()
+  );
 
   const toggleExpanded = (sessionId: string) => {
     setExpandedSessions((prev) => {
@@ -219,7 +221,7 @@ export function SessionHistoryPage({
               sessions.map((session) => {
                 const isExpanded = expandedSessions.has(session.session_id);
                 const displayName = getDisplayName(session);
-                
+
                 return (
                   <TableRow key={session.session_id} className="group">
                     <TableCell className="font-medium">
@@ -229,7 +231,10 @@ export function SessionHistoryPage({
                             {displayName}
                           </span>
                           {session.study_type && (
-                            <Badge variant="secondary" className="text-xs font-normal">
+                            <Badge
+                              variant="secondary"
+                              className="text-xs font-normal"
+                            >
                               <FlaskConical className="h-3 w-3 mr-1" />
                               {formatStudyType(session.study_type)}
                             </Badge>
@@ -245,25 +250,32 @@ export function SessionHistoryPage({
                         variant="outline"
                         className={getStatusColor(session.status)}
                       >
-                        {session.status === "completed" ? "Finished" : "In Progress"}
+                        {session.status === "completed"
+                          ? "Finished"
+                          : "In Progress"}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <button
-                          onClick={() => session.document_names.length > 0 && toggleExpanded(session.session_id)}
+                          onClick={() =>
+                            session.document_names.length > 0 &&
+                            toggleExpanded(session.session_id)
+                          }
                           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
                           disabled={session.document_names.length === 0}
                         >
                           <FileText className="h-4 w-4" />
-                          <span>{session.document_count} file{session.document_count !== 1 ? "s" : ""}</span>
-                          {session.document_names.length > 0 && (
-                            isExpanded ? (
+                          <span>
+                            {session.document_count} file
+                            {session.document_count !== 1 ? "s" : ""}
+                          </span>
+                          {session.document_names.length > 0 &&
+                            (isExpanded ? (
                               <ChevronUp className="h-3 w-3" />
                             ) : (
                               <ChevronDown className="h-3 w-3" />
-                            )
-                          )}
+                            ))}
                         </button>
                         {isExpanded && session.document_names.length > 0 && (
                           <div className="mt-1 ml-5 space-y-0.5">

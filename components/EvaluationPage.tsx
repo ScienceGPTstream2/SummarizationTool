@@ -223,16 +223,23 @@ export function EvaluationPage({
 
   // Sync files when session changes (e.g., after session restore)
   useEffect(() => {
-    if (!documentData.sessionId || !documentData.uploadedFiles || documentData.uploadedFiles.length === 0) {
+    if (
+      !documentData.sessionId ||
+      !documentData.uploadedFiles ||
+      documentData.uploadedFiles.length === 0
+    ) {
       return;
     }
 
     // Only sync when session ID changes (not on every data update)
     if (lastSyncedSessionRef.current !== documentData.sessionId) {
-      console.log("[EvaluationPage] Session changed, syncing files:", documentData.sessionId);
+      console.log(
+        "[EvaluationPage] Session changed, syncing files:",
+        documentData.sessionId
+      );
       setFiles(documentData.uploadedFiles);
       lastSyncedSessionRef.current = documentData.sessionId;
-      
+
       if (documentData.uploadedFiles.length > 0) {
         setSelectedFileId(documentData.uploadedFiles[0].fileId);
       }
@@ -382,7 +389,7 @@ export function EvaluationPage({
     Record<string, string[]>
   >(
     documentData.evaluationConfig?.customEvaluationSteps ||
-    DEFAULT_EVALUATION_STEPS
+      DEFAULT_EVALUATION_STEPS
   );
 
   // Dialog state for viewing/editing evaluation prompts
@@ -413,7 +420,7 @@ export function EvaluationPage({
     isOpen: false,
     title: "",
     description: "",
-    action: () => { },
+    action: () => {},
   });
 
   // Validation dialog state
@@ -586,7 +593,12 @@ export function EvaluationPage({
         clearTimeout(evalConfigSaveTimerRef.current);
       }
     };
-  }, [selectedMetrics, selectedProviders, customEvaluationSteps, selectedSourceModels]);
+  }, [
+    selectedMetrics,
+    selectedProviders,
+    customEvaluationSteps,
+    selectedSourceModels,
+  ]);
 
   // Persist ground truths to entities in documentData whenever they change
   // Persist ground truths to entities in files state whenever they change
@@ -624,8 +636,8 @@ export function EvaluationPage({
       // Also update legacy fields for backward compatibility if single file
       ...(files.length === 1
         ? {
-          entities: files[0].entities,
-        }
+            entities: files[0].entities,
+          }
         : {}),
     }));
   }, [files]);
@@ -656,7 +668,12 @@ export function EvaluationPage({
   }, [selectedMetrics, entityGroundTruths, currentFile]);
 
   const updateGroundTruth = (entityName: string, value: string) => {
-    console.log("[Ground Truth] User editing:", entityName, "value length:", value.length);
+    console.log(
+      "[Ground Truth] User editing:",
+      entityName,
+      "value length:",
+      value.length
+    );
     hasUserEditedGroundTruthRef.current = true;
     setEntityGroundTruths((prev) => ({
       ...prev,
@@ -693,7 +710,7 @@ export function EvaluationPage({
       evaluation_time: number;
     }>,
     humanScore?: number,
-    documentId?: string  // Add document_id for multi-file support
+    documentId?: string // Add document_id for multi-file support
   ) => {
     const sessionId = documentData.sessionId;
     if (!sessionId) {
@@ -716,16 +733,19 @@ export function EvaluationPage({
         "Entity Extraction Relevance": "relevance",
         "Entity Extraction Safety": "safety",
         // Direct mappings (in case short names are used)
-        "correctness": "correctness",
-        "completeness": "completeness",
-        "relevance": "relevance",
-        "safety": "safety",
+        correctness: "correctness",
+        completeness: "completeness",
+        relevance: "relevance",
+        safety: "safety",
       };
 
       // Transform evaluation results to backend schema format
       const scores = evaluationResults.flatMap((result) =>
         result.metrics.map((metric) => ({
-          metric: metricNameMap[metric.metric_name] || metric.metric_name.toLowerCase().split(" ").pop() || "unknown",
+          metric:
+            metricNameMap[metric.metric_name] ||
+            metric.metric_name.toLowerCase().split(" ").pop() ||
+            "unknown",
           score: metric.score,
           reasoning: metric.reason,
           judge_model: result.model,
@@ -743,7 +763,7 @@ export function EvaluationPage({
           body: JSON.stringify({
             entity_name: entityName,
             model_id: modelId,
-            file_hash: documentId,  // Use file_hash for multi-file sessions (backend looks up document_id from this)
+            file_hash: documentId, // Use file_hash for multi-file sessions (backend looks up document_id from this)
             ground_truth: groundTruth,
             scores: scores,
             human_score: humanScore,
@@ -753,7 +773,7 @@ export function EvaluationPage({
 
       if (response.ok) {
         console.log(
-          `[Eval Persist] Saved evaluation for ${entityName}/${modelId} (doc: ${documentId || 'none'})`
+          `[Eval Persist] Saved evaluation for ${entityName}/${modelId} (doc: ${documentId || "none"})`
         );
       } else {
         const errorBody = await response.text();
@@ -791,7 +811,8 @@ export function EvaluationPage({
       if (!user) return;
 
       // Convert human score from 0-100 to 0-1 scale for storage
-      const normalizedScore = params.humanScore !== null ? params.humanScore / 100 : undefined;
+      const normalizedScore =
+        params.humanScore !== null ? params.humanScore / 100 : undefined;
 
       const response = await fetch(
         `/api/sessions/${sessionId}/evaluations?user_id=${user.id}`,
@@ -807,12 +828,16 @@ export function EvaluationPage({
             model_id: params.sourceModel,
             ground_truth: params.groundTruth || undefined,
             // Include judge_model in scores to update specific judge's human_score
-            scores: params.judgeModel ? [{
-              metric: "human_score_update",
-              score: null,
-              reasoning: null,
-              judge_model: params.judgeModel,
-            }] : [],
+            scores: params.judgeModel
+              ? [
+                  {
+                    metric: "human_score_update",
+                    score: null,
+                    reasoning: null,
+                    judge_model: params.judgeModel,
+                  },
+                ]
+              : [],
             human_score: normalizedScore,
           }),
         }
@@ -824,41 +849,54 @@ export function EvaluationPage({
         setDocumentData((prev: DocumentData) => ({
           ...prev,
           uploadedFiles: (prev.uploadedFiles || []).map((file: any) => {
-            if (file.fileId !== params.fileId && file.processingResult?.conversionId !== params.fileId) {
+            if (
+              file.fileId !== params.fileId &&
+              file.processingResult?.conversionId !== params.fileId
+            ) {
               return file;
             }
-            
+
             return {
               ...file,
-              evaluationEntities: (file.evaluationEntities || []).map((entity: any) => {
-                if (entity.name !== params.entityName) return entity;
-                
-                // Update extractionsByModel
-                const updatedExtractionsByModel = { ...entity.extractionsByModel };
-                if (updatedExtractionsByModel[params.sourceModel]) {
-                  const extraction = { ...updatedExtractionsByModel[params.sourceModel] };
-                  
-                  // Update human_score in the specific judge's evaluation result
-                  if (params.judgeModel && extraction.evaluationResults) {
-                    extraction.evaluationResults = extraction.evaluationResults.map((evalResult: any) => {
-                      if (evalResult.model === params.judgeModel) {
-                        return { ...evalResult, human_score: normalizedScore };
-                      }
-                      return evalResult;
-                    });
-                  } else {
-                    // Fallback: update at extraction level
-                    extraction.humanScore = normalizedScore;
+              evaluationEntities: (file.evaluationEntities || []).map(
+                (entity: any) => {
+                  if (entity.name !== params.entityName) return entity;
+
+                  // Update extractionsByModel
+                  const updatedExtractionsByModel = {
+                    ...entity.extractionsByModel,
+                  };
+                  if (updatedExtractionsByModel[params.sourceModel]) {
+                    const extraction = {
+                      ...updatedExtractionsByModel[params.sourceModel],
+                    };
+
+                    // Update human_score in the specific judge's evaluation result
+                    if (params.judgeModel && extraction.evaluationResults) {
+                      extraction.evaluationResults =
+                        extraction.evaluationResults.map((evalResult: any) => {
+                          if (evalResult.model === params.judgeModel) {
+                            return {
+                              ...evalResult,
+                              human_score: normalizedScore,
+                            };
+                          }
+                          return evalResult;
+                        });
+                    } else {
+                      // Fallback: update at extraction level
+                      extraction.humanScore = normalizedScore;
+                    }
+
+                    updatedExtractionsByModel[params.sourceModel] = extraction;
                   }
-                  
-                  updatedExtractionsByModel[params.sourceModel] = extraction;
+
+                  return {
+                    ...entity,
+                    extractionsByModel: updatedExtractionsByModel,
+                  };
                 }
-                
-                return {
-                  ...entity,
-                  extractionsByModel: updatedExtractionsByModel,
-                };
-              }),
+              ),
             };
           }),
         }));
@@ -878,14 +916,21 @@ export function EvaluationPage({
   const saveGroundTruthsToSession = async () => {
     const sessionId = documentData.sessionId;
     const fileId = currentFile?.fileId;
-    
-    console.log("[Ground Truth] Save called - sessionId:", sessionId, "fileId:", fileId, "edited:", hasUserEditedGroundTruthRef.current);
-    
+
+    console.log(
+      "[Ground Truth] Save called - sessionId:",
+      sessionId,
+      "fileId:",
+      fileId,
+      "edited:",
+      hasUserEditedGroundTruthRef.current
+    );
+
     if (!sessionId || !fileId) {
       console.log("[Ground Truth] Missing sessionId or fileId, skipping");
       return;
     }
-    
+
     if (!hasUserEditedGroundTruthRef.current) {
       console.log("[Ground Truth] No edits made, skipping");
       return;
@@ -897,7 +942,7 @@ export function EvaluationPage({
         groundTruths[name] = value;
       }
     });
-    
+
     console.log("[Ground Truth] Saving:", groundTruths);
 
     try {
@@ -1022,7 +1067,7 @@ export function EvaluationPage({
       ...prev,
       [metricId]:
         DEFAULT_EVALUATION_STEPS[
-        metricId as keyof typeof DEFAULT_EVALUATION_STEPS
+          metricId as keyof typeof DEFAULT_EVALUATION_STEPS
         ] || [],
     }));
   };
@@ -1045,8 +1090,12 @@ export function EvaluationPage({
     // In batch mode: use selectedSourceModels
     // In single mode: use singleModeSourceModel or fallback to entity.extracted
     const sourceModelsToEvaluate = isBatchMode
-      ? (selectedSourceModels.length > 0 ? selectedSourceModels : availableSourceModels)
-      : (singleModeSourceModel ? [singleModeSourceModel] : []);
+      ? selectedSourceModels.length > 0
+        ? selectedSourceModels
+        : availableSourceModels
+      : singleModeSourceModel
+        ? [singleModeSourceModel]
+        : [];
 
     console.log(
       `🔄 Evaluating entity: ${entity.name} with ${providers.length} judge models across ${sourceModelsToEvaluate.length || 1} source models...`
@@ -1083,9 +1132,12 @@ export function EvaluationPage({
       }
     } else {
       // Fallback to legacy single extraction
-      const sourceModel = currentFile?.selectedModel || 
-        (entity.extractionsByModel ? Object.keys(entity.extractionsByModel)[0] : "unknown");
-      
+      const sourceModel =
+        currentFile?.selectedModel ||
+        (entity.extractionsByModel
+          ? Object.keys(entity.extractionsByModel)[0]
+          : "unknown");
+
       for (const providerId of providers) {
         if (signal.aborted) continue;
 
@@ -1177,9 +1229,7 @@ export function EvaluationPage({
           `[Evaluation Error] ${provider.name} - ${entity.name}:`,
           error.detail || error
         );
-        throw new Error(
-          error.detail || `Evaluation failed for ${entity.name}`
-        );
+        throw new Error(error.detail || `Evaluation failed for ${entity.name}`);
       }
 
       const result = await response.json();
@@ -1236,8 +1286,13 @@ export function EvaluationPage({
                 if (!extByModel[sourceModel].evaluationResults) {
                   extByModel[sourceModel].evaluationResults = [];
                 }
-                const extFilteredResults = extByModel[sourceModel].evaluationResults.filter(
-                  (r: any) => !(r.provider === result.provider && r.model === result.model)
+                const extFilteredResults = extByModel[
+                  sourceModel
+                ].evaluationResults.filter(
+                  (r: any) =>
+                    !(
+                      r.provider === result.provider && r.model === result.model
+                    )
                 );
                 extByModel[sourceModel].evaluationResults = [
                   ...extFilteredResults,
@@ -1248,7 +1303,10 @@ export function EvaluationPage({
 
             // Persist to PostgreSQL - include document_id for multi-file support
             // Use the file's fileId as the document identifier
-            const documentId = file.fileId || file.processingResult?.conversionId || selectedFileId;
+            const documentId =
+              file.fileId ||
+              file.processingResult?.conversionId ||
+              selectedFileId;
             saveEvaluationResult(
               entity.name,
               sourceModel,
@@ -1540,13 +1598,19 @@ export function EvaluationPage({
 
   // Batch Mode Functions
   const batchGroundTruthDirtyRef = useRef<Set<string>>(new Set());
-  
+
   const updateBatchGroundTruth = (
     fileId: string,
     entityName: string,
     value: string
   ) => {
-    console.log("[Batch Ground Truth] Editing:", fileId, entityName, "value length:", value.length);
+    console.log(
+      "[Batch Ground Truth] Editing:",
+      fileId,
+      entityName,
+      "value length:",
+      value.length
+    );
     batchGroundTruthDirtyRef.current.add(fileId);
     setFiles((prevFiles) =>
       prevFiles.map((f) => {
@@ -1562,35 +1626,35 @@ export function EvaluationPage({
       })
     );
   };
-  
+
   const saveBatchGroundTruths = async (fileId: string) => {
     const sessionId = documentData.sessionId;
     if (!sessionId || !batchGroundTruthDirtyRef.current.has(fileId)) {
       console.log("[Batch Ground Truth] Skip save - no changes for:", fileId);
       return;
     }
-    
-    const file = files.find(f => f.fileId === fileId);
+
+    const file = files.find((f) => f.fileId === fileId);
     if (!file) return;
-    
+
     const groundTruths: Record<string, string> = {};
     (file.entities || []).forEach((e: any) => {
       if (e.groundTruth?.trim()) {
         groundTruths[e.name] = e.groundTruth;
       }
     });
-    
+
     console.log("[Batch Ground Truth] Saving for", fileId, ":", groundTruths);
     batchGroundTruthDirtyRef.current.delete(fileId);
-    
+
     try {
       const token = await getValidToken();
       if (!token) return;
-      
+
       const { getCurrentUser } = await import("../utils/authUtils");
       const user = await getCurrentUser();
       if (!user) return;
-      
+
       const response = await fetch(`/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: {
@@ -1604,7 +1668,7 @@ export function EvaluationPage({
           },
         }),
       });
-      
+
       if (response.ok) {
         console.log(`[Batch Ground Truth] ✅ Saved for ${fileId}`);
       } else {
@@ -2826,12 +2890,13 @@ export function EvaluationPage({
                             <Card
                               key={index}
                               id={`entity-card-${entity.name}`}
-                              className={`border-2 transition-all duration-300 ${isEvaluating
-                                ? "border-blue-400 shadow-lg"
-                                : isCompleted
-                                  ? "border-green-400"
-                                  : ""
-                                }`}
+                              className={`border-2 transition-all duration-300 ${
+                                isEvaluating
+                                  ? "border-blue-400 shadow-lg"
+                                  : isCompleted
+                                    ? "border-green-400"
+                                    : ""
+                              }`}
                             >
                               <CardHeader className="pb-3">
                                 <CardTitle className="text-lg flex items-center gap-2">
@@ -2901,7 +2966,7 @@ export function EvaluationPage({
                                           singleModeSourceModel &&
                                           entity.extractionsByModel &&
                                           !entity.extractionsByModel[
-                                          singleModeSourceModel
+                                            singleModeSourceModel
                                           ]
                                         ) {
                                           return (
@@ -2946,10 +3011,10 @@ export function EvaluationPage({
                                         m === "correctness" ||
                                         m === "completeness"
                                     ) && (
-                                        <span className="ml-2 text-xs text-orange-600 font-normal">
-                                          (required for Correctness/Completeness)
-                                        </span>
-                                      )}
+                                      <span className="ml-2 text-xs text-orange-600 font-normal">
+                                        (required for Correctness/Completeness)
+                                      </span>
+                                    )}
                                   </Label>
                                   <Textarea
                                     id={`ground-truth-${index}`}
@@ -2985,26 +3050,26 @@ export function EvaluationPage({
                                             {resolvedEvaluationResults.length}{" "}
                                             model
                                             {resolvedEvaluationResults.length >
-                                              1
+                                            1
                                               ? "s"
                                               : ""}
                                             )
                                             {resolvedEvaluationResults.length >
                                               1 && (
-                                                <span className="ml-2 text-sm font-semibold text-primary">
-                                                  Avg:{" "}
-                                                  {(
-                                                    (resolvedEvaluationResults.reduce(
-                                                      (sum: number, r: any) =>
-                                                        sum + r.aggregate_score,
-                                                      0
-                                                    ) /
-                                                      resolvedEvaluationResults.length) *
-                                                    100
-                                                  ).toFixed(1)}
-                                                  %
-                                                </span>
-                                              )}
+                                              <span className="ml-2 text-sm font-semibold text-primary">
+                                                Avg:{" "}
+                                                {(
+                                                  (resolvedEvaluationResults.reduce(
+                                                    (sum: number, r: any) =>
+                                                      sum + r.aggregate_score,
+                                                    0
+                                                  ) /
+                                                    resolvedEvaluationResults.length) *
+                                                  100
+                                                ).toFixed(1)}
+                                                %
+                                              </span>
+                                            )}
                                             {isCompleted && !isEvaluating && (
                                               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -3026,7 +3091,7 @@ export function EvaluationPage({
                                             </DialogTitle>
                                             <DialogDescription>
                                               {resolvedEvaluationResults.length >
-                                                1 ? (
+                                              1 ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                   <span>
                                                     Compare how different LLM
@@ -3124,7 +3189,7 @@ export function EvaluationPage({
                                                         <p className="text-sm text-blue-800 leading-relaxed">
                                                           {
                                                             metricDefinitions[
-                                                            metricName
+                                                              metricName
                                                             ]
                                                           }
                                                         </p>
@@ -3165,7 +3230,7 @@ export function EvaluationPage({
                                                                         "Entity Extraction ",
                                                                         ""
                                                                       ) ===
-                                                                      metricName ||
+                                                                        metricName ||
                                                                       m.metric_name
                                                                         .toLowerCase()
                                                                         .includes(
@@ -3206,36 +3271,39 @@ export function EvaluationPage({
 
                                                         return (
                                                           <div
-                                                            className={`border rounded-lg p-4 ${avgPercentage >=
+                                                            className={`border rounded-lg p-4 ${
+                                                              avgPercentage >=
                                                               70
-                                                              ? "bg-green-50 border-green-200"
-                                                              : avgPercentage >=
-                                                                50
-                                                                ? "bg-yellow-50 border-yellow-200"
-                                                                : "bg-red-50 border-red-200"
-                                                              }`}
+                                                                ? "bg-green-50 border-green-200"
+                                                                : avgPercentage >=
+                                                                    50
+                                                                  ? "bg-yellow-50 border-yellow-200"
+                                                                  : "bg-red-50 border-red-200"
+                                                            }`}
                                                           >
                                                             <div className="flex items-center justify-between">
                                                               <div className="flex items-center gap-2">
                                                                 <BarChart3
-                                                                  className={`h-5 w-5 ${avgPercentage >=
+                                                                  className={`h-5 w-5 ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-600"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-600"
-                                                                      : "text-red-600"
-                                                                    }`}
+                                                                      ? "text-green-600"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-600"
+                                                                        : "text-red-600"
+                                                                  }`}
                                                                 />
                                                                 <span
-                                                                  className={`font-semibold ${avgPercentage >=
+                                                                  className={`font-semibold ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-900"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-900"
-                                                                      : "text-red-900"
-                                                                    }`}
+                                                                      ? "text-green-900"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-900"
+                                                                        : "text-red-900"
+                                                                  }`}
                                                                 >
                                                                   Average{" "}
                                                                   {metricName}{" "}
@@ -3244,14 +3312,15 @@ export function EvaluationPage({
                                                                 </span>
                                                               </div>
                                                               <span
-                                                                className={`text-2xl font-bold ${avgPercentage >=
+                                                                className={`text-2xl font-bold ${
+                                                                  avgPercentage >=
                                                                   70
-                                                                  ? "text-green-700"
-                                                                  : avgPercentage >=
-                                                                    50
-                                                                    ? "text-yellow-700"
-                                                                    : "text-red-700"
-                                                                  }`}
+                                                                    ? "text-green-700"
+                                                                    : avgPercentage >=
+                                                                        50
+                                                                      ? "text-yellow-700"
+                                                                      : "text-red-700"
+                                                                }`}
                                                               >
                                                                 {avgPercentage.toFixed(
                                                                   1
@@ -3260,14 +3329,15 @@ export function EvaluationPage({
                                                               </span>
                                                             </div>
                                                             <p
-                                                              className={`text-xs mt-2 ${avgPercentage >=
+                                                              className={`text-xs mt-2 ${
+                                                                avgPercentage >=
                                                                 70
-                                                                ? "text-green-700"
-                                                                : avgPercentage >=
-                                                                  50
-                                                                  ? "text-yellow-700"
-                                                                  : "text-red-700"
-                                                                }`}
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                      50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                              }`}
                                                             >
                                                               Based on
                                                               evaluations from{" "}
@@ -3276,7 +3346,7 @@ export function EvaluationPage({
                                                               }{" "}
                                                               model
                                                               {metricScores.length >
-                                                                1
+                                                              1
                                                                 ? "s"
                                                                 : ""}
                                                             </p>
@@ -3544,21 +3614,51 @@ export function EvaluationPage({
                                             (p) => p.id === judgeId
                                           );
                                           // Check multiple ways to handle race condition where Azure models haven't loaded yet
-                                          const hasResult = ext.evaluationResults.some(
-                                            (r: any) => {
-                                              if (!r.model) return false;
-                                              // Exact matches
-                                              if (judge && r.model === judge.model) return true;
-                                              if (r.model === judgeId) return true;
-                                              // Fuzzy matches for when Azure models haven't loaded
-                                              if (judgeId.toLowerCase().includes(r.model.toLowerCase())) return true;
-                                              // Special cases for Vertex AI
-                                              if (judgeId === 'vertex_ai_lite' && r.model.includes('flash-lite')) return true;
-                                              if (judgeId === 'vertex_ai_pro' && r.model.includes('gemini') && r.model.includes('pro')) return true;
-                                              if (judgeId === 'vertex_ai_3_pro' && r.model.includes('gemini-2.5-pro')) return true;
-                                              return false;
-                                            }
-                                          );
+                                          const hasResult =
+                                            ext.evaluationResults.some(
+                                              (r: any) => {
+                                                if (!r.model) return false;
+                                                // Exact matches
+                                                if (
+                                                  judge &&
+                                                  r.model === judge.model
+                                                )
+                                                  return true;
+                                                if (r.model === judgeId)
+                                                  return true;
+                                                // Fuzzy matches for when Azure models haven't loaded
+                                                if (
+                                                  judgeId
+                                                    .toLowerCase()
+                                                    .includes(
+                                                      r.model.toLowerCase()
+                                                    )
+                                                )
+                                                  return true;
+                                                // Special cases for Vertex AI
+                                                if (
+                                                  judgeId ===
+                                                    "vertex_ai_lite" &&
+                                                  r.model.includes("flash-lite")
+                                                )
+                                                  return true;
+                                                if (
+                                                  judgeId === "vertex_ai_pro" &&
+                                                  r.model.includes("gemini") &&
+                                                  r.model.includes("pro")
+                                                )
+                                                  return true;
+                                                if (
+                                                  judgeId ===
+                                                    "vertex_ai_3_pro" &&
+                                                  r.model.includes(
+                                                    "gemini-2.5-pro"
+                                                  )
+                                                )
+                                                  return true;
+                                                return false;
+                                              }
+                                            );
                                           return hasResult;
                                         });
                                       if (allJudgesFinished) {
@@ -3607,7 +3707,9 @@ export function EvaluationPage({
                                             e.target.value
                                           )
                                         }
-                                        onBlur={() => saveBatchGroundTruths(file.fileId)}
+                                        onBlur={() =>
+                                          saveBatchGroundTruths(file.fileId)
+                                        }
                                         placeholder="Enter expected output..."
                                         className="min-h-[80px]"
                                       />
