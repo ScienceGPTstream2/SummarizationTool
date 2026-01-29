@@ -125,9 +125,16 @@ async def add_evaluation_result(
 
     If a result for the same entity and model already exists, it will be updated.
     """
-    session = session_service.add_evaluation_result(user_id, session_id, result)
+    try:
+        session = session_service.add_evaluation_result(user_id, session_id, result)
 
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found or no extraction exists for entity {result.entity_name}")
 
-    return session
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error saving evaluation: {str(e)}")

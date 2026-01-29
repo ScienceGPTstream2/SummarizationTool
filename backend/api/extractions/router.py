@@ -140,10 +140,10 @@ async def extract_entities(
         tasks = [run_extraction(entity) for entity in request.entities]
         extracted_entities = await asyncio.gather(*tasks)
 
-        # Persist results if session_id and user_id are available
+        # Persist results if session_id and user_model are available
         if request.session_id and user_model:
             try:
-                user_id = str(user_model.id)
+                user_id = str(user_model["id"] if isinstance(user_model, dict) else user_model.id)
                 document_id = None
                 session_docs = session_service.db.get_documents_by_session(
                     request.session_id
@@ -190,7 +190,12 @@ async def extract_entities(
                     )
 
             except Exception as e:
-                print(f"Error persisting extractions: {e}")
+                import traceback
+                print(f"Error persisting extractions for session {request.session_id}:")
+                print(f"  conversion_id: {request.conversion_id}")
+                print(f"  document_id: {document_id if 'document_id' in dir() else 'not assigned'}")
+                print(f"  Error: {e}")
+                traceback.print_exc()
                 # Don't fail the request if persistence fails, just log it
 
         return JSONResponse(

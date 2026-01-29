@@ -36,14 +36,20 @@ class SupabaseDBService:
         self,
         user_id: str,
         name: str = "Untitled Session",
+        last_step: str = "upload",
         configuration: Optional[Dict[str, Any]] = None,
+        evaluation_config: Optional[Dict[str, Any]] = None,
+        files_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new session for a user"""
         data = {
             "user_id": user_id,
             "name": name,
-            "status": "draft",
+            "status": "in_progress",
+            "last_step": last_step,
             "configuration": configuration or {},
+            "evaluation_config": evaluation_config or {},
+            "files_config": files_config or {},
         }
 
         result = self.client.table("sessions").insert(data).execute()
@@ -100,10 +106,10 @@ class SupabaseDBService:
     def list_sessions(
         self, user_id: str, limit: int = 50, offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """List all sessions for a user with counts (optimized)"""
+        """List all sessions for a user with counts and document names"""
         result = (
             self.client.table("sessions")
-            .select("id, name, status, configuration, created_at, updated_at")
+            .select("id, name, status, last_step, configuration, evaluation_config, files_config, created_at, updated_at")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
             .range(offset, offset + limit - 1)
@@ -115,35 +121,45 @@ class SupabaseDBService:
         if not sessions:
             return sessions
 
-        # Batch get counts for all sessions at once (avoid N+1)
+        # Batch get counts and document info for all sessions
         session_ids = [s["id"] for s in sessions]
 
-        # Get document counts in one query
-        doc_counts = {}
-        for sid in session_ids:
-            doc_count = (
-                self.client.table("documents")
-                .select("id", count="exact")
-                .eq("session_id", sid)
-                .execute()
-            )
-            doc_counts[sid] = doc_count.count or 0
+        # Get documents with filenames for all sessions
+        docs_result = (
+            self.client.table("documents")
+            .select("session_id, filename")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        docs_by_session: Dict[str, List[str]] = {}
+        for doc in docs_result.data or []:
+            sid = doc["session_id"]
+            if sid not in docs_by_session:
+                docs_by_session[sid] = []
+            docs_by_session[sid].append(doc["filename"])
 
-        # Get extraction counts in one query
-        ext_counts = {}
-        for sid in session_ids:
-            ext_count = (
-                self.client.table("extraction_results")
-                .select("id", count="exact")
-                .eq("session_id", sid)
-                .execute()
-            )
-            ext_counts[sid] = ext_count.count or 0
+        # Get extraction counts for all sessions
+        ext_result = (
+            self.client.table("extraction_results")
+            .select("session_id")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        ext_counts: Dict[str, int] = {}
+        for ext in ext_result.data or []:
+            sid = ext["session_id"]
+            ext_counts[sid] = ext_counts.get(sid, 0) + 1
 
-        # Apply counts to sessions
+        # Apply counts and document names to sessions
         for session in sessions:
-            session["document_count"] = doc_counts.get(session["id"], 0)
-            session["extraction_count"] = ext_counts.get(session["id"], 0)
+            sid = session["id"]
+            doc_names = docs_by_session.get(sid, [])
+            session["document_count"] = len(doc_names)
+            session["document_names"] = doc_names
+            session["extraction_count"] = ext_counts.get(sid, 0)
+            # Extract study_type from configuration
+            config = session.get("configuration", {})
+            session["study_type"] = config.get("study_type") if config else None
 
         return sessions
 

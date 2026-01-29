@@ -10,6 +10,8 @@ export interface SessionConfiguration {
   entities: SessionEntity[];
   summary_prompt?: string | null;
   temperature: number;
+  files_config?: Record<string, any>;
+  evaluation_config?: Record<string, any>;
 }
 
 export interface SessionDocument {
@@ -46,9 +48,10 @@ export interface Session {
   session_id: string;
   user_id: string;
   name: string;
-  status: "draft" | "in_progress" | "completed";
+  status: "in_progress" | "completed";
   created_at: string;
   updated_at: string;
+  last_step?: string;
   configuration: SessionConfiguration;
   documents: SessionDocument[];
   extraction_results: ExtractionResult[];
@@ -65,7 +68,8 @@ export interface CreateSessionRequest {
 export interface UpdateSessionRequest {
   user_id: string;
   name?: string;
-  status?: "draft" | "in_progress" | "completed";
+  status?: "in_progress" | "completed";
+  last_step?: string;
   configuration?: Partial<SessionConfiguration>;
   documents?: SessionDocument[];
   extraction_results?: ExtractionResult[];
@@ -75,10 +79,13 @@ export interface UpdateSessionRequest {
 export interface SessionSummary {
   session_id: string;
   name: string;
-  status: "draft" | "in_progress" | "completed";
+  status: "in_progress" | "completed";
   created_at: string;
   updated_at: string;
+  last_step?: string;
+  study_type?: string | null;
   document_count: number;
+  document_names: string[];
   extraction_count: number;
   evaluation_count: number;
 }

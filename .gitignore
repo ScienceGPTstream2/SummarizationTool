@@ -71,7 +71,4 @@ backend/uploads/
 /backend/tests/
 /files/
 
-# Supabase Docker - track config files but not runtime data
-supabase-docker/volumes/
-
 /backend/files/

@@ -19,9 +19,22 @@ export async function getSession(): Promise<Session | null> {
 
 /**
  * Get valid access token from current session
+ * Will attempt to refresh the session if no token is available
  */
 export async function getValidToken(): Promise<string | null> {
-  const session = await getSession();
+  let session = await getSession();
+
+  // If no session or token is missing, try to refresh
+  if (!session?.access_token) {
+    console.log("[Auth] No access token, attempting session refresh...");
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error) {
+      console.warn("[Auth] Session refresh failed:", error.message);
+      return null;
+    }
+    session = data.session;
+  }
+
   return session?.access_token ?? null;
 }
 

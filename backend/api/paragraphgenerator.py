@@ -17,6 +17,7 @@ class ParagraphGenerationRequest(BaseModel):
     entities: List[Dict]
     summary_prompt: str
     session_id: Optional[str] = None  # Added for persistence
+    file_hash: Optional[str] = None  # File hash for multi-document sessions
     system_prompt: Optional[str] = None  # Custom system prompt
     model_type: Optional[str] = "azure"  # New field for model type
     model_id: Optional[str] = None  # New field for Gemini model ID
@@ -93,6 +94,7 @@ async def generate_paragraph(
                             model_id=request.model_id or "summary-generator",
                             extracted_text=summary_text,
                             status="completed",
+                            file_hash=request.file_hash,  # CRITICAL: Include file_hash for multi-doc sessions
                         )
 
                         # Save using the service

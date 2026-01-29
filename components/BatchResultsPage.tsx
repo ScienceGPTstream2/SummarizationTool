@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import Fuse from "fuse.js";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -56,8 +56,10 @@ import {
 // Result row type matching Excel export structure
 export interface ResultRow {
   id: string;
+  fileId: string; // Document/file ID for per-document tracking
   studyName: string;
   llmSource: string;
+  sourceModelRaw: string; // Raw model ID for API calls
   ingestion: string;
   systemPrompt: string;
   promptTemplate: string;
@@ -65,6 +67,7 @@ export interface ResultRow {
   actualOutput: string;
   groundTruth: string;
   judge: string;
+  judgeRaw: string; // Raw judge model ID for API calls
   correctness: number | null;
   completeness: number | null;
   relevance: number | null;
@@ -129,6 +132,7 @@ export function transformToRows(documentData: any): ResultRow[] {
 
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
+    const fileId = fileItem.fileId || "";
     const ingestionTool =
       fileItem.processorUsed || documentData.processorUsed || "";
     const entities = fileItem.entities || [];
@@ -168,12 +172,17 @@ export function transformToRows(documentData: any): ResultRow[] {
 
         const actualOutput = extractionData.extracted || "";
         const evalResults = extractionData.evaluationResults || [];
+        
+        // Human score can be at extraction level or inside each evaluation result
+        const extractionHumanScore = extractionData.humanScore ?? extractionData.human_score ?? null;
 
         if (evalResults.length === 0) {
           rows.push({
             id: `row-${idCounter++}`,
+            fileId: fileId,
             studyName: fileName,
             llmSource: getDisplayModelName(sourceModel),
+            sourceModelRaw: sourceModel,
             ingestion: ingestionTool,
             systemPrompt: systemPrompt,
             promptTemplate: promptTemplate,
@@ -181,18 +190,25 @@ export function transformToRows(documentData: any): ResultRow[] {
             actualOutput: actualOutput,
             groundTruth: groundTruth,
             judge: "",
+            judgeRaw: "",
             correctness: null,
             completeness: null,
             relevance: null,
             safety: null,
-            humanEval: null,
+            humanEval: extractionHumanScore !== null 
+              ? (typeof extractionHumanScore === 'number' ? Math.round(extractionHumanScore * 100) : extractionHumanScore) 
+              : null,
           });
         } else {
           for (const result of evalResults) {
+            // Read human_score from evaluation result first, fallback to extraction level
+            const humanScore = result.human_score ?? result.humanScore ?? extractionHumanScore ?? null;
             rows.push({
               id: `row-${idCounter++}`,
+              fileId: fileId,
               studyName: fileName,
               llmSource: getDisplayModelName(sourceModel),
+              sourceModelRaw: sourceModel,
               ingestion: ingestionTool,
               systemPrompt: systemPrompt,
               promptTemplate: promptTemplate,
@@ -200,11 +216,12 @@ export function transformToRows(documentData: any): ResultRow[] {
               actualOutput: actualOutput,
               groundTruth: groundTruth,
               judge: getDisplayModelName(result.model || "Unknown Judge"),
+              judgeRaw: result.model || "",
               correctness: getMetricScore(result, "correctness"),
               completeness: getMetricScore(result, "completeness"),
               relevance: getMetricScore(result, "relevance"),
               safety: getMetricScore(result, "safety"),
-              humanEval: null,
+              humanEval: humanScore !== null ? (typeof humanScore === 'number' ? Math.round(humanScore * 100) : humanScore) : null,
             });
           }
         }
@@ -248,16 +265,38 @@ type SortDirection = "asc" | "desc" | null;
 interface BatchResultsPageProps {
   documentData: any;
   onBack?: () => void;
+  onSaveHumanScore?: (params: {
+    fileId: string;
+    entityName: string;
+    sourceModel: string;
+    judgeModel: string;
+    humanScore: number | null;
+    groundTruth: string;
+  }) => Promise<void>;
 }
 
 export default function BatchResultsPage({
   documentData,
   onBack,
+  onSaveHumanScore,
 }: BatchResultsPageProps) {
   // Transform data to rows
   const [rows, setRows] = useState<ResultRow[]>(() =>
     transformToRows(documentData)
   );
+
+  // Re-sync rows when documentData changes (e.g., after session restore)
+  const lastSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sessionId = documentData?.sessionId;
+    if (sessionId && sessionId !== lastSessionIdRef.current) {
+      setRows(transformToRows(documentData));
+      lastSessionIdRef.current = sessionId;
+    }
+  }, [documentData?.sessionId, documentData?.uploadedFiles]);
+
+  // Ref for debounce timers per row
+  const saveTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Visible columns
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -350,11 +389,49 @@ export default function BatchResultsPage({
     }
   };
 
-  // Update human eval score (0-100)
+  // Update human eval score (0-100) with debounced save
   const updateHumanEval = useCallback((rowId: string, value: number | null) => {
+    // Find the row first (before state update, to capture current values)
+    const currentRow = rows.find((r) => r.id === rowId);
+
+    // Update local state immediately
     setRows((prev) =>
       prev.map((r) => (r.id === rowId ? { ...r, humanEval: value } : r))
     );
+
+    // Clear any existing debounce timer for this row
+    if (saveTimersRef.current[rowId]) {
+      clearTimeout(saveTimersRef.current[rowId]);
+    }
+
+    // Debounce the save call
+    // Only save if we have a judge model - human scores are stored per (entity, source_model, judge_model)
+    if (currentRow && onSaveHumanScore && currentRow.judgeRaw) {
+      // Capture row data now to avoid stale closure
+      const saveData = {
+        fileId: currentRow.fileId,
+        entityName: currentRow.entity,
+        sourceModel: currentRow.sourceModelRaw,
+        judgeModel: currentRow.judgeRaw,
+        humanScore: value,
+        groundTruth: currentRow.groundTruth,
+      };
+
+      saveTimersRef.current[rowId] = setTimeout(() => {
+        onSaveHumanScore(saveData).catch((err) => {
+          console.error("Failed to save human score:", err);
+        });
+      }, 500); // 500ms debounce
+    }
+  }, [rows, onSaveHumanScore]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(saveTimersRef.current).forEach((timer) =>
+        clearTimeout(timer)
+      );
+    };
   }, []);
 
   // Export filtered results to Excel
@@ -694,13 +771,15 @@ export default function BatchResultsPage({
                             e.target.value === ""
                               ? null
                               : Math.min(
-                                  100,
-                                  Math.max(0, parseInt(e.target.value) || 0)
-                                );
+                                100,
+                                Math.max(0, parseInt(e.target.value) || 0)
+                              );
                           updateHumanEval(row.id, val);
                         }}
-                        placeholder="Score"
-                        className="h-8 text-sm w-20 text-center"
+                        placeholder={row.judgeRaw ? "Score" : "N/A"}
+                        disabled={!row.judgeRaw}
+                        title={!row.judgeRaw ? "Run evaluation first to enable human scoring" : "Enter human evaluation score (0-100)"}
+                        className={`h-8 text-sm w-20 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
                       />
                     </TableCell>
                   )}
@@ -856,9 +935,9 @@ export default function BatchResultsPage({
                           e.target.value === ""
                             ? null
                             : Math.min(
-                                100,
-                                Math.max(0, parseInt(e.target.value) || 0)
-                              );
+                              100,
+                              Math.max(0, parseInt(e.target.value) || 0)
+                            );
                         updateHumanEval(selectedRowForCompare.id, val);
                         setSelectedRowForCompare({
                           ...selectedRowForCompare,

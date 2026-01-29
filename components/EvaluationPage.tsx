@@ -218,6 +218,27 @@ export function EvaluationPage({
     ];
   });
 
+  // Track the last synced session to detect when to re-sync
+  const lastSyncedSessionRef = useRef<string | null>(null);
+
+  // Sync files when session changes (e.g., after session restore)
+  useEffect(() => {
+    if (!documentData.sessionId || !documentData.uploadedFiles || documentData.uploadedFiles.length === 0) {
+      return;
+    }
+
+    // Only sync when session ID changes (not on every data update)
+    if (lastSyncedSessionRef.current !== documentData.sessionId) {
+      console.log("[EvaluationPage] Session changed, syncing files:", documentData.sessionId);
+      setFiles(documentData.uploadedFiles);
+      lastSyncedSessionRef.current = documentData.sessionId;
+      
+      if (documentData.uploadedFiles.length > 0) {
+        setSelectedFileId(documentData.uploadedFiles[0].fileId);
+      }
+    }
+  }, [documentData.sessionId]); // Only react to session ID changes
+
   // Active tab: "evaluation" or "results"
   const [activeTab, setActiveTab] = useState<"evaluation" | "results">(
     "evaluation"
@@ -259,15 +280,19 @@ export function EvaluationPage({
     ],
   };
 
-  // Entity ground truths
   // Entity ground truths - synced with current file
   const [entityGroundTruths, setEntityGroundTruths] = useState<
     Record<string, string>
   >({});
 
+  // Track if user has edited ground truths (to avoid saving on initial load)
+  const hasUserEditedGroundTruthRef = useRef(false);
+
   // Sync ground truths when file changes
   useEffect(() => {
     if (currentFile) {
+      // Reset edit flag when loading a new file
+      hasUserEditedGroundTruthRef.current = false;
       const initial: Record<string, string> = {};
       (currentFile.entities || []).forEach((entity: any) => {
         initial[entity.name] = entity.groundTruth || "";
@@ -357,7 +382,7 @@ export function EvaluationPage({
     Record<string, string[]>
   >(
     documentData.evaluationConfig?.customEvaluationSteps ||
-      DEFAULT_EVALUATION_STEPS
+    DEFAULT_EVALUATION_STEPS
   );
 
   // Dialog state for viewing/editing evaluation prompts
@@ -388,7 +413,7 @@ export function EvaluationPage({
     isOpen: false,
     title: "",
     description: "",
-    action: () => {},
+    action: () => { },
   });
 
   // Validation dialog state
@@ -405,7 +430,7 @@ export function EvaluationPage({
     []
   );
   const [selectedSourceModels, setSelectedSourceModels] = useState<string[]>(
-    []
+    documentData.evaluationConfig?.selectedSourceModels || []
   );
 
   // Track Source Model locally for Single Mode viewing
@@ -487,29 +512,81 @@ export function EvaluationPage({
     window.scrollTo(0, 0);
   }, []);
 
-  // Persist evaluation configuration to documentData whenever it changes
-  useEffect(() => {
-    // Only update if the configuration actually changed
-    const currentConfig = documentData.evaluationConfig;
-    const hasChanged =
-      JSON.stringify(currentConfig?.selectedMetrics) !==
-        JSON.stringify(selectedMetrics) ||
-      JSON.stringify(currentConfig?.selectedProviders) !==
-        JSON.stringify(selectedProviders) ||
-      JSON.stringify(currentConfig?.customEvaluationSteps) !==
-        JSON.stringify(customEvaluationSteps);
+  // Ref for debounce timer
+  const evalConfigSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    if (hasChanged) {
-      setDocumentData({
-        ...documentData,
-        evaluationConfig: {
+  // Persist evaluation configuration to documentData and backend whenever it changes
+  useEffect(() => {
+    // Update documentData
+    const newConfig = {
+      selectedMetrics,
+      selectedProviders,
+      selectedSourceModels,
+      customEvaluationSteps,
+    };
+
+    setDocumentData((prev) => ({
+      ...prev,
+      evaluationConfig: newConfig,
+    }));
+
+    // Clear previous timer
+    if (evalConfigSaveTimerRef.current) {
+      clearTimeout(evalConfigSaveTimerRef.current);
+    }
+
+    // Auto-save to backend with debounce
+    evalConfigSaveTimerRef.current = setTimeout(async () => {
+      const sessionId = documentData.sessionId;
+      if (!sessionId) {
+        console.log("[Eval Config] No session ID, skipping save");
+        return;
+      }
+
+      try {
+        const token = await getValidToken();
+        const { getCurrentUser } = await import("../utils/authUtils");
+        const user = await getCurrentUser();
+        if (!token || !user) return;
+
+        console.log("[Eval Config] Saving:", {
           selectedMetrics,
           selectedProviders,
-          customEvaluationSteps,
-        },
-      });
-    }
-  }, [selectedMetrics, selectedProviders, customEvaluationSteps]);
+          selectedSourceModels,
+        });
+
+        const response = await fetch(`/api/sessions/${sessionId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            user_id: user.id,
+            evaluation_config: {
+              selected_metrics: selectedMetrics,
+              selected_providers: selectedProviders,
+              selected_source_models: selectedSourceModels,
+              custom_evaluation_steps: customEvaluationSteps,
+            },
+          }),
+        });
+        if (response.ok) {
+          console.log("✅ Evaluation config saved");
+        } else {
+          console.error("Failed to save eval config:", await response.text());
+        }
+      } catch (error) {
+        console.error("Failed to auto-save eval config:", error);
+      }
+    }, 300); // 300ms debounce - fast save while preventing rapid-fire requests
+
+    return () => {
+      if (evalConfigSaveTimerRef.current) {
+        clearTimeout(evalConfigSaveTimerRef.current);
+      }
+    };
+  }, [selectedMetrics, selectedProviders, customEvaluationSteps, selectedSourceModels]);
 
   // Persist ground truths to entities in documentData whenever they change
   // Persist ground truths to entities in files state whenever they change
@@ -547,8 +624,8 @@ export function EvaluationPage({
       // Also update legacy fields for backward compatibility if single file
       ...(files.length === 1
         ? {
-            entities: files[0].entities,
-          }
+          entities: files[0].entities,
+        }
         : {}),
     }));
   }, [files]);
@@ -579,10 +656,21 @@ export function EvaluationPage({
   }, [selectedMetrics, entityGroundTruths, currentFile]);
 
   const updateGroundTruth = (entityName: string, value: string) => {
+    console.log("[Ground Truth] User editing:", entityName, "value length:", value.length);
+    hasUserEditedGroundTruthRef.current = true;
     setEntityGroundTruths((prev) => ({
       ...prev,
       [entityName]: value,
     }));
+  };
+
+  // Wrapper to save ground truths before switching files
+  const handleFileChange = (newFileId: string) => {
+    // Save current file's ground truths before switching
+    saveGroundTruthsToSession();
+    // Reset edit flag for new file
+    hasUserEditedGroundTruthRef.current = false;
+    setSelectedFileId(newFileId);
   };
 
   // Helper to save evaluation result to PostgreSQL
@@ -604,7 +692,8 @@ export function EvaluationPage({
       all_passed: boolean;
       evaluation_time: number;
     }>,
-    humanScore?: number
+    humanScore?: number,
+    documentId?: string  // Add document_id for multi-file support
   ) => {
     const sessionId = documentData.sessionId;
     if (!sessionId) {
@@ -620,10 +709,23 @@ export function EvaluationPage({
       const user = await getCurrentUser();
       if (!user) return;
 
+      // Map metric names to DB-compatible short names
+      const metricNameMap: Record<string, string> = {
+        "Entity Extraction Correctness": "correctness",
+        "Entity Extraction Completeness": "completeness",
+        "Entity Extraction Relevance": "relevance",
+        "Entity Extraction Safety": "safety",
+        // Direct mappings (in case short names are used)
+        "correctness": "correctness",
+        "completeness": "completeness",
+        "relevance": "relevance",
+        "safety": "safety",
+      };
+
       // Transform evaluation results to backend schema format
       const scores = evaluationResults.flatMap((result) =>
         result.metrics.map((metric) => ({
-          metric: metric.metric_name,
+          metric: metricNameMap[metric.metric_name] || metric.metric_name.toLowerCase().split(" ").pop() || "unknown",
           score: metric.score,
           reasoning: metric.reason,
           judge_model: result.model,
@@ -641,6 +743,7 @@ export function EvaluationPage({
           body: JSON.stringify({
             entity_name: entityName,
             model_id: modelId,
+            file_hash: documentId,  // Use file_hash for multi-file sessions (backend looks up document_id from this)
             ground_truth: groundTruth,
             scores: scores,
             human_score: humanScore,
@@ -650,11 +753,13 @@ export function EvaluationPage({
 
       if (response.ok) {
         console.log(
-          `[Eval Persist] Saved evaluation for ${entityName}/${modelId}`
+          `[Eval Persist] Saved evaluation for ${entityName}/${modelId} (doc: ${documentId || 'none'})`
         );
       } else {
+        const errorBody = await response.text();
         console.error(
-          `[Eval Persist] Failed to save evaluation: ${response.status}`
+          `[Eval Persist] Failed to save evaluation: ${response.status}`,
+          errorBody
         );
       }
     } catch (error) {
@@ -662,15 +767,20 @@ export function EvaluationPage({
     }
   };
 
-  // Debounced auto-save for ground truth changes
-  const groundTruthSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const saveGroundTruthToSession = async (
-    entityName: string,
-    groundTruth: string
-  ) => {
+  // Helper to save just the human score for an evaluation (used by BatchResultsPage)
+  const saveHumanScore = async (params: {
+    fileId?: string;
+    entityName: string;
+    sourceModel: string;
+    judgeModel: string;
+    humanScore: number | null;
+    groundTruth: string;
+  }) => {
     const sessionId = documentData.sessionId;
-    if (!sessionId || !groundTruth.trim()) return;
+    if (!sessionId) {
+      console.log("[Human Score] No session ID, skipping save");
+      return;
+    }
 
     try {
       const token = await getValidToken();
@@ -680,56 +790,155 @@ export function EvaluationPage({
       const user = await getCurrentUser();
       if (!user) return;
 
-      // Find the model ID for this entity (use first available)
-      const entity = currentFile?.entities?.find(
-        (e: any) => e.name === entityName
-      );
-      const modelId = entity?.extractionsByModel
-        ? Object.keys(entity.extractionsByModel)[0]
-        : currentFile?.selectedModel || "unknown";
+      // Convert human score from 0-100 to 0-1 scale for storage
+      const normalizedScore = params.humanScore !== null ? params.humanScore / 100 : undefined;
 
-      await fetch(`/api/sessions/${sessionId}/evaluations?user_id=${user.id}`, {
-        method: "POST",
+      const response = await fetch(
+        `/api/sessions/${sessionId}/evaluations?user_id=${user.id}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            file_hash: params.fileId || undefined, // For per-document tracking (backend looks up document_id from this)
+            entity_name: params.entityName,
+            model_id: params.sourceModel,
+            ground_truth: params.groundTruth || undefined,
+            // Include judge_model in scores to update specific judge's human_score
+            scores: params.judgeModel ? [{
+              metric: "human_score_update",
+              score: null,
+              reasoning: null,
+              judge_model: params.judgeModel,
+            }] : [],
+            human_score: normalizedScore,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        // Update local state so the value persists across re-renders
+        // Find the file and update the entity's human score
+        setDocumentData((prev: DocumentData) => ({
+          ...prev,
+          uploadedFiles: (prev.uploadedFiles || []).map((file: any) => {
+            if (file.fileId !== params.fileId && file.processingResult?.conversionId !== params.fileId) {
+              return file;
+            }
+            
+            return {
+              ...file,
+              evaluationEntities: (file.evaluationEntities || []).map((entity: any) => {
+                if (entity.name !== params.entityName) return entity;
+                
+                // Update extractionsByModel
+                const updatedExtractionsByModel = { ...entity.extractionsByModel };
+                if (updatedExtractionsByModel[params.sourceModel]) {
+                  const extraction = { ...updatedExtractionsByModel[params.sourceModel] };
+                  
+                  // Update human_score in the specific judge's evaluation result
+                  if (params.judgeModel && extraction.evaluationResults) {
+                    extraction.evaluationResults = extraction.evaluationResults.map((evalResult: any) => {
+                      if (evalResult.model === params.judgeModel) {
+                        return { ...evalResult, human_score: normalizedScore };
+                      }
+                      return evalResult;
+                    });
+                  } else {
+                    // Fallback: update at extraction level
+                    extraction.humanScore = normalizedScore;
+                  }
+                  
+                  updatedExtractionsByModel[params.sourceModel] = extraction;
+                }
+                
+                return {
+                  ...entity,
+                  extractionsByModel: updatedExtractionsByModel,
+                };
+              }),
+            };
+          }),
+        }));
+      } else {
+        const errorBody = await response.text();
+        console.error(
+          `[Human Score] Failed to save: ${response.status}`,
+          errorBody
+        );
+      }
+    } catch (error) {
+      console.error("[Human Score] Error saving:", error);
+    }
+  };
+
+  // Save ground truths to files_config
+  const saveGroundTruthsToSession = async () => {
+    const sessionId = documentData.sessionId;
+    const fileId = currentFile?.fileId;
+    
+    console.log("[Ground Truth] Save called - sessionId:", sessionId, "fileId:", fileId, "edited:", hasUserEditedGroundTruthRef.current);
+    
+    if (!sessionId || !fileId) {
+      console.log("[Ground Truth] Missing sessionId or fileId, skipping");
+      return;
+    }
+    
+    if (!hasUserEditedGroundTruthRef.current) {
+      console.log("[Ground Truth] No edits made, skipping");
+      return;
+    }
+
+    const groundTruths: Record<string, string> = {};
+    Object.entries(entityGroundTruths).forEach(([name, value]) => {
+      if (value.trim()) {
+        groundTruths[name] = value;
+      }
+    });
+    
+    console.log("[Ground Truth] Saving:", groundTruths);
+
+    try {
+      const token = await getValidToken();
+      if (!token) {
+        console.log("[Ground Truth] No token, skipping");
+        return;
+      }
+
+      const { getCurrentUser } = await import("../utils/authUtils");
+      const user = await getCurrentUser();
+      if (!user) {
+        console.log("[Ground Truth] No user, skipping");
+        return;
+      }
+
+      const response = await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          entity_name: entityName,
-          model_id: modelId,
-          ground_truth: groundTruth,
-          scores: [], // Just saving ground truth, no scores yet
+          user_id: user.id,
+          files_config: {
+            [fileId]: {
+              ground_truths: groundTruths,
+            },
+          },
         }),
       });
-      console.log(`[Eval Persist] Saved ground truth for ${entityName}`);
+
+      if (response.ok) {
+        console.log(`[Ground Truth] ✅ Saved for ${fileId}:`, groundTruths);
+      } else {
+        console.error("[Ground Truth] Failed:", await response.text());
+      }
     } catch (error) {
-      console.error("[Eval Persist] Error saving ground truth:", error);
+      console.error("[Ground Truth] Error:", error);
     }
   };
-
-  // Auto-save ground truth with debounce
-  useEffect(() => {
-    if (groundTruthSaveTimeoutRef.current) {
-      clearTimeout(groundTruthSaveTimeoutRef.current);
-    }
-
-    groundTruthSaveTimeoutRef.current = setTimeout(() => {
-      // Save all non-empty ground truths
-      Object.entries(entityGroundTruths).forEach(
-        ([entityName, groundTruth]) => {
-          if (groundTruth.trim()) {
-            saveGroundTruthToSession(entityName, groundTruth);
-          }
-        }
-      );
-    }, 2000); // 2 second debounce
-
-    return () => {
-      if (groundTruthSaveTimeoutRef.current) {
-        clearTimeout(groundTruthSaveTimeoutRef.current);
-      }
-    };
-  }, [entityGroundTruths, documentData.sessionId]);
 
   const toggleMetric = (metricId: string) => {
     setSelectedMetrics((prev) =>
@@ -813,7 +1022,7 @@ export function EvaluationPage({
       ...prev,
       [metricId]:
         DEFAULT_EVALUATION_STEPS[
-          metricId as keyof typeof DEFAULT_EVALUATION_STEPS
+        metricId as keyof typeof DEFAULT_EVALUATION_STEPS
         ] || [],
     }));
   };
@@ -832,184 +1041,239 @@ export function EvaluationPage({
     // Mark entity as evaluating
     setEvaluatingEntities((prev) => new Set(prev).add(entity.name));
 
+    // Determine which source models to evaluate
+    // In batch mode: use selectedSourceModels
+    // In single mode: use singleModeSourceModel or fallback to entity.extracted
+    const sourceModelsToEvaluate = isBatchMode
+      ? (selectedSourceModels.length > 0 ? selectedSourceModels : availableSourceModels)
+      : (singleModeSourceModel ? [singleModeSourceModel] : []);
+
     console.log(
-      `\n🔄 Evaluating entity: ${entity.name} with ${providers.length} models...`
+      `🔄 Evaluating entity: ${entity.name} with ${providers.length} judge models across ${sourceModelsToEvaluate.length || 1} source models...`
     );
 
-    // Evaluate all selected models for this entity in parallel
-    const modelPromises = providers.map(async (providerId) => {
-      if (signal.aborted) return;
+    // If we have source models in extractionsByModel, evaluate each
+    // Otherwise fallback to legacy entity.extracted
+    const evaluationPromises: Promise<void>[] = [];
 
-      const provider = allProviders.find((p) => p.id === providerId);
-      if (!provider) return;
+    if (sourceModelsToEvaluate.length > 0 && entity.extractionsByModel) {
+      // Evaluate each source model with each judge
+      for (const sourceModel of sourceModelsToEvaluate) {
+        const extraction = entity.extractionsByModel[sourceModel];
+        if (!extraction?.extracted) continue;
 
-      try {
-        // Prepare evaluation request
-        const requestBody: any = {
-          entity_name: entity.name,
-          extraction_prompt: entity.prompt,
-          actual_output: entity.extracted,
-          expected_output: entityGroundTruths[entity.name] || undefined,
-          retrieval_context: documentData.extractedText || undefined,
-          metrics: selectedMetrics,
-          threshold: 0.7,
-          custom_evaluation_steps: customEvaluationSteps,
-        };
+        for (const providerId of providers) {
+          if (signal.aborted) continue;
 
-        // Add provider-specific config
-        if (providerId.startsWith("azure-")) {
-          // Azure OpenAI models
-          requestBody.provider = "azure_openai";
-          requestBody.azure_deployment = provider.deployment || provider.model;
-          requestBody.azure_model_name = provider.model;
-        } else if (
-          providerId === "vertex_ai_pro" ||
-          providerId === "vertex_ai_lite" ||
-          providerId === "vertex_ai_3_pro"
-        ) {
-          requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
-          requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
-        } else if (providerId.startsWith("anthropic_")) {
-          requestBody.provider = "anthropic"; // Backend expects "anthropic"
-          requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
-        }
+          const provider = allProviders.find((p) => p.id === providerId);
+          if (!provider) continue;
 
-        // Call evaluation API
-        const response = await fetch("/api/evaluations/evaluate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(requestBody),
-          signal, // Pass abort signal
-        });
-
-        if (!response.ok) {
-          const error = await response
-            .json()
-            .catch(() => ({ detail: "Unknown error" }));
-          console.error(
-            `[Evaluation Error] ${provider.name} - ${entity.name}:`,
-            error.detail || error
-          );
-          throw new Error(
-            error.detail || `Evaluation failed for ${entity.name}`
-          );
-        }
-
-        const result = await response.json();
-        console.log(
-          `✅ ${provider.model} - ${entity.name}: ${(result.aggregate_score * 100).toFixed(1)}%`
-        );
-
-        // Update files state with new result
-        setFiles((prevFiles) => {
-          return prevFiles.map((file) => {
-            if (file.fileId !== selectedFileId) return file;
-
-            const newEntities = [...file.entities];
-            const targetIndex = newEntities.findIndex(
-              (e: any) => e.name === entity.name
-            );
-
-            if (targetIndex !== -1) {
-              if (!newEntities[targetIndex].evaluationResults) {
-                newEntities[targetIndex].evaluationResults = [];
-              }
-
-              // Remove any existing result from this provider+model combination to avoid duplicates
-              const existingResults =
-                newEntities[targetIndex].evaluationResults!;
-              const filteredResults = existingResults.filter(
-                (r: any) =>
-                  !(r.provider === result.provider && r.model === result.model)
-              );
-
-              // Add the new result
-              const newResult = {
-                provider: result.provider,
-                model: result.model,
-                metrics: result.metrics,
-                aggregate_score: result.aggregate_score,
-                all_passed: result.all_passed,
-                evaluation_time: result.evaluation_time,
-              };
-
-              newEntities[targetIndex].evaluationResults = [
-                ...filteredResults,
-                newResult,
-              ];
-
-              // Update ground truth if provided
-              if (entityGroundTruths[entity.name]) {
-                newEntities[targetIndex].groundTruth =
-                  entityGroundTruths[entity.name];
-              }
-
-              // Persist to PostgreSQL
-              // Use the source model from the entity's extraction
-              const sourceModelId =
-                currentFile?.selectedModel ||
-                (entity.extractionsByModel
-                  ? Object.keys(entity.extractionsByModel)[0]
-                  : "unknown");
-              saveEvaluationResult(
-                entity.name,
-                sourceModelId,
-                entityGroundTruths[entity.name],
-                [newResult]
-              );
-            }
-
-            return {
-              ...file,
-              entities: newEntities,
-            };
-          });
-        });
-      } catch (error: any) {
-        if (error.name === "AbortError") {
-          console.log(`Evaluation aborted for ${entity.name}`);
-        } else {
-          console.error(
-            `[Evaluation Error] ${provider?.name} - ${entity.name}:`,
-            error.message || error
+          evaluationPromises.push(
+            evaluateWithSourceModel(
+              entity,
+              sourceModel,
+              extraction.extracted,
+              provider,
+              providerId,
+              token,
+              signal
+            )
           );
         }
       }
-    });
+    } else {
+      // Fallback to legacy single extraction
+      const sourceModel = currentFile?.selectedModel || 
+        (entity.extractionsByModel ? Object.keys(entity.extractionsByModel)[0] : "unknown");
+      
+      for (const providerId of providers) {
+        if (signal.aborted) continue;
 
-    // Wait for all models to finish evaluating this entity
-    await Promise.all(modelPromises);
+        const provider = allProviders.find((p) => p.id === providerId);
+        if (!provider) continue;
 
-    // Mark entity as completed and no longer evaluating
+        evaluationPromises.push(
+          evaluateWithSourceModel(
+            entity,
+            sourceModel,
+            entity.extracted,
+            provider,
+            providerId,
+            token,
+            signal
+          )
+        );
+      }
+    }
+
+    // Wait for all evaluations to complete
+    await Promise.all(evaluationPromises);
+
+    // Mark entity as completed
     setEvaluatingEntities((prev) => {
       const newSet = new Set(prev);
       newSet.delete(entity.name);
       return newSet;
     });
+  };
 
-    if (!signal.aborted) {
-      setCompletedEntities((prev) => new Set(prev).add(entity.name));
+  // Helper function to evaluate a specific source model extraction
+  const evaluateWithSourceModel = async (
+    entity: any,
+    sourceModel: string,
+    actualOutput: string,
+    provider: any,
+    providerId: string,
+    token: string,
+    signal: AbortSignal
+  ) => {
+    try {
+      // Prepare evaluation request
+      const requestBody: any = {
+        entity_name: entity.name,
+        extraction_prompt: entity.prompt,
+        actual_output: actualOutput,
+        expected_output: entityGroundTruths[entity.name] || undefined,
+        retrieval_context: documentData.extractedText || undefined,
+        metrics: selectedMetrics,
+        threshold: 0.7,
+        custom_evaluation_steps: customEvaluationSteps,
+      };
 
-      // Auto-scroll to the completed entity card
-      setTimeout(() => {
-        const entityCard = document.getElementById(
-          `entity-card-${entity.name}`
+      // Add provider-specific config
+      if (providerId.startsWith("azure-")) {
+        // Azure OpenAI models
+        requestBody.provider = "azure_openai";
+        requestBody.azure_deployment = provider.deployment || provider.model;
+        requestBody.azure_model_name = provider.model;
+      } else if (
+        providerId === "vertex_ai_pro" ||
+        providerId === "vertex_ai_lite" ||
+        providerId === "vertex_ai_3_pro"
+      ) {
+        requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
+        requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
+      } else if (providerId.startsWith("anthropic_")) {
+        requestBody.provider = "anthropic"; // Backend expects "anthropic"
+        requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
+      }
+
+      // Call evaluation API
+      const response = await fetch("/api/evaluations/evaluate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal, // Pass abort signal
+      });
+
+      if (!response.ok) {
+        const error = await response
+          .json()
+          .catch(() => ({ detail: "Unknown error" }));
+        console.error(
+          `[Evaluation Error] ${provider.name} - ${entity.name}:`,
+          error.detail || error
         );
-        if (entityCard) {
-          entityCard.scrollIntoView({ behavior: "smooth", block: "center" });
-          // Add a brief highlight animation
-          entityCard.classList.add("highlight-flash");
-          setTimeout(
-            () => entityCard.classList.remove("highlight-flash"),
-            2000
-          );
-        }
-      }, 100);
+        throw new Error(
+          error.detail || `Evaluation failed for ${entity.name}`
+        );
+      }
 
-      console.log(`✅ Completed evaluation for: ${entity.name}\n`);
+      const result = await response.json();
+      console.log(
+        `✅ ${provider.model} - ${entity.name} (${sourceModel}): ${(result.aggregate_score * 100).toFixed(1)}%`
+      );
+
+      // Update files state with new result
+      setFiles((prevFiles) => {
+        return prevFiles.map((file) => {
+          if (file.fileId !== selectedFileId) return file;
+
+          const newEntities = [...file.entities];
+          const targetIndex = newEntities.findIndex(
+            (e: any) => e.name === entity.name
+          );
+
+          if (targetIndex !== -1) {
+            // Add the new result
+            const newResult = {
+              provider: result.provider,
+              model: result.model,
+              metrics: result.metrics,
+              aggregate_score: result.aggregate_score,
+              all_passed: result.all_passed,
+              evaluation_time: result.evaluation_time,
+            };
+
+            // Update entity-level evaluationResults (for backwards compatibility)
+            if (!newEntities[targetIndex].evaluationResults) {
+              newEntities[targetIndex].evaluationResults = [];
+            }
+            const existingResults = newEntities[targetIndex].evaluationResults!;
+            const filteredResults = existingResults.filter(
+              (r: any) =>
+                !(r.provider === result.provider && r.model === result.model)
+            );
+            newEntities[targetIndex].evaluationResults = [
+              ...filteredResults,
+              newResult,
+            ];
+
+            // Update ground truth if provided
+            if (entityGroundTruths[entity.name]) {
+              newEntities[targetIndex].groundTruth =
+                entityGroundTruths[entity.name];
+            }
+
+            // Update extractionsByModel[sourceModel].evaluationResults
+            // This is critical for batch mode status check
+            if (newEntities[targetIndex].extractionsByModel && sourceModel) {
+              const extByModel = newEntities[targetIndex].extractionsByModel;
+              if (extByModel[sourceModel]) {
+                if (!extByModel[sourceModel].evaluationResults) {
+                  extByModel[sourceModel].evaluationResults = [];
+                }
+                const extFilteredResults = extByModel[sourceModel].evaluationResults.filter(
+                  (r: any) => !(r.provider === result.provider && r.model === result.model)
+                );
+                extByModel[sourceModel].evaluationResults = [
+                  ...extFilteredResults,
+                  newResult,
+                ];
+              }
+            }
+
+            // Persist to PostgreSQL - include document_id for multi-file support
+            // Use the file's fileId as the document identifier
+            const documentId = file.fileId || file.processingResult?.conversionId || selectedFileId;
+            saveEvaluationResult(
+              entity.name,
+              sourceModel,
+              entityGroundTruths[entity.name],
+              [newResult],
+              undefined, // humanScore
+              documentId
+            );
+          }
+
+          return {
+            ...file,
+            entities: newEntities,
+          };
+        });
+      });
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        console.log(`Evaluation aborted for ${entity.name}`);
+      } else {
+        console.error(
+          `[Evaluation Error] ${provider?.name} - ${entity.name}:`,
+          error.message || error
+        );
+      }
     }
   };
 
@@ -1088,6 +1352,25 @@ export function EvaluationPage({
       (e: any) => e.name === entityName
     );
     if (!entity) return;
+
+    // IMPORTANT: Save ground truths to files_config before running evaluation
+    // This ensures the latest edits are persisted for session restore
+    hasUserEditedGroundTruthRef.current = true; // Force save even if not manually edited
+    await saveGroundTruthsToSession();
+
+    // Clear human eval scores for this entity before rerunning
+    // Get all source models that have evaluations for this entity
+    // Use entityGroundTruths (local state) which has the latest edits
+    const sourceModels = Object.keys(entity.extractionsByModel || {});
+    for (const sourceModel of sourceModels) {
+      await saveHumanScore({
+        entityName,
+        sourceModel,
+        judgeModel: "",
+        humanScore: null,
+        groundTruth: entityGroundTruths[entityName] || "",
+      });
+    }
 
     // Start single entity evaluation
     const controller = new AbortController();
@@ -1193,6 +1476,11 @@ export function EvaluationPage({
     setEvaluatingEntities(new Set());
     setCompletedEntities(new Set());
 
+    // IMPORTANT: Save ground truths to files_config before running evaluation
+    // This ensures the latest edits are persisted for session restore
+    hasUserEditedGroundTruthRef.current = true; // Force save even if not manually edited
+    await saveGroundTruthsToSession();
+
     // Create new abort controller
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -1251,11 +1539,15 @@ export function EvaluationPage({
   };
 
   // Batch Mode Functions
+  const batchGroundTruthDirtyRef = useRef<Set<string>>(new Set());
+  
   const updateBatchGroundTruth = (
     fileId: string,
     entityName: string,
     value: string
   ) => {
+    console.log("[Batch Ground Truth] Editing:", fileId, entityName, "value length:", value.length);
+    batchGroundTruthDirtyRef.current.add(fileId);
     setFiles((prevFiles) =>
       prevFiles.map((f) => {
         if (f.fileId === fileId) {
@@ -1269,6 +1561,58 @@ export function EvaluationPage({
         return f;
       })
     );
+  };
+  
+  const saveBatchGroundTruths = async (fileId: string) => {
+    const sessionId = documentData.sessionId;
+    if (!sessionId || !batchGroundTruthDirtyRef.current.has(fileId)) {
+      console.log("[Batch Ground Truth] Skip save - no changes for:", fileId);
+      return;
+    }
+    
+    const file = files.find(f => f.fileId === fileId);
+    if (!file) return;
+    
+    const groundTruths: Record<string, string> = {};
+    (file.entities || []).forEach((e: any) => {
+      if (e.groundTruth?.trim()) {
+        groundTruths[e.name] = e.groundTruth;
+      }
+    });
+    
+    console.log("[Batch Ground Truth] Saving for", fileId, ":", groundTruths);
+    batchGroundTruthDirtyRef.current.delete(fileId);
+    
+    try {
+      const token = await getValidToken();
+      if (!token) return;
+      
+      const { getCurrentUser } = await import("../utils/authUtils");
+      const user = await getCurrentUser();
+      if (!user) return;
+      
+      const response = await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          files_config: {
+            [fileId]: { ground_truths: groundTruths },
+          },
+        }),
+      });
+      
+      if (response.ok) {
+        console.log(`[Batch Ground Truth] ✅ Saved for ${fileId}`);
+      } else {
+        console.error("[Batch Ground Truth] Failed:", await response.text());
+      }
+    } catch (error) {
+      console.error("[Batch Ground Truth] Error:", error);
+    }
   };
 
   const handleRunBatchEvaluation = async () => {
@@ -1346,7 +1690,7 @@ export function EvaluationPage({
     setEvaluationComplete(false);
 
     try {
-      const token = getValidToken();
+      const token = await getValidToken();
       if (!token) throw new Error("No token available");
 
       // 1. Identify all evaluation tasks (File x Entity x SourceModel x JudgeModel)
@@ -1543,12 +1887,14 @@ export function EvaluationPage({
               })
             );
 
-            // Persist to PostgreSQL
+            // Persist to PostgreSQL - include document_id for multi-file support
             saveEvaluationResult(
               task.entityName,
               task.sourceModel,
               task.groundTruth,
-              [result]
+              [result],
+              undefined, // humanScore
+              task.fileId // document_id
             );
 
             completedCount++;
@@ -1684,10 +2030,12 @@ export function EvaluationPage({
       {activeTab === "evaluation" && (
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            <Button variant="outline" size="sm" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Extraction
-            </Button>
+            {isBatchMode && (
+              <Button variant="outline" size="sm" onClick={onBack}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Extraction
+              </Button>
+            )}
             <div>
               <h2 className="text-xl">Evaluation & Validation</h2>
               <p className="text-muted-foreground">
@@ -1706,6 +2054,7 @@ export function EvaluationPage({
           <BatchResultsPage
             documentData={documentData}
             onBack={() => setActiveTab("evaluation")}
+            onSaveHumanScore={saveHumanScore}
           />
         </div>
       ) : (
@@ -1720,7 +2069,7 @@ export function EvaluationPage({
                   </Label>
                   <Select
                     value={selectedFileId}
-                    onValueChange={setSelectedFileId}
+                    onValueChange={handleFileChange}
                     disabled={isEvaluating}
                   >
                     <SelectTrigger className="w-full h-auto py-2">
@@ -2412,6 +2761,7 @@ export function EvaluationPage({
                           ← Back to File List
                         </Button>
                       )}
+
                       <h3 className="text-lg font-semibold">
                         Entities (
                         {
@@ -2476,13 +2826,12 @@ export function EvaluationPage({
                             <Card
                               key={index}
                               id={`entity-card-${entity.name}`}
-                              className={`border-2 transition-all duration-300 ${
-                                isEvaluating
-                                  ? "border-blue-400 shadow-lg"
-                                  : isCompleted
-                                    ? "border-green-400"
-                                    : ""
-                              }`}
+                              className={`border-2 transition-all duration-300 ${isEvaluating
+                                ? "border-blue-400 shadow-lg"
+                                : isCompleted
+                                  ? "border-green-400"
+                                  : ""
+                                }`}
                             >
                               <CardHeader className="pb-3">
                                 <CardTitle className="text-lg flex items-center gap-2">
@@ -2552,7 +2901,7 @@ export function EvaluationPage({
                                           singleModeSourceModel &&
                                           entity.extractionsByModel &&
                                           !entity.extractionsByModel[
-                                            singleModeSourceModel
+                                          singleModeSourceModel
                                           ]
                                         ) {
                                           return (
@@ -2597,10 +2946,10 @@ export function EvaluationPage({
                                         m === "correctness" ||
                                         m === "completeness"
                                     ) && (
-                                      <span className="ml-2 text-xs text-orange-600 font-normal">
-                                        (required for Correctness/Completeness)
-                                      </span>
-                                    )}
+                                        <span className="ml-2 text-xs text-orange-600 font-normal">
+                                          (required for Correctness/Completeness)
+                                        </span>
+                                      )}
                                   </Label>
                                   <Textarea
                                     id={`ground-truth-${index}`}
@@ -2613,6 +2962,7 @@ export function EvaluationPage({
                                         e.target.value
                                       )
                                     }
+                                    onBlur={() => saveGroundTruthsToSession()}
                                     placeholder="Enter the expected/correct output for this entity..."
                                     rows={3}
                                     className="mt-2"
@@ -2635,26 +2985,26 @@ export function EvaluationPage({
                                             {resolvedEvaluationResults.length}{" "}
                                             model
                                             {resolvedEvaluationResults.length >
-                                            1
+                                              1
                                               ? "s"
                                               : ""}
                                             )
                                             {resolvedEvaluationResults.length >
                                               1 && (
-                                              <span className="ml-2 text-sm font-semibold text-primary">
-                                                Avg:{" "}
-                                                {(
-                                                  (resolvedEvaluationResults.reduce(
-                                                    (sum: number, r: any) =>
-                                                      sum + r.aggregate_score,
-                                                    0
-                                                  ) /
-                                                    resolvedEvaluationResults.length) *
-                                                  100
-                                                ).toFixed(1)}
-                                                %
-                                              </span>
-                                            )}
+                                                <span className="ml-2 text-sm font-semibold text-primary">
+                                                  Avg:{" "}
+                                                  {(
+                                                    (resolvedEvaluationResults.reduce(
+                                                      (sum: number, r: any) =>
+                                                        sum + r.aggregate_score,
+                                                      0
+                                                    ) /
+                                                      resolvedEvaluationResults.length) *
+                                                    100
+                                                  ).toFixed(1)}
+                                                  %
+                                                </span>
+                                              )}
                                             {isCompleted && !isEvaluating && (
                                               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -2676,7 +3026,7 @@ export function EvaluationPage({
                                             </DialogTitle>
                                             <DialogDescription>
                                               {resolvedEvaluationResults.length >
-                                              1 ? (
+                                                1 ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                   <span>
                                                     Compare how different LLM
@@ -2774,7 +3124,7 @@ export function EvaluationPage({
                                                         <p className="text-sm text-blue-800 leading-relaxed">
                                                           {
                                                             metricDefinitions[
-                                                              metricName
+                                                            metricName
                                                             ]
                                                           }
                                                         </p>
@@ -2815,7 +3165,7 @@ export function EvaluationPage({
                                                                         "Entity Extraction ",
                                                                         ""
                                                                       ) ===
-                                                                        metricName ||
+                                                                      metricName ||
                                                                       m.metric_name
                                                                         .toLowerCase()
                                                                         .includes(
@@ -2856,39 +3206,36 @@ export function EvaluationPage({
 
                                                         return (
                                                           <div
-                                                            className={`border rounded-lg p-4 ${
-                                                              avgPercentage >=
+                                                            className={`border rounded-lg p-4 ${avgPercentage >=
                                                               70
-                                                                ? "bg-green-50 border-green-200"
-                                                                : avgPercentage >=
-                                                                    50
-                                                                  ? "bg-yellow-50 border-yellow-200"
-                                                                  : "bg-red-50 border-red-200"
-                                                            }`}
+                                                              ? "bg-green-50 border-green-200"
+                                                              : avgPercentage >=
+                                                                50
+                                                                ? "bg-yellow-50 border-yellow-200"
+                                                                : "bg-red-50 border-red-200"
+                                                              }`}
                                                           >
                                                             <div className="flex items-center justify-between">
                                                               <div className="flex items-center gap-2">
                                                                 <BarChart3
-                                                                  className={`h-5 w-5 ${
-                                                                    avgPercentage >=
+                                                                  className={`h-5 w-5 ${avgPercentage >=
                                                                     70
-                                                                      ? "text-green-600"
-                                                                      : avgPercentage >=
-                                                                          50
-                                                                        ? "text-yellow-600"
-                                                                        : "text-red-600"
-                                                                  }`}
+                                                                    ? "text-green-600"
+                                                                    : avgPercentage >=
+                                                                      50
+                                                                      ? "text-yellow-600"
+                                                                      : "text-red-600"
+                                                                    }`}
                                                                 />
                                                                 <span
-                                                                  className={`font-semibold ${
-                                                                    avgPercentage >=
+                                                                  className={`font-semibold ${avgPercentage >=
                                                                     70
-                                                                      ? "text-green-900"
-                                                                      : avgPercentage >=
-                                                                          50
-                                                                        ? "text-yellow-900"
-                                                                        : "text-red-900"
-                                                                  }`}
+                                                                    ? "text-green-900"
+                                                                    : avgPercentage >=
+                                                                      50
+                                                                      ? "text-yellow-900"
+                                                                      : "text-red-900"
+                                                                    }`}
                                                                 >
                                                                   Average{" "}
                                                                   {metricName}{" "}
@@ -2897,15 +3244,14 @@ export function EvaluationPage({
                                                                 </span>
                                                               </div>
                                                               <span
-                                                                className={`text-2xl font-bold ${
-                                                                  avgPercentage >=
+                                                                className={`text-2xl font-bold ${avgPercentage >=
                                                                   70
-                                                                    ? "text-green-700"
-                                                                    : avgPercentage >=
-                                                                        50
-                                                                      ? "text-yellow-700"
-                                                                      : "text-red-700"
-                                                                }`}
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                    50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                                  }`}
                                                               >
                                                                 {avgPercentage.toFixed(
                                                                   1
@@ -2914,15 +3260,14 @@ export function EvaluationPage({
                                                               </span>
                                                             </div>
                                                             <p
-                                                              className={`text-xs mt-2 ${
-                                                                avgPercentage >=
+                                                              className={`text-xs mt-2 ${avgPercentage >=
                                                                 70
-                                                                  ? "text-green-700"
-                                                                  : avgPercentage >=
-                                                                      50
-                                                                    ? "text-yellow-700"
-                                                                    : "text-red-700"
-                                                              }`}
+                                                                ? "text-green-700"
+                                                                : avgPercentage >=
+                                                                  50
+                                                                  ? "text-yellow-700"
+                                                                  : "text-red-700"
+                                                                }`}
                                                             >
                                                               Based on
                                                               evaluations from{" "}
@@ -2931,7 +3276,7 @@ export function EvaluationPage({
                                                               }{" "}
                                                               model
                                                               {metricScores.length >
-                                                              1
+                                                                1
                                                                 ? "s"
                                                                 : ""}
                                                             </p>
@@ -3198,20 +3543,28 @@ export function EvaluationPage({
                                           const judge = allProviders.find(
                                             (p) => p.id === judgeId
                                           );
-                                          // The result.model usually matches the provider.model, but sometimes backend might return ID
-                                          // We check both to be safe
-                                          return ext.evaluationResults.some(
-                                            (r: any) =>
-                                              (judge &&
-                                                r.model === judge.model) ||
-                                              r.model === judgeId
+                                          // Check multiple ways to handle race condition where Azure models haven't loaded yet
+                                          const hasResult = ext.evaluationResults.some(
+                                            (r: any) => {
+                                              if (!r.model) return false;
+                                              // Exact matches
+                                              if (judge && r.model === judge.model) return true;
+                                              if (r.model === judgeId) return true;
+                                              // Fuzzy matches for when Azure models haven't loaded
+                                              if (judgeId.toLowerCase().includes(r.model.toLowerCase())) return true;
+                                              // Special cases for Vertex AI
+                                              if (judgeId === 'vertex_ai_lite' && r.model.includes('flash-lite')) return true;
+                                              if (judgeId === 'vertex_ai_pro' && r.model.includes('gemini') && r.model.includes('pro')) return true;
+                                              if (judgeId === 'vertex_ai_3_pro' && r.model.includes('gemini-2.5-pro')) return true;
+                                              return false;
+                                            }
                                           );
+                                          return hasResult;
                                         });
                                       if (allJudgesFinished) {
                                         completedCount++;
                                       }
                                     } else {
-                                      // If no judges selected but we have results, count it (fallback)
                                       completedCount++;
                                     }
                                   }
@@ -3254,6 +3607,7 @@ export function EvaluationPage({
                                             e.target.value
                                           )
                                         }
+                                        onBlur={() => saveBatchGroundTruths(file.fileId)}
                                         placeholder="Enter expected output..."
                                         className="min-h-[80px]"
                                       />
@@ -3288,7 +3642,7 @@ export function EvaluationPage({
                                             size="sm"
                                             className="h-6 text-xs text-blue-600 hover:text-blue-800 p-1"
                                             onClick={() => {
-                                              setSelectedFileId(file.fileId);
+                                              handleFileChange(file.fileId);
                                               setIsBatchMode(false);
                                             }}
                                           >

@@ -23,6 +23,8 @@ class SessionConfiguration(BaseModel):
     summary_prompt: Optional[str] = None
     paragraph_system_prompt: Optional[str] = None
     temperature: float = 0.0
+    files_config: Optional[Dict[str, Any]] = Field(default_factory=dict) # Per-file configurations
+    evaluation_config: Optional[Dict[str, Any]] = Field(default_factory=dict) # Evaluation settings (metrics, models, prompts)
 
 
 class SessionDocument(BaseModel):
@@ -30,6 +32,7 @@ class SessionDocument(BaseModel):
 
     file_hash: str
     filename: str
+    id: Optional[str] = None
 
 
 class ExtractionResult(BaseModel):
@@ -37,11 +40,13 @@ class ExtractionResult(BaseModel):
 
     entity_name: str
     model_id: str
+    document_id: Optional[str] = None
     extracted_text: Optional[str] = None
     references: Optional[List[Dict[str, Any]]] = None
     status: Literal["pending", "completed", "error"] = "pending"
     error_message: Optional[str] = None
     extracted_at: Optional[datetime] = None
+    file_hash: Optional[str] = None
 
 
 class EvaluationScore(BaseModel):
@@ -51,11 +56,14 @@ class EvaluationScore(BaseModel):
     score: Optional[float] = None
     reasoning: Optional[str] = None
     judge_model: Optional[str] = None
+    human_score: Optional[float] = None  # Per-judge human evaluation score
 
 
 class EvaluationResult(BaseModel):
     """Evaluation result for an extraction"""
 
+    document_id: Optional[str] = None  # Links to specific document for per-doc scores
+    file_hash: Optional[str] = None  # Alternative way to identify document (used by frontend)
     entity_name: str
     model_id: str  # Source model that produced the extraction
     ground_truth: Optional[str] = None
@@ -70,7 +78,10 @@ class Session(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     name: str = "Untitled Session"
-    status: Literal["draft", "in_progress", "completed"] = "draft"
+    status: Literal["in_progress", "completed"] = "in_progress"
+    last_step: Optional[str] = "upload"
+    evaluation_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    files_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -95,7 +106,10 @@ class CreateSessionRequest(BaseModel):
 
     user_id: str
     name: Optional[str] = "Untitled Session"
+    last_step: Optional[str] = "upload"
     configuration: Optional[SessionConfiguration] = None
+    evaluation_config: Optional[Dict[str, Any]] = None
+    files_config: Optional[Dict[str, Any]] = None
     documents: Optional[List[SessionDocument]] = None
 
 
@@ -104,8 +118,11 @@ class UpdateSessionRequest(BaseModel):
 
     user_id: str
     name: Optional[str] = None
-    status: Optional[Literal["draft", "in_progress", "completed"]] = None
+    status: Optional[Literal["in_progress", "completed"]] = None
+    last_step: Optional[str] = None
     configuration: Optional[SessionConfiguration] = None
+    evaluation_config: Optional[Dict[str, Any]] = None
+    files_config: Optional[Dict[str, Any]] = None
     documents: Optional[List[SessionDocument]] = None
     extraction_results: Optional[List[ExtractionResult]] = None
     evaluation_results: Optional[List[EvaluationResult]] = None
@@ -116,10 +133,13 @@ class SessionSummary(BaseModel):
 
     session_id: str
     name: str
-    status: Literal["draft", "in_progress", "completed"]
+    status: Literal["in_progress", "completed"]
     created_at: datetime
     updated_at: datetime
+    last_step: Optional[str] = None
+    study_type: Optional[str] = None
     document_count: int
+    document_names: List[str] = Field(default_factory=list)
     extraction_count: int
     evaluation_count: int
 
