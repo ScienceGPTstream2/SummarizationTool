@@ -151,7 +151,8 @@ class MacbookLLMClient:
 
         url = f"{self.base_url}/api/tags"
         try:
-            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=30))
+            # Keep this reasonably short so UI is not blocked on slow/offline Macbook
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=5))
             if not resp.ok:
                 print(
                     f"[MacbookLLM] /api/tags failed: status={resp.status_code} body={resp.text}"
@@ -189,6 +190,28 @@ class MacbookLLMClient:
         if skipped:
             print(f"[MacbookLLM] Skipped models: {', '.join(skipped)}")
         return filtered
+
+    async def check_health(self) -> bool:
+        """Lightweight health check for the Macbook LLM service.
+
+        Uses /api/tags with a strict timeout to avoid blocking the UI. Returns
+        False on any error or non-200 response.
+        """
+        if self.disabled:
+            return False
+
+        url = f"{self.base_url}/api/tags"
+        try:
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=3))
+            if not resp.ok:
+                print(
+                    f"[MacbookLLM] health check failed: status={resp.status_code} body={resp.text}"
+                )
+                return False
+            return True
+        except Exception as exc:
+            print(f"[MacbookLLM] health check exception: {exc}")
+            return False
 
     async def _call_macbook_api(
         self,

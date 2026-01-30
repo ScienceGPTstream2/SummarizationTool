@@ -164,7 +164,7 @@ export function SessionMetrics() {
           </div>
         </Card>
       </DialogTrigger>
-      <DialogContent className="w-[95vw] max-w-4xl max-h-[85vh] overflow-hidden">
+      <DialogContent className="w-[99vw] max-w-7xl min-w-[900px] max-h-[85vh] overflow-hidden">
         <DialogHeader className="shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-3 pr-12">
             <DialogTitle>Session Metrics Breakdown</DialogTitle>

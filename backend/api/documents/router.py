@@ -53,6 +53,8 @@ async def process_uploaded_file(
     Process an uploaded file to markdown using specified or auto-selected processor
     """
     try:
+        import time
+
         # Get file info
         file_info = await file_service.get_file_by_id(file_id)
         if not file_info:
@@ -60,12 +62,14 @@ async def process_uploaded_file(
 
         # Convert file to markdown using user-selected processor
         file_path = file_info["file_path"]
+        conversion_start = time.perf_counter()
         result = await document_service.convert_document_to_markdown(
             file_path,
             "file",
             processor=request.processor,
             extract_figures=request.extract_figures,
         )
+        conversion_duration = time.perf_counter() - conversion_start
 
         try:
             from services.telemetry.cost_tracker import cost_tracker
@@ -78,7 +82,7 @@ async def process_uploaded_file(
                 model=result.get("processor_used", "unknown"),
                 prompt_tokens=0,
                 completion_tokens=0,
-                duration=metadata.get("conversion_time") or 0.0,
+                duration=conversion_duration,
                 page_count=metadata.get("page_count") or 0,
             )
         except Exception as e:

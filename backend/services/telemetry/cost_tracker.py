@@ -44,6 +44,7 @@ class CostTracker:
         prompt_tokens: Optional[int],
         completion_tokens: Optional[int],
         page_count: Optional[int] = None,
+        duration: Optional[float] = None,
     ) -> float:
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
@@ -84,7 +85,10 @@ class CostTracker:
 
         per_page_rate = pricing.get("cost_per_page", 0.0)
         page_cost = page_count_value * float(per_page_rate or 0.0)
-        return base_cost + page_cost
+        cost_per_minute = pricing.get("cost_per_minute", 0.0)
+        duration_minutes = max(float(duration or 0.0), 0.0) / 60.0
+        compute_cost = duration_minutes * float(cost_per_minute or 0.0)
+        return base_cost + page_cost + compute_cost
 
     def estimate_call_cost(
         self,
@@ -93,6 +97,7 @@ class CostTracker:
         prompt_tokens: Optional[int],
         completion_tokens: Optional[int],
         page_count: Optional[int] = None,
+        duration: Optional[float] = None,
     ) -> float:
         return self._compute_cost(
             provider=provider,
@@ -100,6 +105,7 @@ class CostTracker:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             page_count=page_count,
+            duration=duration,
         )
 
     def _normalize_model_key(self, model: str, provider: Optional[str]) -> str:
@@ -153,6 +159,7 @@ class CostTracker:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             page_count=page_count,
+            duration=duration,
         )
 
         metrics = self._sessions.get(session_id)

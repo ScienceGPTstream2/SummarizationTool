@@ -365,6 +365,10 @@ class GeminiLLMClient:
             print(f"[LLMService] Gemini content extraction error: {e}, Raw: {raw}")
             return {"success": False, "error": f"Unexpected response format: {raw}"}
 
+        usage = raw.get("usageMetadata", {}) if isinstance(raw, dict) else {}
+        prompt_tokens = usage.get("promptTokenCount")
+        completion_tokens = usage.get("candidatesTokenCount")
+
         result = {
             "success": True,
             "content": content,  # Keep for backward compatibility
@@ -373,6 +377,8 @@ class GeminiLLMClient:
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model_id,
                 "duration": duration,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
             },
         }
 

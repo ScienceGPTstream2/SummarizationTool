@@ -149,7 +149,8 @@
       "provider": "azure",
       "input_per_million": 0.0,
       "output_per_million": 0.0,
-      "cost_per_page": 1.0
+      "cost_per_page": 0.0,
+      "cost_per_minute": 0.0015
     }
   }
 }
