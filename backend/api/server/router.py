@@ -98,7 +98,14 @@ async def get_server_config():
     )
 
     macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
+    macbook_client = MacbookLLMClient() if macbook_base_url else None
     is_macbook_configured = bool(macbook_base_url)
+    is_macbook_healthy = False
+    if macbook_client:
+        try:
+            is_macbook_healthy = await macbook_client.check_health()
+        except Exception:
+            is_macbook_healthy = False
 
     return ServerConfig(
         is_azure_openai_configured=is_azure_openai_configured,
@@ -106,6 +113,7 @@ async def get_server_config():
         is_azure_document_intelligence_configured=is_azure_document_intelligence_configured,
         is_llama_configured=is_llama_configured,
         is_macbook_configured=is_macbook_configured,
+        is_macbook_healthy=is_macbook_healthy,
     )
 
 
@@ -346,26 +354,24 @@ async def get_available_models():
     macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
     if macbook_base_url:
         macbook_client = MacbookLLMClient()
-        macbook_models = await macbook_client.fetch_available_models()
-        if not macbook_models:
-            fallback_models = sorted(macbook_client.allowed_models)
-            macbook_models = [
-                {
-                    "id": model_id,
-                    "name": model_id,
-                    "provider": "Macbook LLM",
-                }
-                for model_id in fallback_models
-            ]
-        for model in macbook_models:
-            models.append(
-                {
-                    "id": model["id"],
-                    "name": model["name"],
-                    "provider": "Macbook LLM",
-                    "description": "Self-hosted model",
-                }
-            )
+        is_macbook_healthy = await macbook_client.check_health()
+        if is_macbook_healthy:
+            macbook_models = await macbook_client.fetch_available_models()
+            # If tags returns empty even when healthy, still skip to avoid unreliable state
+            if macbook_models:
+                for model in macbook_models:
+                    models.append(
+                        {
+                            "id": model["id"],
+                            "name": model["name"],
+                            "provider": "Macbook LLM",
+                            "description": "Self-hosted model",
+                        }
+                    )
+            else:
+                print("[MacbookLLM] Healthy but no models returned; skipping Macbook models")
+        else:
+            print("[MacbookLLM] Macbook health check failed; skipping Macbook models")
 
     return JSONResponse(status_code=200, content=models)
 

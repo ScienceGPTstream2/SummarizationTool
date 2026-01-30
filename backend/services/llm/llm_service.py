@@ -157,6 +157,14 @@ class LLMService:
                         system_instruction=system_message,
                     )
                 )
+                # Gemini responses include usageMetadata; ensure meta has tokens for downstream UI
+                meta = result.get("meta") if isinstance(result, dict) else None
+                if meta is not None:
+                    usage = result.get("raw", {}).get("usageMetadata", {}) if isinstance(result.get("raw"), dict) else {}
+                    prompt_tokens = meta.get("prompt_tokens") or usage.get("promptTokenCount")
+                    completion_tokens = meta.get("completion_tokens") or usage.get("candidatesTokenCount")
+                    meta["prompt_tokens"] = prompt_tokens
+                    meta["completion_tokens"] = completion_tokens
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
             elif model_type == "anthropic":
