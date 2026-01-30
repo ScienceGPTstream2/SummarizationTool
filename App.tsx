@@ -527,9 +527,9 @@ export default function App() {
         const configEntityNames = new Set(
           configEntities.map((e: any) => e.name)
         );
-        const extractionEntityNames = new Set(
+        const extractionEntityNames = new Set<string>(
           sessionData.extraction_results
-            .map((r: any) => r.entity_name)
+            .map((r: any) => r.entity_name as string)
             .filter((name: string) => name !== "__paragraph_summary__")
         );
 
@@ -562,29 +562,35 @@ export default function App() {
             }
           }
 
-          // Merge: keep existing config entities + add missing ones from extraction results
-          const allEntityNames = new Set([
-            ...configEntityNames,
-            ...extractionEntityNames,
-          ]);
-          configEntities = [...allEntityNames].map((name) => {
-            // Try to find in existing config first
-            const existingEntity = configEntities.find(
-              (e: any) => e.name === name
-            );
-            if (existingEntity) return existingEntity;
+          // Merge: keep existing config entities in order + add missing ones from extraction results
+          // Use template entities for ordering if available, otherwise use configEntities order
+          const orderedBaseEntities =
+            templateEntities.length > 0 ? templateEntities : configEntities;
 
-            // Try to find matching prompt from template
-            const templateEntity = templateEntities.find(
-              (te) => te.name === name
+          // Start with ordered base entities
+          const mergedEntities = orderedBaseEntities.map((te: any) => {
+            // Use existing config entity if available
+            const existingEntity = configEntities.find(
+              (e: any) => e.name === te.name
             );
-            return {
-              name,
-              prompt:
-                templateEntity?.prompt || "Restored from extraction result",
-              system_prompt: "",
-            };
+            return existingEntity || te;
           });
+
+          // Add any entities from extraction results that aren't in the base
+          const baseEntityNames = new Set(
+            orderedBaseEntities.map((e: any) => e.name)
+          );
+          extractionEntityNames.forEach((name: string) => {
+            if (!baseEntityNames.has(name)) {
+              mergedEntities.push({
+                name,
+                prompt: "Restored from extraction result",
+                system_prompt: "",
+              });
+            }
+          });
+
+          configEntities = mergedEntities;
         }
       }
 
@@ -631,36 +637,39 @@ export default function App() {
             status: "completed" as const,
             entities: (() => {
               // Get entity names that have extraction results for THIS document
-              const docExtractionNames = new Set(
+              const docExtractionNames = new Set<string>(
                 sessionData.extraction_results
                   ?.filter(
                     (r: any) =>
                       r.document_id === doc.id &&
                       r.entity_name !== "__paragraph_summary__"
                   )
-                  .map((r: any) => r.entity_name) || []
+                  .map((r: any) => r.entity_name as string) || []
               );
 
-              // Merge with config entities to get full list
+              // Use config entities as the source of truth for ORDER
+              // This preserves the original template/user-defined order
+              const baseEntities = fileConfig.entities || configEntities || [];
               const configEntityNames = new Set(
-                (fileConfig.entities || configEntities).map((e: any) => e.name)
+                baseEntities.map((e: any) => e.name)
               );
-              const allEntityNames = new Set([
-                ...docExtractionNames,
-                ...configEntityNames,
-              ]);
 
-              // Build entity list prioritizing extraction results
-              return [...allEntityNames].map((entityName) => {
-                const e = (fileConfig.entities || configEntities).find(
-                  (ce: any) => ce.name === entityName
-                ) || {
-                  name: entityName,
-                  prompt: "Restored from extraction result",
-                  system_prompt: "",
-                };
-                return e;
+              // Start with config entities in their original order
+              const orderedEntities = [...baseEntities];
+
+              // Append any entities from extraction results that aren't in config
+              // (for backward compatibility with older sessions)
+              docExtractionNames.forEach((entityName: string) => {
+                if (!configEntityNames.has(entityName)) {
+                  orderedEntities.push({
+                    name: entityName,
+                    prompt: "Restored from extraction result",
+                    system_prompt: "",
+                  });
+                }
               });
+
+              return orderedEntities;
             })().map((e: any) => {
               // Find extraction result for this entity
               const result = sessionData.extraction_results?.find(
@@ -690,9 +699,9 @@ export default function App() {
                     ev.scores.forEach((scoreItem: any) => {
                       const key =
                         scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
-                      // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                      const itemHumanScore =
-                        scoreItem.human_score ?? ev.human_score;
+                      // Use ONLY per-score human_score to avoid cross-judge contamination
+                      // Don't fall back to ev.human_score as it may contain another judge's score
+                      const itemHumanScore = scoreItem.human_score;
 
                       if (!acc[key]) {
                         acc[key] = {
@@ -796,9 +805,8 @@ export default function App() {
                         if (ev.scores && Array.isArray(ev.scores)) {
                           ev.scores.forEach((scoreItem: any) => {
                             const key = scoreItem.judge_model || "unknown";
-                            // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                            const itemHumanScore =
-                              scoreItem.human_score ?? ev.human_score;
+                            // Use ONLY per-score human_score to avoid cross-judge contamination
+                            const itemHumanScore = scoreItem.human_score;
                             if (!judgeAcc[key]) {
                               judgeAcc[key] = {
                                 provider: scoreItem.judge_model?.includes(
@@ -924,9 +932,8 @@ export default function App() {
                 ev.scores.forEach((scoreItem: any) => {
                   const key =
                     scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
-                  // Get human_score from scoreItem (per-judge) first, fallback to ev (per-extraction)
-                  const itemHumanScore =
-                    scoreItem.human_score ?? ev.human_score;
+                  // Use ONLY per-score human_score to avoid cross-judge contamination
+                  const itemHumanScore = scoreItem.human_score;
 
                   if (!acc[key]) {
                     acc[key] = {
@@ -1028,6 +1035,8 @@ export default function App() {
                     if (ev.scores && Array.isArray(ev.scores)) {
                       ev.scores.forEach((scoreItem: any) => {
                         const key = scoreItem.judge_model || "unknown";
+                        // Use ONLY per-score human_score to avoid cross-judge contamination
+                        const itemHumanScore = scoreItem.human_score;
                         if (!judgeAcc[key]) {
                           judgeAcc[key] = {
                             provider: scoreItem.judge_model?.includes("gemini")
@@ -1040,10 +1049,10 @@ export default function App() {
                             aggregate_score: 0,
                             all_passed: true,
                             evaluation_time: 0,
-                            human_score: ev.human_score,
+                            human_score: itemHumanScore,
                           };
-                        } else if (ev.human_score != null) {
-                          judgeAcc[key].human_score = ev.human_score;
+                        } else if (itemHumanScore != null) {
+                          judgeAcc[key].human_score = itemHumanScore;
                         }
                         judgeAcc[key].metrics.push({
                           metric_name: scoreItem.metric,

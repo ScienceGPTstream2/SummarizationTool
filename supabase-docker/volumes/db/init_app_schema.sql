@@ -3,6 +3,16 @@
 -- Run this after Supabase is up and running
 -- ============================================
 
+-- Login history for audit
+CREATE TABLE IF NOT EXISTS public.login_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    ip_address TEXT,
+    user_agent TEXT,
+    login_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- User preferences and settings
 CREATE TABLE IF NOT EXISTS public.user_preferences (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -124,9 +134,13 @@ CREATE INDEX IF NOT EXISTS idx_evaluation_results_extraction_id ON public.evalua
 CREATE INDEX IF NOT EXISTS idx_user_prompt_templates_user_id ON public.user_prompt_templates(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_prompt_templates_study_type ON public.user_prompt_templates(study_type);
 
+CREATE INDEX IF NOT EXISTS idx_login_history_user_id ON public.login_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_login_history_login_at ON public.login_history(login_at DESC);
+
 -- ============================================
 -- Row Level Security
 -- ============================================
+ALTER TABLE public.login_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_prompt_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
@@ -135,6 +149,9 @@ ALTER TABLE public.extraction_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.evaluation_results ENABLE ROW LEVEL SECURITY;
 
 -- Users can only access their own data
+CREATE POLICY "Users can view own login history" ON public.login_history
+    FOR SELECT USING (auth.uid() = user_id);
+
 CREATE POLICY "Users can manage own preferences" ON public.user_preferences
     FOR ALL USING (auth.uid() = user_id);
 

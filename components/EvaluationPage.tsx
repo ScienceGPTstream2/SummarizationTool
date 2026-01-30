@@ -2815,16 +2815,17 @@ export function EvaluationPage({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      {files.length > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-muted-foreground hover:text-foreground px-2"
-                          onClick={() => setIsBatchMode(true)}
-                        >
-                          ← Back to File List
-                        </Button>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground px-2"
+                        onClick={() => setIsBatchMode(true)}
+                      >
+                        ←{" "}
+                        {files.length > 1
+                          ? "Back to File List"
+                          : "Back to Batch View"}
+                      </Button>
 
                       <h3 className="text-lg font-semibold">
                         Entities (

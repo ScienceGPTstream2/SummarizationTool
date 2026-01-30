@@ -79,22 +79,27 @@ class SupabaseDBService:
         )
         session["documents"] = docs_result.data or []
 
-        # Get extraction results
+        # Get extraction results - order by entity_name for consistent ordering
         extractions_result = (
             self.client.table("extraction_results")
             .select("*")
             .eq("session_id", session_id)
+            .order("entity_name")
+            .order("model_id")
             .execute()
         )
         session["extraction_results"] = extractions_result.data or []
 
-        # Get evaluation results for extractions
+        # Get evaluation results for extractions - order for consistent results
         if session["extraction_results"]:
             extraction_ids = [e["id"] for e in session["extraction_results"]]
             evals_result = (
                 self.client.table("evaluation_results")
                 .select("*")
                 .in_("extraction_result_id", extraction_ids)
+                .order("extraction_result_id")
+                .order("judge_model")
+                .order("metric")
                 .execute()
             )
             session["evaluation_results"] = evals_result.data or []

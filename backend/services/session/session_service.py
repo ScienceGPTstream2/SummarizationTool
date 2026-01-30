@@ -405,11 +405,12 @@ class SessionService:
                 # Update human_score only for the specific judge_model
                 for score in result.scores:
                     if score.metric == "human_score_update" and score.judge_model:
-                        # Find existing evaluation for this judge_model
+                        # Find existing evaluations for this judge_model
                         existing_evals = self.db.get_evaluation_results_by_extraction(
                             extraction_id
                         )
                         judge_found = False
+                        # Update ALL metrics for this judge_model (not just the first one)
                         for eval_result in existing_evals:
                             if eval_result.get("judge_model") == score.judge_model:
                                 # Update this specific judge's evaluation with human_score
@@ -424,7 +425,7 @@ class SessionService:
                                     or eval_result.get("ground_truth"),
                                 )
                                 judge_found = True
-                                break
+                                # NOTE: Don't break here! Update ALL metrics for this judge
                         # If no evaluation found for this judge, skip saving silently
                         # This can happen if the source model wasn't evaluated with this judge
             else:
