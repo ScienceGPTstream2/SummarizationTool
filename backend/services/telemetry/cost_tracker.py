@@ -76,8 +76,8 @@ class CostTracker:
         )
         if "input_per_million" in pricing or "output_per_million" in pricing:
             base_cost = (prompt_tokens / 1_000_000.0) * float(prompt_rate or 0.0)
-            base_cost += (
-                (completion_tokens / 1_000_000.0) * float(completion_rate or 0.0)
+            base_cost += (completion_tokens / 1_000_000.0) * float(
+                completion_rate or 0.0
             )
         else:
             base_cost = (prompt_tokens / 1000.0) * float(prompt_rate or 0.0)
@@ -125,7 +125,9 @@ class CostTracker:
                 model_lower = model_lower.replace("publishers/google/models/", "")
             if model_lower.startswith("claude-"):
                 model_lower = model_lower.split("@")[0]
-                model_lower = model_lower.replace("claude-sonnet-4-5", "claude-sonnet-4.5")
+                model_lower = model_lower.replace(
+                    "claude-sonnet-4-5", "claude-sonnet-4.5"
+                )
                 model_lower = model_lower.replace("claude-opus-4-1", "claude-opus-4.1")
             if model_lower.startswith("meta/llama-"):
                 model_lower = model_lower.replace("meta/llama-", "llama-")
@@ -182,7 +184,9 @@ class CostTracker:
             )
         )
 
-    def get_session_metrics(self, session_id: Optional[str]) -> Optional[SessionMetrics]:
+    def get_session_metrics(
+        self, session_id: Optional[str]
+    ) -> Optional[SessionMetrics]:
         if not session_id:
             return None
         return self._sessions.get(session_id)

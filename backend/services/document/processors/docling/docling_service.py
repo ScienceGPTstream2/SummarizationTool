@@ -369,7 +369,9 @@ class DoclingService:
 
                 page_count = 0
                 try:
-                    if hasattr(result, "document") and hasattr(result.document, "pages"):
+                    if hasattr(result, "document") and hasattr(
+                        result.document, "pages"
+                    ):
                         page_count = len(result.document.pages or {})
                 except Exception:
                     page_count = 0

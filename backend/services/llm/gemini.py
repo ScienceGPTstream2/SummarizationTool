@@ -43,14 +43,14 @@ class GeminiLLMClient:
         # Load from environment variables or secrets.toml
         # Check both GEMINI_ and VERTEX_AI_ prefixes for compatibility
         self.project_id = (
-            os.environ.get("GEMINI_PROJECT_ID") or
-            os.environ.get("GEMINI_PROJECT") or
-            os.environ.get("VERTEX_AI_PROJECT")
+            os.environ.get("GEMINI_PROJECT_ID")
+            or os.environ.get("GEMINI_PROJECT")
+            or os.environ.get("VERTEX_AI_PROJECT")
         )
         self.location = (
-            os.environ.get("GEMINI_LOCATION") or
-            os.environ.get("VERTEX_AI_LOCATION") or
-            "us-central1"
+            os.environ.get("GEMINI_LOCATION")
+            or os.environ.get("VERTEX_AI_LOCATION")
+            or "us-central1"
         )
 
         # Find service account file
@@ -435,13 +435,17 @@ class GeminiLLMClient:
         contents = [
             {
                 "role": "user",
-                "parts": [{"text": f"""<markdown study>
+                "parts": [
+                    {
+                        "text": f"""<markdown study>
 {markdown}
 </markdown study>
 
 Prompt:
 {extraction_prompt}
-"""}],
+"""
+                    }
+                ],
             }
         ]
 
@@ -580,32 +584,29 @@ Prompt:
             import base64
 
             with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode('utf-8')
+                image_data = base64.b64encode(f.read()).decode("utf-8")
 
             # Determine MIME type from file extension
             file_ext = Path(image_path).suffix.lower()
             mime_type = {
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.gif': 'image/gif',
-                '.webp': 'image/webp',
-            }.get(file_ext, 'image/png')  # Default to PNG
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(
+                file_ext, "image/png"
+            )  # Default to PNG
 
             # Prepare multimodal content
             contents = [
                 {
                     "role": "user",
                     "parts": [
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": image_data
-                            }
-                        },
+                        {"inline_data": {"mime_type": mime_type, "data": image_data}},
                         {
                             "text": f"Please analyze this image and extract the requested information:\n\n{extraction_prompt}"
-                        }
+                        },
                     ],
                 }
             ]

@@ -28,7 +28,9 @@ class MacbookLLMClient:
         # Caching & resilience
         self._tags_cache: List[Dict[str, Any]] = []
         self._tags_cache_ts: float = 0.0
-        self._tags_cache_ttl_seconds = 120  # reuse tags for 2 minutes to avoid hammering
+        self._tags_cache_ttl_seconds = (
+            120  # reuse tags for 2 minutes to avoid hammering
+        )
 
         # Soft failure tracking (no hard circuit breaker to avoid eager aborts)
         self._fail_count: int = 0
@@ -61,9 +63,7 @@ class MacbookLLMClient:
                     base_url = macbook_section.get("macbook_llm_base_url")
             if base_url:
                 os.environ.setdefault("MACBOOK_LLM_BASE_URL", base_url)
-                print(
-                    f"[MacbookLLM] Loaded base URL from secrets.toml: {base_url}"
-                )
+                print(f"[MacbookLLM] Loaded base URL from secrets.toml: {base_url}")
             return base_url
         except Exception as exc:
             print(f"[MacbookLLM] Failed to read secrets.toml for base URL: {exc}")
@@ -106,7 +106,9 @@ class MacbookLLMClient:
             if fnmatch.fnmatch(normalized, pattern):
                 return False
         if allow_patterns:
-            return any(fnmatch.fnmatch(normalized, pattern) for pattern in allow_patterns)
+            return any(
+                fnmatch.fnmatch(normalized, pattern) for pattern in allow_patterns
+            )
         return True
 
     def _format_prompt(self, system_message: Optional[str], user_prompt: str) -> str:
@@ -136,7 +138,10 @@ class MacbookLLMClient:
 
         # Return cached tags if still fresh
         now = time.time()
-        if self._tags_cache and now - self._tags_cache_ts < self._tags_cache_ttl_seconds:
+        if (
+            self._tags_cache
+            and now - self._tags_cache_ts < self._tags_cache_ttl_seconds
+        ):
             return self._tags_cache
 
         url = f"{self.base_url}/api/tags"
@@ -167,7 +172,9 @@ class MacbookLLMClient:
             base_name = self._strip_quantization_suffix(raw_name)
 
             # Enforce deny/allow policy only (allow-all-except-deny)
-            if not self._matches_policy(normalized, policy) or not self._matches_policy(base_name, policy):
+            if not self._matches_policy(normalized, policy) or not self._matches_policy(
+                base_name, policy
+            ):
                 skipped.append(raw_name)
                 continue
 
@@ -273,7 +280,9 @@ class MacbookLLMClient:
                         }
                 else:
                     # Non-200
-                    last_error = f"Macbook request failed ({resp.status_code}): {resp.text}"
+                    last_error = (
+                        f"Macbook request failed ({resp.status_code}): {resp.text}"
+                    )
                     if 500 <= resp.status_code < 600:
                         self._fail_count += 1
             # Backoff before retry

@@ -30,6 +30,7 @@ TIMEOUT_LOG_DIR = Path(__file__).resolve().parents[2] / "output" / "timeout_logs
 TIMEOUT_LOG_DIR.mkdir(parents=True, exist_ok=True)
 TIMEOUT_LOG_FILE = TIMEOUT_LOG_DIR / "timeout_log.txt"
 
+
 def log_timeout_event(operation: str, details: str, duration: float = None):
     """
     Log timeout events to a file for monitoring API request issues.
@@ -89,14 +90,24 @@ async def extract_entities(request: ExtractRequest, http_request: Request):
         figures_content = ""
         figures = None
         try:
-            figures = await document_service.get_figures_for_conversion(request.conversion_id)
-            print(f"[EXTRACTION] Found {len(figures) if figures else 0} figures for document {request.conversion_id}")
+            figures = await document_service.get_figures_for_conversion(
+                request.conversion_id
+            )
+            print(
+                f"[EXTRACTION] Found {len(figures) if figures else 0} figures for document {request.conversion_id}"
+            )
             if figures:
                 # Debug: print figure IDs
                 figure_ids = [f.get("id", "unknown") for f in figures]
-                print(f"[EXTRACTION] Figure IDs from Azure Doc Intelligence: {figure_ids}")
-                figures_content = await _build_figures_context(figures, request.conversion_id)
-                print(f"[EXTRACTION] Generated {len(figures_content)} characters of figure content")
+                print(
+                    f"[EXTRACTION] Figure IDs from Azure Doc Intelligence: {figure_ids}"
+                )
+                figures_content = await _build_figures_context(
+                    figures, request.conversion_id
+                )
+                print(
+                    f"[EXTRACTION] Generated {len(figures_content)} characters of figure content"
+                )
         except Exception as e:
             print(f"Warning: Could not load figure content for analysis: {e}")
 
@@ -109,9 +120,13 @@ async def extract_entities(request: ExtractRequest, http_request: Request):
             nonlocal raw_analysis  # Allow access to outer scope variable
 
             async with sem:
-                print(f"[EXTRACTION] Running extraction for entity '{entity.name}' with model {request.model_type}")
+                print(
+                    f"[EXTRACTION] Running extraction for entity '{entity.name}' with model {request.model_type}"
+                )
                 print(f"[EXTRACTION] Prompt preview: {entity.prompt[:100]}...")
-                print(f"[EXTRACTION] Enhanced markdown length: {len(enhanced_markdown)}")
+                print(
+                    f"[EXTRACTION] Enhanced markdown length: {len(enhanced_markdown)}"
+                )
 
                 session_id = http_request.headers.get("X-Session-Id")
                 result = await llm_service.extract_entities_from_markdown(
@@ -132,8 +147,12 @@ async def extract_entities(request: ExtractRequest, http_request: Request):
                     session_id=session_id,
                 )
 
-                print(f"[EXTRACTION] LLM response for '{entity.name}': {result.get('content', '')[:200]}...")
-                print(f"[EXTRACTION] References found: {len(result.get('references', []))}")
+                print(
+                    f"[EXTRACTION] LLM response for '{entity.name}': {result.get('content', '')[:200]}..."
+                )
+                print(
+                    f"[EXTRACTION] References found: {len(result.get('references', []))}"
+                )
             if result.get("success"):
                 response_data = {
                     "name": entity.name,
@@ -160,12 +179,16 @@ async def extract_entities(request: ExtractRequest, http_request: Request):
                                 # Match references to bounding boxes based on processor
                                 if request.processor_used == "azure_doc_intelligence":
                                     # Get figures for figure reference matching
-                                    figures = await document_service.get_figures_for_conversion(request.conversion_id)
+                                    figures = await document_service.get_figures_for_conversion(
+                                        request.conversion_id
+                                    )
                                     if figures:
-                                        matched_references = match_azure_figure_references(
-                                            references=references,
-                                            raw_analysis=raw_analysis,
-                                            figures=figures,
+                                        matched_references = (
+                                            match_azure_figure_references(
+                                                references=references,
+                                                raw_analysis=raw_analysis,
+                                                figures=figures,
+                                            )
                                         )
                                     else:
                                         matched_references = match_azure_references(
@@ -255,11 +278,15 @@ async def _build_figures_context(figures: list, conversion_id: str) -> str:
         # Try to get scientific summary - this is the new preferred method
         try:
             # Check if we have a stored scientific summary (preferred)
-            if figure.get("scientific_summary") and figure["scientific_summary"].get("summary"):
+            if figure.get("scientific_summary") and figure["scientific_summary"].get(
+                "summary"
+            ):
                 summary_content = figure["scientific_summary"]["summary"]
                 figure_context += f"Summary: {summary_content}\n"
             # Fallback to legacy OCR content if no summary exists
-            elif figure.get("extracted_content") and figure["extracted_content"].get("content"):
+            elif figure.get("extracted_content") and figure["extracted_content"].get(
+                "content"
+            ):
                 ocr_content = figure["extracted_content"]["content"]
                 figure_context += f"Content: {ocr_content}\n"
             else:

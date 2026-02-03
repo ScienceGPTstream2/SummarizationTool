@@ -349,7 +349,9 @@ async def get_available_models():
             # - meta/llama-3.1-8b-instruct-maas (not available)
         ]
         models.extend(llama_models)
-        print(f"✅ Loaded {len(llama_models)} Llama model(s) from configuration (region-specific availability)")
+        print(
+            f"✅ Loaded {len(llama_models)} Llama model(s) from configuration (region-specific availability)"
+        )
 
     macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
     if macbook_base_url:
@@ -358,16 +360,15 @@ async def get_available_models():
         global _MACBOOK_MODELS_CACHE  # type: ignore
         global _MACBOOK_MODELS_CACHE_TS  # type: ignore
 
-        if '_MACBOOK_MODELS_CACHE' not in globals():
+        if "_MACBOOK_MODELS_CACHE" not in globals():
             _MACBOOK_MODELS_CACHE = []
             _MACBOOK_MODELS_CACHE_TS = 0.0
 
         cache_ttl = 120  # seconds
-        now_ts = __import__('time').time()
+        now_ts = __import__("time").time()
 
         use_cache = (
-            _MACBOOK_MODELS_CACHE
-            and now_ts - _MACBOOK_MODELS_CACHE_TS < cache_ttl
+            _MACBOOK_MODELS_CACHE and now_ts - _MACBOOK_MODELS_CACHE_TS < cache_ttl
         )
 
         if use_cache:
@@ -412,13 +413,17 @@ async def get_available_models():
 async def get_session_metrics(http_request: Request):
     session_id = http_request.headers.get("X-Session-Id")
     if not session_id:
-        return JSONResponse(status_code=200, content={"message": "No session id", "metrics": None})
+        return JSONResponse(
+            status_code=200, content={"message": "No session id", "metrics": None}
+        )
 
     from services.telemetry.cost_tracker import cost_tracker
 
     metrics = cost_tracker.get_session_metrics(session_id)
     if not metrics:
-        return JSONResponse(status_code=200, content={"session_id": session_id, "metrics": None})
+        return JSONResponse(
+            status_code=200, content={"session_id": session_id, "metrics": None}
+        )
 
     return JSONResponse(
         status_code=200,
@@ -454,4 +459,6 @@ async def clear_session_metrics(http_request: Request):
     from services.telemetry.cost_tracker import cost_tracker
 
     cost_tracker.clear_session(session_id)
-    return JSONResponse(status_code=200, content={"session_id": session_id, "cleared": True})
+    return JSONResponse(
+        status_code=200, content={"session_id": session_id, "cleared": True}
+    )

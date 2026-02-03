@@ -370,18 +370,22 @@ class LlamaLLMClient:
             return {
                 "success": False,
                 "error": f"Model '{used_model_name}' is not available in this Vertex AI project. "
-                        f"Available Llama models: {', '.join(model_region_map.keys())}. "
-                        f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1."
+                f"Available Llama models: {', '.join(model_region_map.keys())}. "
+                f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1.",
             }
 
         # Override region for this specific model
         region_override = model_region_map[used_model_name]
 
         # Use structured outputs with JSON mode (similar to Azure but without server-side schema enforcement)
-        print(f"[LLMService] Using structured outputs with Llama model: {used_model_name} in region: {region_override}")
+        print(
+            f"[LLMService] Using structured outputs with Llama model: {used_model_name} in region: {region_override}"
+        )
 
         # Optimize prompts for Llama to prevent hallucination
-        optimized_prompt, optimized_markdown = self._optimize_prompts_for_llama(extraction_prompt, markdown, max_input_length)
+        optimized_prompt, optimized_markdown = self._optimize_prompts_for_llama(
+            extraction_prompt, markdown, max_input_length
+        )
 
         # Try primary strategy first
         result = await self._try_llama_extraction_strategy(
@@ -415,21 +419,29 @@ class LlamaLLMClient:
 
         return result
 
-    def _optimize_prompts_for_llama(self, extraction_prompt: str, markdown: str, max_markdown_length: int = 128000) -> tuple[str, str]:
+    def _optimize_prompts_for_llama(
+        self, extraction_prompt: str, markdown: str, max_markdown_length: int = 128000
+    ) -> tuple[str, str]:
         """Optimize prompts and content for Llama to prevent hallucination."""
 
         # Simplify extraction prompt - remove complex few-shot examples that cause issues
         if len(extraction_prompt) > 500:  # If prompt is too long
             # Extract just the core instruction
-            lines = extraction_prompt.split('\n')
+            lines = extraction_prompt.split("\n")
             core_instruction = ""
             for line in lines:
-                if not line.startswith('Input:') and not line.startswith('Output:') and line.strip():
+                if (
+                    not line.startswith("Input:")
+                    and not line.startswith("Output:")
+                    and line.strip()
+                ):
                     if "Extract" in line or "extract" in line:
                         core_instruction = line.strip()
                         break
             if not core_instruction:
-                core_instruction = extraction_prompt[:200] + "..."  # Truncate if can't find core
+                core_instruction = (
+                    extraction_prompt[:200] + "..."
+                )  # Truncate if can't find core
             optimized_prompt = core_instruction
         else:
             optimized_prompt = extraction_prompt
@@ -439,17 +451,21 @@ class LlamaLLMClient:
             # Try to truncate at a reasonable boundary
             truncated = markdown[:max_markdown_length]
             # Find last complete sentence or paragraph
-            last_period = truncated.rfind('.')
-            last_newline = truncated.rfind('\n')
+            last_period = truncated.rfind(".")
+            last_newline = truncated.rfind("\n")
             cutoff = max(last_period, last_newline)
             if cutoff > max_markdown_length * 0.8:  # Only if we can keep most content
-                truncated = truncated[:cutoff + 1]
+                truncated = truncated[: cutoff + 1]
             optimized_markdown = truncated + "\n\n[Content truncated for processing...]"
         else:
             optimized_markdown = markdown
 
-        print(f"[LLMService] Optimized prompt length: {len(optimized_prompt)} (was {len(extraction_prompt)})")
-        print(f"[LLMService] Optimized markdown length: {len(optimized_markdown)} (was {len(markdown)}, limit: {max_markdown_length})")
+        print(
+            f"[LLMService] Optimized prompt length: {len(optimized_prompt)} (was {len(extraction_prompt)})"
+        )
+        print(
+            f"[LLMService] Optimized markdown length: {len(optimized_markdown)} (was {len(markdown)}, limit: {max_markdown_length})"
+        )
 
         return optimized_prompt, optimized_markdown
 
@@ -517,9 +533,13 @@ Return JSON only:"""
                     "timestamp": response["meta"]["timestamp"],
                     "model": model_name,
                     "duration": response["meta"]["duration"],
-                    "prompt_tokens": response["raw"].get("usage", {}).get("prompt_tokens"),
-                    "completion_tokens": response["raw"].get("usage", {}).get("completion_tokens"),
-                    "strategy": "primary_optimized"
+                    "prompt_tokens": response["raw"]
+                    .get("usage", {})
+                    .get("prompt_tokens"),
+                    "completion_tokens": response["raw"]
+                    .get("usage", {})
+                    .get("completion_tokens"),
+                    "strategy": "primary_optimized",
                 },
             }
 
@@ -546,13 +566,21 @@ Return JSON only:"""
         print("[LLMService] Attempting fallback extraction strategy...")
 
         # Ultra-minimal system message
-        system_message = """Return JSON: {"answer": "response", "references": [{"text": "quote"}]}"""
+        system_message = (
+            """Return JSON: {"answer": "response", "references": [{"text": "quote"}]}"""
+        )
 
         # Extract just essential content (first 2000 chars)
-        essential_markdown = markdown[:2000] + "..." if len(markdown) > 2000 else markdown
+        essential_markdown = (
+            markdown[:2000] + "..." if len(markdown) > 2000 else markdown
+        )
 
         # Simplify prompt to core instruction
-        simple_prompt = extraction_prompt.split('.')[0] if '.' in extraction_prompt else extraction_prompt[:100]
+        simple_prompt = (
+            extraction_prompt.split(".")[0]
+            if "." in extraction_prompt
+            else extraction_prompt[:100]
+        )
 
         user_message = f"""{simple_prompt}
 
@@ -568,7 +596,7 @@ Text: {essential_markdown}"""
             model_name,
             messages,
             1024,  # Very low token limit
-            0.0,   # Zero temperature for consistency
+            0.0,  # Zero temperature for consistency
             response_format={"type": "json_object"},
             project_id_override=project_id_override,
             location_override=location_override,
@@ -592,7 +620,7 @@ Text: {essential_markdown}"""
                     "timestamp": response["meta"]["timestamp"],
                     "model": model_name,
                     "duration": response["meta"]["duration"],
-                    "strategy": "fallback_minimal"
+                    "strategy": "fallback_minimal",
                 },
             }
 
@@ -608,7 +636,7 @@ Text: {essential_markdown}"""
         content: str,
         response: Dict[str, Any],
         model_name: str,
-        strategy: str
+        strategy: str,
     ) -> Dict[str, Any]:
         """Handle JSON parsing errors with enhanced logging and fallback."""
 
@@ -634,7 +662,7 @@ Text: {essential_markdown}"""
         }
 
         error_file = error_log_path / f"llama_error_{timestamp}_{strategy}.json"
-        with open(error_file, 'w') as f:
+        with open(error_file, "w") as f:
             json.dump(error_details, f, indent=2, default=str)
         print(f"[LLMService] Error logged to: {error_file}")
 
@@ -649,13 +677,16 @@ Text: {essential_markdown}"""
         else:
             # Try to extract any valid JSON fragments
             import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 try:
                     fragment = json.loads(json_match.group())
                     if "answer" in fragment:
                         fallback_answer = fragment["answer"]
-                    if "references" in fragment and isinstance(fragment["references"], list):
+                    if "references" in fragment and isinstance(
+                        fragment["references"], list
+                    ):
                         fallback_references = fragment["references"]
                 except:
                     pass
@@ -679,7 +710,7 @@ Text: {essential_markdown}"""
                 "parsing_error": str(error),
                 "content_length": len(content),
                 "error_logged": str(error_file),
-                "strategy": strategy
+                "strategy": strategy,
             },
         }
 
@@ -709,8 +740,8 @@ Text: {essential_markdown}"""
             return {
                 "success": False,
                 "error": f"Model '{used_model_name}' is not available in this Vertex AI project. "
-                        f"Available Llama models: {', '.join(model_region_map.keys())}. "
-                        f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1."
+                f"Available Llama models: {', '.join(model_region_map.keys())}. "
+                f"Llama 4 models work in us-east5, Llama 3.x models work in us-central1.",
             }
 
         # Override region for this specific model

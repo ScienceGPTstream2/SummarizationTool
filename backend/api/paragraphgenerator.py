@@ -29,7 +29,9 @@ class ParagraphGenerationRequest(BaseModel):
 
 
 @router.post("/generate_paragraph", dependencies=[Depends(get_current_user)])
-async def generate_paragraph(request: ParagraphGenerationRequest, http_request: Request):
+async def generate_paragraph(
+    request: ParagraphGenerationRequest, http_request: Request
+):
     """
     Generate a paragraph from a list of extracted entities.
     """
