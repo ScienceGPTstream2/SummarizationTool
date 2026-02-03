@@ -248,9 +248,12 @@ export class SettingsManager {
               ? "google"
               : model.provider?.toLowerCase().includes("anthropic")
                 ? "anthropic"
-                : model.provider?.toLowerCase().includes("macbook")
-                  ? "macbook"
-                  : "other",
+                : model.provider?.toLowerCase().includes("meta") ||
+                  model.provider?.toLowerCase().includes("llama")
+                  ? "meta"
+                  : model.provider?.toLowerCase().includes("macbook")
+                    ? "macbook"
+                    : "other",
           deployment: model.deployment,
           api_version: model.api_version,
           project_id: model.project_id,
