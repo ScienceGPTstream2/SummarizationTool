@@ -30,62 +30,73 @@ export function RawOutputViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchMarkdownContent = useCallback(async (forceRefresh = false) => {
-    if (!conversionId) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const token = localStorage.getItem("token");
-
-      // Always fetch enhanced content, which includes both base and enhanced versions
-      const response = await fetch(`/api/documents/${conversionId}/enhanced-content`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!response.ok) {
-        console.warn("Enhanced markdown content not available, trying base content");
-        // Fallback to base content
-        const baseResponse = await fetch(`/api/documents/${conversionId}/content`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!baseResponse.ok) {
-          setLoading(false);
-          return;
-        }
-
-        const baseData = await baseResponse.json();
-        setMarkdownData({
-          markdown_content: baseData.markdown_content || "",
-          has_enhancements: false,
-          base_content: baseData.markdown_content || "",
-        });
+  const fetchMarkdownContent = useCallback(
+    async (forceRefresh = false) => {
+      if (!conversionId) {
         setLoading(false);
         return;
       }
 
-      const data = await response.json();
-      setMarkdownData({
-        markdown_content: data.markdown_content || "",
-        has_enhancements: data.has_enhancements || false,
-        base_content: data.base_content || data.markdown_content || "",
-      });
+      try {
+        setLoading(true);
+        const token = localStorage.getItem("token");
 
-      // Notify parent component that content was updated
-      if (onContentUpdate && forceRefresh) {
-        onContentUpdate();
+        // Always fetch enhanced content, which includes both base and enhanced versions
+        const response = await fetch(
+          `/api/documents/${conversionId}/enhanced-content`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (!response.ok) {
+          console.warn(
+            "Enhanced markdown content not available, trying base content"
+          );
+          // Fallback to base content
+          const baseResponse = await fetch(
+            `/api/documents/${conversionId}/content`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+
+          if (!baseResponse.ok) {
+            setLoading(false);
+            return;
+          }
+
+          const baseData = await baseResponse.json();
+          setMarkdownData({
+            markdown_content: baseData.markdown_content || "",
+            has_enhancements: false,
+            base_content: baseData.markdown_content || "",
+          });
+          setLoading(false);
+          return;
+        }
+
+        const data = await response.json();
+        setMarkdownData({
+          markdown_content: data.markdown_content || "",
+          has_enhancements: data.has_enhancements || false,
+          base_content: data.base_content || data.markdown_content || "",
+        });
+
+        // Notify parent component that content was updated
+        if (onContentUpdate && forceRefresh) {
+          onContentUpdate();
+        }
+
+        setLoading(false);
+      } catch (err: any) {
+        console.error("Error fetching markdown output:", err);
+        setError(err.message || "Failed to load markdown output");
+        setLoading(false);
       }
-
-      setLoading(false);
-    } catch (err: any) {
-      console.error("Error fetching markdown output:", err);
-      setError(err.message || "Failed to load markdown output");
-      setLoading(false);
-    }
-  }, [conversionId, onContentUpdate]);
+    },
+    [conversionId, onContentUpdate]
+  );
 
   useEffect(() => {
     fetchMarkdownContent();
@@ -171,7 +182,9 @@ export function RawOutputViewer({
                 <Code className="h-5 w-5 text-purple-600" />
               )}
               <span className="font-bold">
-                {currentView === "enhanced" ? "Enhanced Markdown" : "Base Markdown"}
+                {currentView === "enhanced"
+                  ? "Enhanced Markdown"
+                  : "Base Markdown"}
               </span>
               {processorUsed && (
                 <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200 whitespace-nowrap">
@@ -207,7 +220,11 @@ export function RawOutputViewer({
                 onClick={() => toggleView("enhanced")}
                 disabled={!hasEnhancements}
                 className="rounded-none border-0 h-8 px-3 text-xs flex-1 sm:flex-none"
-                title={!hasEnhancements ? "No figure summaries available" : "View with figure summaries"}
+                title={
+                  !hasEnhancements
+                    ? "No figure summaries available"
+                    : "View with figure summaries"
+                }
               >
                 <Sparkles className="h-3 w-3 mr-1" />
                 Enhanced
@@ -216,7 +233,12 @@ export function RawOutputViewer({
 
             {/* Download Button */}
             {currentMarkdown && (
-              <Button variant="outline" size="sm" onClick={handleDownload} className="w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownload}
+                className="w-full sm:w-auto"
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Download MD
               </Button>
@@ -246,13 +268,17 @@ export function RawOutputViewer({
           </Alert>
         )}
 
-        {!hasEnhancements && currentView === "base" && !loading && currentMarkdown && (
-          <Alert className="bg-amber-50 border-amber-200 mb-4">
-            <AlertDescription className="text-amber-800">
-              📊 Generate figure summaries in the Figure Gallery above to see enhanced content with inline summaries.
-            </AlertDescription>
-          </Alert>
-        )}
+        {!hasEnhancements &&
+          currentView === "base" &&
+          !loading &&
+          currentMarkdown && (
+            <Alert className="bg-amber-50 border-amber-200 mb-4">
+              <AlertDescription className="text-amber-800">
+                📊 Generate figure summaries in the Figure Gallery above to see
+                enhanced content with inline summaries.
+              </AlertDescription>
+            </Alert>
+          )}
 
         {loading ? (
           <div className="flex items-center justify-center h-[1130px]">

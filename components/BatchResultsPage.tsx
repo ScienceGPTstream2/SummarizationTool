@@ -373,7 +373,9 @@ export default function BatchResultsPage({
   const exportToExcel = async () => {
     const sessionMetrics = await (async () => {
       try {
-        const response = await authenticatedFetch("/api/server/session-metrics");
+        const response = await authenticatedFetch(
+          "/api/server/session-metrics"
+        );
         const data = await response.json();
         return data.metrics || null;
       } catch (error) {
@@ -447,7 +449,12 @@ export default function BatchResultsPage({
 
       const modelStats = new Map<
         string,
-        { provider: string; calls: number; totalCost: number; totalLatency: number }
+        {
+          provider: string;
+          calls: number;
+          totalCost: number;
+          totalLatency: number;
+        }
       >();
       (sessionMetrics.calls || []).forEach((call: any) => {
         const key = call.model || "Unknown";

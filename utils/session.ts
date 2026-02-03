@@ -19,7 +19,10 @@ export function shouldAttachSessionHeader(url: string): boolean {
 
   try {
     const parsed = new URL(url, window.location.origin);
-    return parsed.origin === window.location.origin && parsed.pathname.startsWith("/api");
+    return (
+      parsed.origin === window.location.origin &&
+      parsed.pathname.startsWith("/api")
+    );
   } catch {
     return false;
   }

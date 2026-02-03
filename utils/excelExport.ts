@@ -54,7 +54,10 @@ const getDisplayModelName = (model: string): string => {
 };
 
 // Helper to safely get metric score
-const getMetricScore = (result: EvaluationResult | undefined, metricName: string): string => {
+const getMetricScore = (
+  result: EvaluationResult | undefined,
+  metricName: string
+): string => {
   if (!result || !result.metrics) return "";
   const metric = result.metrics.find((m) =>
     m.metric_name.toLowerCase().includes(metricName.toLowerCase())
@@ -112,11 +115,13 @@ export async function downloadExcelReport(documentData: DocumentData) {
       const systemPrompt =
         (entity as { systemPrompt?: string }).systemPrompt ||
         "You are an expert toxicologist...";
-      const groundTruth = (entity as { groundTruth?: string }).groundTruth || "";
+      const groundTruth =
+        (entity as { groundTruth?: string }).groundTruth || "";
 
       // Identify Source Models
-      const extractionsByModel = (entity as { extractionsByModel?: Record<string, ExtractionData> })
-        .extractionsByModel;
+      const extractionsByModel = (
+        entity as { extractionsByModel?: Record<string, ExtractionData> }
+      ).extractionsByModel;
       let sourceModels = Object.keys(extractionsByModel || {});
 
       if (
@@ -140,8 +145,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
         ) {
           extractionData = {
             extracted: (entity as { extracted?: string }).extracted,
-            evaluationResults: (entity as { evaluationResults?: EvaluationResult[] })
-              .evaluationResults,
+            evaluationResults: (
+              entity as { evaluationResults?: EvaluationResult[] }
+            ).evaluationResults,
           };
         }
 
@@ -204,7 +210,10 @@ export async function downloadExcelReport(documentData: DocumentData) {
     ];
     metricsSheet.addRows([
       { metric: "Total Cost", value: sessionMetrics.total_cost?.toFixed(6) },
-      { metric: "Total Latency (s)", value: sessionMetrics.total_latency?.toFixed(3) },
+      {
+        metric: "Total Latency (s)",
+        value: sessionMetrics.total_latency?.toFixed(3),
+      },
       { metric: "Total Calls", value: sessionMetrics.total_calls },
     ]);
 
@@ -255,7 +264,12 @@ export async function downloadExcelReport(documentData: DocumentData) {
 
     const modelStats = new Map<
       string,
-      { provider: string; calls: number; totalCost: number; totalLatency: number }
+      {
+        provider: string;
+        calls: number;
+        totalCost: number;
+        totalLatency: number;
+      }
     >();
     (sessionMetrics.calls || []).forEach((call: SessionCallMetric) => {
       const key = call.model || "Unknown";

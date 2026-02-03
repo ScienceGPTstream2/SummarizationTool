@@ -89,7 +89,9 @@ export async function authenticatedFetch(
   headers.set("Authorization", `Bearer ${token}`);
 
   try {
-    const { getSessionId, shouldAttachSessionHeader } = await import("./session");
+    const { getSessionId, shouldAttachSessionHeader } = await import(
+      "./session"
+    );
     if (shouldAttachSessionHeader(url)) {
       headers.set("X-Session-Id", getSessionId());
     }
