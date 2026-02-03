@@ -25,14 +25,12 @@ async def inspect():
         )
 
         # Get most recent session
-        row = await conn.fetchrow(
-            """
+        row = await conn.fetchrow("""
             SELECT id, name, configuration, created_at 
             FROM public.sessions 
             ORDER BY updated_at DESC 
             LIMIT 1
-        """
-        )
+        """)
 
         if not row:
             print("No sessions found.")
