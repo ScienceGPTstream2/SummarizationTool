@@ -746,6 +746,7 @@ export function BatchStudySelectionPage({
                             {selection.selected}/{selection.total}
                           </Badge>
                         </div>
+                        {/* Batch toggle removed (was Macbook micro-batch) */}
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>

@@ -675,7 +675,7 @@ export function EvaluationPage({
   const evaluateSingleEntity = async (
     entity: any,
     providers: string[],
-    token: string,
+    _token: string,
     signal: AbortSignal
   ) => {
     const entityIndex = (currentFile.entities || []).findIndex(

@@ -101,9 +101,10 @@ async def get_server_config():
     macbook_client = MacbookLLMClient() if macbook_base_url else None
     is_macbook_configured = bool(macbook_base_url)
     is_macbook_healthy = False
+    # For server-config, avoid short health gate; defer to model fetch in /models
     if macbook_client:
         try:
-            is_macbook_healthy = await macbook_client.check_health()
+            is_macbook_healthy = True  # optimistic; real fetch happens in /models
         except Exception:
             is_macbook_healthy = False
 
@@ -353,13 +354,47 @@ async def get_available_models():
 
     macbook_base_url = os.getenv("MACBOOK_LLM_BASE_URL")
     if macbook_base_url:
-        macbook_client = MacbookLLMClient()
-        is_macbook_healthy = await macbook_client.check_health()
-        if is_macbook_healthy:
+        # Keep a simple static cache in the router scope to avoid hammering tags
+        # across rapid successive calls.
+        global _MACBOOK_MODELS_CACHE  # type: ignore
+        global _MACBOOK_MODELS_CACHE_TS  # type: ignore
+
+        if '_MACBOOK_MODELS_CACHE' not in globals():
+            _MACBOOK_MODELS_CACHE = []
+            _MACBOOK_MODELS_CACHE_TS = 0.0
+
+        cache_ttl = 120  # seconds
+        now_ts = __import__('time').time()
+
+        use_cache = (
+            _MACBOOK_MODELS_CACHE
+            and now_ts - _MACBOOK_MODELS_CACHE_TS < cache_ttl
+        )
+
+        if use_cache:
+            macbook_models = _MACBOOK_MODELS_CACHE
+        else:
+            macbook_client = MacbookLLMClient()
             macbook_models = await macbook_client.fetch_available_models()
-            # If tags returns empty even when healthy, still skip to avoid unreliable state
             if macbook_models:
-                for model in macbook_models:
+                _MACBOOK_MODELS_CACHE = macbook_models
+                _MACBOOK_MODELS_CACHE_TS = now_ts
+
+        if macbook_models:
+            for model in macbook_models:
+                models.append(
+                    {
+                        "id": model["id"],
+                        "name": model["name"],
+                        "provider": "Macbook LLM",
+                        "description": "Self-hosted model",
+                    }
+                )
+        else:
+            # If no models returned and we have a cached version, keep them to avoid UI drop
+            if _MACBOOK_MODELS_CACHE:
+                print("[MacbookLLM] Using cached macbook models after fetch failure")
+                for model in _MACBOOK_MODELS_CACHE:
                     models.append(
                         {
                             "id": model["id"],
@@ -369,9 +404,7 @@ async def get_available_models():
                         }
                     )
             else:
-                print("[MacbookLLM] Healthy but no models returned; skipping Macbook models")
-        else:
-            print("[MacbookLLM] Macbook health check failed; skipping Macbook models")
+                print("[MacbookLLM] No models returned; skipping Macbook models")
 
     return JSONResponse(status_code=200, content=models)
 

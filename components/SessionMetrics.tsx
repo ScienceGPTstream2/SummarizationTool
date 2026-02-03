@@ -120,7 +120,8 @@ export function SessionMetrics() {
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 8000);
+    // Poll less frequently (was 8s) to reduce backend load
+    const interval = setInterval(fetchMetrics, 20000);
     return () => {
       mounted = false;
       clearInterval(interval);

@@ -222,8 +222,6 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     const formData = new FormData();
     formData.append("file", file);
 
-    const token = localStorage.getItem("token");
-
     try {
       const response = await authenticatedFetch("/api/upload", {
         method: "POST",
