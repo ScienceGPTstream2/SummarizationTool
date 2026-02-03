@@ -22,3 +22,4 @@ anthropic[vertex]>=0.39.0
 httpx==0.28.1
 supabase==2.27.2
 asyncpg==0.31.0
+black==26.1.0
