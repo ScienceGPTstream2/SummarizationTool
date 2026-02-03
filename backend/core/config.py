@@ -14,6 +14,12 @@ def load_config():
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = toml.load(f)
+                macbook_base_url = cfg.get("macbook_llm_base_url")
+                if macbook_base_url:
+                    os.environ.setdefault("MACBOOK_LLM_BASE_URL", macbook_base_url)
+                    print(
+                        f"✅ Macbook LLM base URL loaded from secrets.toml: {macbook_base_url}"
+                    )
                 azure_cfg = cfg.get("azure_openai", {}) or {}
                 endpoint = azure_cfg.get("endpoint")
                 api_key = azure_cfg.get("api_key")

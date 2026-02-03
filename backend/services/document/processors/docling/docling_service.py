@@ -180,6 +180,13 @@ class DoclingService:
             async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
                 markdown_content = await f.read()
 
+            page_count = 0
+            try:
+                if hasattr(result, "document") and hasattr(result.document, "pages"):
+                    page_count = len(result.document.pages or {})
+            except Exception:
+                page_count = 0
+
             # Create metadata (include path to log file and image info)
             metadata = {
                 "conversion_id": conversion_id,
@@ -192,6 +199,7 @@ class DoclingService:
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
                 "content_length": len(markdown_content),
+                "page_count": page_count,
                 "status": "success",
                 **image_info,  # Add image extraction info
             }
@@ -359,6 +367,15 @@ class DoclingService:
                 with open(markdown_path, "r", encoding="utf-8") as mf:
                     markdown_content = mf.read()
 
+                page_count = 0
+                try:
+                    if hasattr(result, "document") and hasattr(
+                        result.document, "pages"
+                    ):
+                        page_count = len(result.document.pages or {})
+                except Exception:
+                    page_count = 0
+
                 # Build final metadata
                 final_meta = {
                     "conversion_id": conv_id,
@@ -371,6 +388,7 @@ class DoclingService:
                     "log_path": str(log_path),
                     "conversion_time": datetime.now().isoformat(),
                     "content_length": len(markdown_content),
+                    "page_count": page_count,
                     "status": "success",
                     **image_info,  # Add image extraction info
                 }

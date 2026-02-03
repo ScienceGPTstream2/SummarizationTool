@@ -7,7 +7,7 @@ import os
 import asyncio
 import time
 import random
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from deepeval.models.base_model import DeepEvalBaseLLM
 from langchain_google_vertexai import (
     ChatVertexAI,
@@ -46,6 +46,7 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         self.project = project or os.getenv("GEMINI_PROJECT")
         self.location = location or os.getenv("GEMINI_LOCATION", "us-central1")
         self.temperature = temperature
+        self.call_history: List[Dict[str, Any]] = []
 
         if not self.project:
             raise ValueError(
@@ -77,6 +78,48 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
             model_kwargs["temperature"] = self.temperature
 
         self.model = ChatVertexAI(**model_kwargs)
+
+    def _record_call(self, duration: float, usage: Dict[str, Any]) -> None:
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+        self.call_history.append(
+            {
+                "model": self._model_name,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "duration": duration,
+            }
+        )
+
+    def _extract_usage(self, response) -> Dict[str, Any]:
+        metadata = getattr(response, "response_metadata", {}) or {}
+        token_usage = (
+            metadata.get("token_usage")
+            or metadata.get("usage")
+            or metadata.get("usage_metadata")
+            or {}
+        )
+        usage = {
+            "prompt_tokens": token_usage.get("prompt_tokens")
+            or token_usage.get("input_tokens")
+            or token_usage.get("promptTokenCount")
+            or token_usage.get("inputTokenCount"),
+            "completion_tokens": token_usage.get("completion_tokens")
+            or token_usage.get("output_tokens")
+            or token_usage.get("completionTokenCount")
+            or token_usage.get("outputTokenCount")
+            or token_usage.get("candidatesTokenCount"),
+            "total_tokens": token_usage.get("total_tokens")
+            or token_usage.get("totalTokenCount"),
+        }
+        if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
+            print(
+                "[VertexAdapter] Missing token usage in response metadata",
+                {"metadata": metadata, "model": self._model_name},
+            )
+        return usage
 
     def load_model(self):
         """Load the LangChain model"""
@@ -112,7 +155,11 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
                     )
                     time.sleep(total_delay)
 
-                return chat_model.invoke(prompt).content
+                start_time = time.perf_counter()
+                response = chat_model.invoke(prompt)
+                duration = time.perf_counter() - start_time
+                self._record_call(duration, self._extract_usage(response))
+                return response.content
 
             except Exception as e:
                 error_str = str(e).lower()
@@ -181,8 +228,11 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
                     )
                     await asyncio.sleep(total_delay)
 
-                res = await chat_model.ainvoke(prompt)
-                return res.content
+                start_time = time.perf_counter()
+                response = await chat_model.ainvoke(prompt)
+                duration = time.perf_counter() - start_time
+                self._record_call(duration, self._extract_usage(response))
+                return response.content
 
             except Exception as e:
                 error_str = str(e).lower()

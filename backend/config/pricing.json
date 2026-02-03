@@ -1,0 +1,156 @@
+{
+  "currency": "USD",
+  "models": {
+    "azure:gpt-5.2": {
+      "provider": "azure",
+      "input_per_million": 1.75,
+      "cached_input_per_million": 0.175,
+      "output_per_million": 14.0
+    },
+    "azure:gpt-5.2-chat": {
+      "provider": "azure",
+      "input_per_million": 1.75,
+      "cached_input_per_million": 0.175,
+      "output_per_million": 14.0
+    },
+    "azure:gpt-5.1": {
+      "provider": "azure",
+      "input_per_million": 1.25,
+      "cached_input_per_million": 0.13,
+      "output_per_million": 10.0
+    },
+    "azure:gpt-5.1-chat": {
+      "provider": "azure",
+      "input_per_million": 1.25,
+      "cached_input_per_million": 0.13,
+      "output_per_million": 10.0
+    },
+    "azure:gpt-5-mini": {
+      "provider": "azure",
+      "input_per_million": 0.25,
+      "cached_input_per_million": 0.03,
+      "output_per_million": 2.0
+    },
+    "azure:gpt-5-nano": {
+      "provider": "azure",
+      "input_per_million": 0.05,
+      "cached_input_per_million": 0.01,
+      "output_per_million": 0.4
+    },
+    "azure:gpt-4.1": {
+      "provider": "azure",
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 8.0
+    },
+    "azure:gpt-4o": {
+      "provider": "azure",
+      "input_per_million": 5.0,
+      "cached_input_per_million": 1.25,
+      "output_per_million": 15.0
+    },
+    "azure:gpt-4": {
+      "provider": "azure",
+      "input_per_million": 2.50,
+      "cached_input_per_million": 1.25,
+      "output_per_million": 10.0
+    },
+    "azure:gpt-4.1-mini": {
+      "provider": "azure",
+      "input_per_million": 0.4,
+      "cached_input_per_million": 0.1,
+      "output_per_million": 1.6
+    },
+    "azure:gpt-4.1-nano": {
+      "provider": "azure",
+      "input_per_million": 0.1,
+      "cached_input_per_million": 0.03,
+      "output_per_million": 0.4
+    },
+    "azure:o3": {
+      "provider": "azure",
+      "input_per_million": 2.0,
+      "cached_input_per_million": 0.5,
+      "output_per_million": 8.0,
+      "batch_input_per_million": 1.0,
+      "batch_output_per_million": 4.0
+    },
+    "azure:o3-mini": {
+      "provider": "azure",
+      "input_per_million": 1.1,
+      "cached_input_per_million": 0.28,
+      "output_per_million": 4.4
+    },
+    "azure:o4-mini": {
+      "provider": "azure",
+      "input_per_million": 1.1,
+      "cached_input_per_million": 0.28,
+      "output_per_million": 4.4,
+      "batch_input_per_million": 0.55,
+      "batch_output_per_million": 2.2
+    },
+    "vertex:gemini-2.5-pro": {
+      "provider": "gcp",
+      "input_per_million": 1.25,
+      "output_per_million": 10.0
+    },
+    "vertex:gemini-2.5-flash": {
+      "provider": "gcp",
+      "input_per_million": 0.3,
+      "output_per_million": 2.5
+    },
+    "vertex:gemini-2.5-flash-lite": {
+      "provider": "gcp",
+      "input_per_million": 0.1,
+      "output_per_million": 0.4
+    },
+    "vertex:gemini-3-flash-preview": {
+      "provider": "gcp",
+      "input_per_million": 0.5,
+      "output_per_million": 3.0
+    },
+    "vertex:claude-sonnet-4.5": {
+      "provider": "gcp",
+      "input_per_million": 3.0,
+      "output_per_million": 15.0
+    },
+    "vertex:claude-opus-4.1": {
+      "provider": "gcp",
+      "input_per_million": 15.0,
+      "output_per_million": 75.0
+    },
+    "vertex:llama-4-maverick-17b": {
+      "provider": "gcp",
+      "input_per_million": 5.0,
+      "output_per_million": 16.0
+    },
+    "vertex:llama-4-scout-17b-16e": {
+      "provider": "gcp",
+      "input_per_million": 5.0,
+      "output_per_million": 16.0
+    },
+    "vertex:llama-3.3-70b": {
+      "provider": "gcp",
+      "input_per_million": 0.72,
+      "output_per_million": 2.4
+    },
+    "vertex:llama-3.1-405b": {
+      "provider": "gcp",
+      "input_per_million": 5.0,
+      "output_per_million": 16.0
+    },
+    "azure_doc_intelligence": {
+      "provider": "azure",
+      "input_per_million": 0.0,
+      "output_per_million": 0.0,
+      "cost_per_page": 1.0
+    },
+    "docling": {
+      "provider": "azure",
+      "input_per_million": 0.0,
+      "output_per_million": 0.0,
+      "cost_per_page": 0.0,
+      "cost_per_minute": 0.0015
+    }
+  }
+}
