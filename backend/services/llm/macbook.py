@@ -23,30 +23,15 @@ class MacbookLLMClient:
         else:
             print(f"[MacbookLLM] Using base URL: {self.base_url}")
 
-        self.allowed_models = {
-            "qwen3:8b",
-            "qwen3:14b",
-            "qwen2.5:32b",
-            "llama3.1:8b",
-            "llama3.1:8b-instruct",
-            "llama3.2:3b-instruct",
-            "phi-3.5:3.8b",
-            "mistral-nemo:12b",
-            "mistral-nemo:12b-instruct-2407",
-            "mistral-7b-instruct-v0.3",
-            "llama3.1:70b-instruct",
-            "llama3.3:70b-instruct",
-            "nemotron:70b-instruct",
-            "openbiollm-llama-3:70b",
-            "llama3.1:405b-instruct",
-            "mistral-large:123b",
-            "llama3.2-vision:11b-instruct",
-            "llava-med-v1.6",
-            "llava:34b-v1.6",
-            "minicpm-v:8b-2.6",
-            "openbiollm-llava-med",
-            "nemotron-mini:4b-instruct",
-        }
+        # Allow-all-except-deny: the model policy file controls exclusions. No hardcoded allowlist.
+
+        # Caching & resilience
+        self._tags_cache: List[Dict[str, Any]] = []
+        self._tags_cache_ts: float = 0.0
+        self._tags_cache_ttl_seconds = 120  # reuse tags for 2 minutes to avoid hammering
+
+        # Soft failure tracking (no hard circuit breaker to avoid eager aborts)
+        self._fail_count: int = 0
 
     def _normalize_model_name(self, model: str) -> str:
         return (model or "").strip().lower()
@@ -149,10 +134,15 @@ class MacbookLLMClient:
             print("[MacbookLLM] fetch_available_models skipped; client disabled")
             return []
 
+        # Return cached tags if still fresh
+        now = time.time()
+        if self._tags_cache and now - self._tags_cache_ts < self._tags_cache_ttl_seconds:
+            return self._tags_cache
+
         url = f"{self.base_url}/api/tags"
         try:
-            # Keep this reasonably short so UI is not blocked on slow/offline Macbook
-            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=5))
+            # Allow up to 15s to accommodate slow /tags responses (was 5s)
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=15))
             if not resp.ok:
                 print(
                     f"[MacbookLLM] /api/tags failed: status={resp.status_code} body={resp.text}"
@@ -161,6 +151,10 @@ class MacbookLLMClient:
             payload = resp.json()
         except Exception:
             print("[MacbookLLM] Failed to fetch /api/tags")
+            # Fallback to cached tags if available
+            if self._tags_cache:
+                print("[MacbookLLM] Using cached tags after fetch failure")
+                return self._tags_cache
             return []
 
         models = payload.get("models", []) if isinstance(payload, dict) else []
@@ -171,17 +165,19 @@ class MacbookLLMClient:
             raw_name = model.get("name") or model.get("model") or ""
             normalized = self._normalize_model_name(raw_name)
             base_name = self._strip_quantization_suffix(raw_name)
+
+            # Enforce deny/allow policy only (allow-all-except-deny)
             if not self._matches_policy(normalized, policy) or not self._matches_policy(base_name, policy):
                 skipped.append(raw_name)
                 continue
-            if normalized in self.allowed_models or base_name in self.allowed_models:
-                filtered.append({
+
+            filtered.append(
+                {
                     "id": raw_name,
                     "name": raw_name,
                     "provider": "Macbook LLM",
-                })
-            else:
-                skipped.append(raw_name)
+                }
+            )
 
         print(
             f"[MacbookLLM] /api/tags returned {len(models)} model(s); "
@@ -189,6 +185,10 @@ class MacbookLLMClient:
         )
         if skipped:
             print(f"[MacbookLLM] Skipped models: {', '.join(skipped)}")
+
+        # Update cache on success
+        self._tags_cache = filtered
+        self._tags_cache_ts = time.time()
         return filtered
 
     async def check_health(self) -> bool:
@@ -226,40 +226,62 @@ class MacbookLLMClient:
         url = f"{self.base_url}/api/generate"
         payload = self._build_request_payload(model_id, prompt, temperature, max_tokens)
 
+        # Retry with simple backoff for transient 5xx/timeout
+        attempts = 0
+        max_attempts = 3
+        backoff = 1.0
+        last_error: Optional[str] = None
         start_time = time.time()
-        try:
-            resp = await asyncio.to_thread(
-                lambda: requests.post(url, json=payload, timeout=600)
-            )
-            duration = time.time() - start_time
-        except Exception as e:
-            return {"success": False, "error": f"Macbook request failed: {str(e)}"}
 
-        if not resp.ok:
-            return {
-                "success": False,
-                "error": f"Macbook request failed ({resp.status_code}): {resp.text}",
-            }
+        while attempts < max_attempts:
+            attempts += 1
+            try:
+                resp = await asyncio.to_thread(
+                    lambda: requests.post(url, json=payload, timeout=180)
+                )
+            except Exception as e:
+                last_error = f"Macbook request failed: {str(e)}"
+                self._fail_count += 1
+            else:
+                if resp.ok:
+                    try:
+                        raw = resp.json()
+                    except Exception:
+                        last_error = "Invalid JSON response from Macbook LLM"
+                        self._fail_count += 1
+                    else:
+                        # Reset breaker on success
+                        self._fail_count = 0
+                        content = (
+                            raw.get("response")
+                            or raw.get("content")
+                            or raw.get("text")
+                            or ""
+                        )
+                        duration = time.time() - start_time
+                        return {
+                            "success": True,
+                            "content": content,
+                            "raw": raw,
+                            "meta": {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "model": model_id,
+                                "duration": duration,
+                                "prompt_tokens": raw.get("prompt_eval_count"),
+                                "completion_tokens": raw.get("eval_count"),
+                            },
+                        }
+                else:
+                    # Non-200
+                    last_error = f"Macbook request failed ({resp.status_code}): {resp.text}"
+                    if 500 <= resp.status_code < 600:
+                        self._fail_count += 1
+            # Backoff before retry
+            await asyncio.sleep(backoff)
+            backoff *= 2
 
-        try:
-            raw = resp.json()
-        except Exception:
-            return {"success": False, "error": "Invalid JSON response from Macbook LLM"}
-
-        content = raw.get("response") or raw.get("content") or raw.get("text") or ""
-
-        return {
-            "success": True,
-            "content": content,
-            "raw": raw,
-            "meta": {
-                "timestamp": datetime.utcnow().isoformat(),
-                "model": model_id,
-                "duration": duration,
-                "prompt_tokens": raw.get("prompt_eval_count"),
-                "completion_tokens": raw.get("eval_count"),
-            },
-        }
+        # After retries exhausted
+        return {"success": False, "error": last_error or "Macbook request failed"}
 
     async def extract_entities_with_macbook(
         self,

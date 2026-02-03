@@ -823,7 +823,7 @@ function EntityPDFViewerBetaComponent({
 
       console.log(`[PDF_VIEWER] Referenced figure IDs on page ${pageNum}:`, Array.from(referencedFigureIds));
 
-      figures.forEach((figure, figIdx) => {
+      figures.forEach((figure) => {
         if (figure.page !== pageNum) return;
 
         // Only show figures that are referenced
