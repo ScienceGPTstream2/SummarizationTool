@@ -808,20 +808,23 @@ function EntityPDFViewerBetaComponent({
 
     // Draw figure bounding boxes with different styling - only for referenced figures
     if (figures) {
-    // Find which figures are referenced in the current references
-    const referencedFigureIds = new Set<string>();
-    references.forEach(ref => {
-      // Check if this reference has figure information
-      if (ref.best_match?.type === 'figure' && ref.best_match?.figure_id) {
-        referencedFigureIds.add(ref.best_match.figure_id);
-      }
-      // Also check for references that contain figure references (enhanced matching)
-      if (ref.best_match?.has_figure_reference && ref.best_match?.figure_id) {
-        referencedFigureIds.add(ref.best_match.figure_id);
-      }
-    });
+      // Find which figures are referenced in the current references
+      const referencedFigureIds = new Set<string>();
+      references.forEach((ref) => {
+        // Check if this reference has figure information
+        if (ref.best_match?.type === "figure" && ref.best_match?.figure_id) {
+          referencedFigureIds.add(ref.best_match.figure_id);
+        }
+        // Also check for references that contain figure references (enhanced matching)
+        if (ref.best_match?.has_figure_reference && ref.best_match?.figure_id) {
+          referencedFigureIds.add(ref.best_match.figure_id);
+        }
+      });
 
-      console.log(`[PDF_VIEWER] Referenced figure IDs on page ${pageNum}:`, Array.from(referencedFigureIds));
+      console.log(
+        `[PDF_VIEWER] Referenced figure IDs on page ${pageNum}:`,
+        Array.from(referencedFigureIds)
+      );
 
       figures.forEach((figure) => {
         if (figure.page !== pageNum) return;
@@ -830,10 +833,12 @@ function EntityPDFViewerBetaComponent({
         const figureId = figure.id;
         if (!referencedFigureIds.has(figureId)) {
           // Try different ID formats (e.g., "1" vs "1.1")
-          const isReferenced = Array.from(referencedFigureIds).some(refId => {
-            return refId === figureId ||
-                   refId === figureId.split('.')[0] || // "1.1" -> "1"
-                   figureId.startsWith(refId + '.');   // "1" -> "1.x"
+          const isReferenced = Array.from(referencedFigureIds).some((refId) => {
+            return (
+              refId === figureId ||
+              refId === figureId.split(".")[0] || // "1.1" -> "1"
+              figureId.startsWith(refId + ".")
+            ); // "1" -> "1.x"
           });
           if (!isReferenced) return;
         }

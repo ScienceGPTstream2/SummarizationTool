@@ -48,7 +48,12 @@ export function SessionMetrics() {
     >();
     const modelStats = new Map<
       string,
-      { provider: string; calls: number; totalCost: number; totalLatency: number }
+      {
+        provider: string;
+        calls: number;
+        totalCost: number;
+        totalLatency: number;
+      }
     >();
 
     calls.forEach((call) => {
@@ -86,13 +91,15 @@ export function SessionMetrics() {
       })
     );
 
-    const modelRows = Array.from(modelStats.entries()).map(([model, stats]) => ({
-      model,
-      provider: stats.provider,
-      calls: stats.calls,
-      totalCost: stats.totalCost,
-      avgLatency: stats.calls ? stats.totalLatency / stats.calls : 0,
-    }));
+    const modelRows = Array.from(modelStats.entries()).map(
+      ([model, stats]) => ({
+        model,
+        provider: stats.provider,
+        calls: stats.calls,
+        totalCost: stats.totalCost,
+        avgLatency: stats.calls ? stats.totalLatency / stats.calls : 0,
+      })
+    );
 
     providerRows.sort((a, b) => b.totalCost - a.totalCost);
     modelRows.sort((a, b) => b.totalCost - a.totalCost);
@@ -106,7 +113,9 @@ export function SessionMetrics() {
     const fetchMetrics = async () => {
       setLoading(true);
       try {
-        const response = await authenticatedFetch("/api/server/session-metrics");
+        const response = await authenticatedFetch(
+          "/api/server/session-metrics"
+        );
         const data = await response.json();
         if (!mounted) return;
         setMetrics(data.metrics || null);
@@ -131,8 +140,15 @@ export function SessionMetrics() {
   const handleClear = async () => {
     setClearing(true);
     try {
-      await authenticatedFetch("/api/server/session-metrics", { method: "DELETE" });
-      setMetrics({ total_cost: 0, total_latency: 0, total_calls: 0, calls: [] });
+      await authenticatedFetch("/api/server/session-metrics", {
+        method: "DELETE",
+      });
+      setMetrics({
+        total_cost: 0,
+        total_latency: 0,
+        total_calls: 0,
+        calls: [],
+      });
     } catch (error) {
       console.warn("Failed to clear session metrics:", error);
     } finally {
@@ -151,10 +167,12 @@ export function SessionMetrics() {
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Badge variant="secondary">Session Metrics</Badge>
             <span className="text-muted-foreground">
-              Cost: <strong>${metrics?.total_cost.toFixed(4) ?? "0.0000"}</strong>
+              Cost:{" "}
+              <strong>${metrics?.total_cost.toFixed(4) ?? "0.0000"}</strong>
             </span>
             <span className="text-muted-foreground">
-              Latency: <strong>{metrics?.total_latency.toFixed(2) ?? "0.00"}s</strong>
+              Latency:{" "}
+              <strong>{metrics?.total_latency.toFixed(2) ?? "0.00"}s</strong>
             </span>
             <span className="text-muted-foreground">
               Calls: <strong>{metrics?.total_calls ?? 0}</strong>
@@ -198,7 +216,9 @@ export function SessionMetrics() {
                       <TableRow>
                         <TableHead className="w-1/3">Provider</TableHead>
                         <TableHead className="text-right">Calls</TableHead>
-                        <TableHead className="text-right">Avg Latency</TableHead>
+                        <TableHead className="text-right">
+                          Avg Latency
+                        </TableHead>
                         <TableHead className="text-right">Total Cost</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -241,7 +261,9 @@ export function SessionMetrics() {
                         <TableHead>Model</TableHead>
                         <TableHead>Provider</TableHead>
                         <TableHead className="text-right">Calls</TableHead>
-                        <TableHead className="text-right">Avg Latency</TableHead>
+                        <TableHead className="text-right">
+                          Avg Latency
+                        </TableHead>
                         <TableHead className="text-right">Total Cost</TableHead>
                       </TableRow>
                     </TableHeader>

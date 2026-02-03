@@ -4,7 +4,14 @@ export interface ModelConfig {
   provider: string;
   description: string;
   requiredApiKey: string;
-  category: "openai" | "google" | "anthropic" | "meta" | "other" | "azure" | "macbook";
+  category:
+    | "openai"
+    | "google"
+    | "anthropic"
+    | "meta"
+    | "other"
+    | "azure"
+    | "macbook";
   // Optional runtime fields for deployments (used for custom Azure models)
   deployment?: string;
   api_version?: string;
@@ -243,7 +250,7 @@ export class SettingsManager {
                 ? "anthropic"
                 : model.provider?.toLowerCase().includes("macbook")
                   ? "macbook"
-                : "other",
+                  : "other",
           deployment: model.deployment,
           api_version: model.api_version,
           project_id: model.project_id,

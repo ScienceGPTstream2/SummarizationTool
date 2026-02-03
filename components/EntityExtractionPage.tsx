@@ -383,7 +383,6 @@ export function EntityExtractionPage({
       file.processingResult?.conversionId || documentData.conversionId;
     if (!conversionId) return;
 
-
     // Determine models to use: prefer file-specific selection, fallback to global selection
     const modelsToUse =
       file.selectedModels && file.selectedModels.length > 0
@@ -614,14 +613,15 @@ export function EntityExtractionPage({
       try {
         const response = await authenticatedFetch(
           `/api/documents/${currentFile.processingResult.conversionId}/figures`,
-          {
-          }
+          {}
         );
 
         if (response.ok) {
           const data = await response.json();
           setFigures(data.figures || []);
-          console.log(`[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`);
+          console.log(
+            `[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`
+          );
         }
       } catch (err) {
         console.error("Error fetching figures:", err);
@@ -634,7 +634,14 @@ export function EntityExtractionPage({
   // Debug: Log figures when they change
   useEffect(() => {
     if (figures.length > 0) {
-      console.log('[EntityExtractionPage] Figures loaded for PDF viewer:', figures.map(f => ({ id: f.id, page: f.page, caption: f.caption?.substring(0, 50) })));
+      console.log(
+        "[EntityExtractionPage] Figures loaded for PDF viewer:",
+        figures.map((f) => ({
+          id: f.id,
+          page: f.page,
+          caption: f.caption?.substring(0, 50),
+        }))
+      );
     }
   }, [figures]);
 
@@ -1046,8 +1053,6 @@ export function EntityExtractionPage({
         );
       }
 
-
-
       // Get pre-selected models
       const preSelectedModels =
         currentFile?.selectedModels || documentData.selectedModels || [];
@@ -1251,14 +1256,12 @@ export function EntityExtractionPage({
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
 
-
-
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
         console.log("[Pre-fetch] Caching PDF before entity extraction...");
-      const pdfResponse = await authenticatedFetch(
-        `/api/files/${currentFile.fileId}`
-      );
+        const pdfResponse = await authenticatedFetch(
+          `/api/files/${currentFile.fileId}`
+        );
         if (pdfResponse.ok) {
           await pdfResponse.blob(); // Force browser to cache
           console.log("[Pre-fetch] ✅ PDF cached successfully");

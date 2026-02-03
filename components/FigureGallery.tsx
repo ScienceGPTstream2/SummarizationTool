@@ -25,7 +25,15 @@ import {
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
-import { Image as ImageIcon, ZoomIn, FileImage, Loader2, Brain, Copy, Check } from "lucide-react";
+import {
+  Image as ImageIcon,
+  ZoomIn,
+  FileImage,
+  Loader2,
+  Brain,
+  Copy,
+  Check,
+} from "lucide-react";
 import { authenticatedFetch } from "../utils/authUtils";
 
 // Component to lazy load images with authentication
@@ -134,10 +142,13 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
   const [extractedContent, setExtractedContent] = useState<Map<string, any>>(
     new Map()
   );
-  const [copiedToClipboard, setCopiedToClipboard] = useState<string | null>(null);
+  const [copiedToClipboard, setCopiedToClipboard] = useState<string | null>(
+    null
+  );
 
   // Model selection state
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] =
+    useState<string>("gemini-2.5-flash");
 
   if (!figures || figures.length === 0) {
     return null;
@@ -266,14 +277,18 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
 
       // Force a refresh of the figures list to show the new summary badge
       // The parent component will re-fetch figures and include the new summary
-      console.log("[FigureGallery] Summary generated successfully, figures will be refreshed");
-
+      console.log(
+        "[FigureGallery] Summary generated successfully, figures will be refreshed"
+      );
     } catch (error) {
       console.error("[FigureGallery] Summary generation error:", error);
       setExtractedContent((prev) => {
         const newMap = new Map(prev);
         newMap.set(figureId, {
-          error: error instanceof Error ? error.message : "Failed to generate summary",
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to generate summary",
         });
         return newMap;
       });
@@ -346,12 +361,18 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                       </span>
                       <div className="flex items-center gap-1">
                         {figure.scientific_summary && (
-                          <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
+                          <Badge
+                            variant="secondary"
+                            className="text-xs bg-green-100 text-green-800"
+                          >
                             Summary
                           </Badge>
                         )}
                         {figure.extracted_content && (
-                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                          <Badge
+                            variant="secondary"
+                            className="text-xs bg-blue-100 text-blue-800"
+                          >
                             OCR
                           </Badge>
                         )}
@@ -436,7 +457,10 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                     size="sm"
                     variant="outline"
                     onClick={() => generateFigureSummary(selectedFigure.id)}
-                    disabled={extractingFigure === selectedFigure.id || !!selectedFigure.scientific_summary}
+                    disabled={
+                      extractingFigure === selectedFigure.id ||
+                      !!selectedFigure.scientific_summary
+                    }
                     className="text-xs"
                   >
                     {extractingFigure === selectedFigure.id ? (
@@ -463,13 +487,20 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                   <label className="text-sm font-medium text-muted-foreground mb-2 block">
                     AI Model for Analysis
                   </label>
-                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <Select
+                    value={selectedModel}
+                    onValueChange={setSelectedModel}
+                  >
                     <SelectTrigger className="w-full max-w-xs">
                       <SelectValue placeholder="Select a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Fast)</SelectItem>
-                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Most Capable)</SelectItem>
+                      <SelectItem value="gemini-2.5-flash">
+                        Gemini 2.5 Flash (Fast)
+                      </SelectItem>
+                      <SelectItem value="gemini-2.5-pro">
+                        Gemini 2.5 Pro (Most Capable)
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -479,16 +510,22 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">
-                        Generated: {new Date(selectedFigure.scientific_summary.generated_at).toLocaleString()}
-                        • Model: {selectedFigure.scientific_summary.model_used} (Selected: {selectedModel})
+                        Generated:{" "}
+                        {new Date(
+                          selectedFigure.scientific_summary.generated_at
+                        ).toLocaleString()}
+                        • Model: {selectedFigure.scientific_summary.model_used}{" "}
+                        (Selected: {selectedModel})
                       </div>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => copyToClipboard(
-                          selectedFigure.scientific_summary?.summary || "",
-                          selectedFigure.id
-                        )}
+                        onClick={() =>
+                          copyToClipboard(
+                            selectedFigure.scientific_summary?.summary || "",
+                            selectedFigure.id
+                          )
+                        }
                         className="h-6 px-2 text-xs"
                       >
                         {copiedToClipboard === selectedFigure.id ? (
@@ -512,7 +549,8 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                     />
                     <div className="bg-green-50 border border-green-200 rounded-md p-3">
                       <p className="text-sm text-green-700">
-                        ✅ This summary will be included in entity extraction analysis
+                        ✅ This summary will be included in entity extraction
+                        analysis
                       </p>
                     </div>
                   </div>
@@ -529,15 +567,20 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="text-xs text-muted-foreground">
-                            Model: {extractedContent.get(selectedFigure.id)?.model_used || "Unknown"}
+                            Model:{" "}
+                            {extractedContent.get(selectedFigure.id)
+                              ?.model_used || "Unknown"}
                           </div>
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => copyToClipboard(
-                              extractedContent.get(selectedFigure.id)?.content || "",
-                              selectedFigure.id
-                            )}
+                            onClick={() =>
+                              copyToClipboard(
+                                extractedContent.get(selectedFigure.id)
+                                  ?.content || "",
+                                selectedFigure.id
+                              )
+                            }
                             className="h-6 px-2 text-xs"
                           >
                             {copiedToClipboard === selectedFigure.id ? (
@@ -554,7 +597,10 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                           </Button>
                         </div>
                         <Textarea
-                          value={extractedContent.get(selectedFigure.id)?.content || ""}
+                          value={
+                            extractedContent.get(selectedFigure.id)?.content ||
+                            ""
+                          }
                           readOnly
                           className="min-h-[120px] text-sm font-mono resize-none"
                           placeholder="Extracted content will appear here..."
@@ -562,14 +608,17 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                       </div>
                     )}
                   </div>
-                ) : !extractingFigure && (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <Brain className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">
-                      Generate a scientific summary to extract key data and findings from this figure.
-                      The summary will be included in entity extraction analysis.
-                    </p>
-                  </div>
+                ) : (
+                  !extractingFigure && (
+                    <div className="text-center py-6 text-muted-foreground">
+                      <Brain className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">
+                        Generate a scientific summary to extract key data and
+                        findings from this figure. The summary will be included
+                        in entity extraction analysis.
+                      </p>
+                    </div>
+                  )
                 )}
               </div>
 

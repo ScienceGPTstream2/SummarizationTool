@@ -295,8 +295,8 @@ export function ProcessingPage({
                         }
                         onContentUpdate={() => {
                           // Refresh the file data to show updated figure summaries
-                          setFiles(prevFiles =>
-                            prevFiles.map(file =>
+                          setFiles((prevFiles) =>
+                            prevFiles.map((file) =>
                               file.fileId === selectedFileId
                                 ? { ...file, refreshTrigger: Date.now() }
                                 : file
