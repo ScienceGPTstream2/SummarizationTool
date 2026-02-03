@@ -42,7 +42,9 @@ class LLMService:
         self.macbook_client = MacbookLLMClient()
 
         # Timeout logging setup
-        self.timeout_log_dir = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
+        self.timeout_log_dir = (
+            Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
+        )
         self.timeout_log_dir.mkdir(parents=True, exist_ok=True)
         self.timeout_log_file = self.timeout_log_dir / "timeout_log.txt"
 
@@ -67,7 +69,9 @@ class LLMService:
         except Exception as e:
             print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
 
-    async def _call_with_timeout_logging(self, operation: str, coro, timeout_seconds: int = 120):
+    async def _call_with_timeout_logging(
+        self, operation: str, coro, timeout_seconds: int = 120
+    ):
         """
         Call an async function with timeout detection and logging.
 
@@ -86,14 +90,21 @@ class LLMService:
             return result
         except asyncio.TimeoutError:
             duration = (datetime.now() - start_time).total_seconds()
-            self._log_timeout(operation, f"Request timed out after {timeout_seconds}s", duration)
+            self._log_timeout(
+                operation, f"Request timed out after {timeout_seconds}s", duration
+            )
             raise
         except Exception as e:
             # For other errors, also log if they seem timeout-related
             duration = (datetime.now() - start_time).total_seconds()
             error_msg = str(e).lower()
-            if any(keyword in error_msg for keyword in ['timeout', 'timed out', 'deadline', 'connection']):
-                self._log_timeout(operation, f"Timeout-related error: {str(e)}", duration)
+            if any(
+                keyword in error_msg
+                for keyword in ["timeout", "timed out", "deadline", "connection"]
+            ):
+                self._log_timeout(
+                    operation, f"Timeout-related error: {str(e)}", duration
+                )
             raise
 
     async def extract_entities_from_markdown(
@@ -123,7 +134,10 @@ class LLMService:
         try:
             if model_type == "azure":
                 if self.azure_client.disabled:
-                    return {"success": False, "error": "Azure OpenAI is not configured."}
+                    return {
+                        "success": False,
+                        "error": "Azure OpenAI is not configured.",
+                    }
                 result = await self._call_with_timeout_logging(
                     operation_name,
                     self.azure_client.extract_entities_with_azure(
@@ -136,7 +150,7 @@ class LLMService:
                         max_tokens,
                         temperature,
                         system_message,
-                    )
+                    ),
                 )
                 self._record_session_metrics(session_id, "azure", result)
                 return result
@@ -154,14 +168,22 @@ class LLMService:
                         gemini_project_id_override,
                         gemini_location_override,
                         system_instruction=system_message,
-                    )
+                    ),
                 )
                 # Gemini responses include usageMetadata; ensure meta has tokens for downstream UI
                 meta = result.get("meta") if isinstance(result, dict) else None
                 if meta is not None:
-                    usage = result.get("raw", {}).get("usageMetadata", {}) if isinstance(result.get("raw"), dict) else {}
-                    prompt_tokens = meta.get("prompt_tokens") or usage.get("promptTokenCount")
-                    completion_tokens = meta.get("completion_tokens") or usage.get("candidatesTokenCount")
+                    usage = (
+                        result.get("raw", {}).get("usageMetadata", {})
+                        if isinstance(result.get("raw"), dict)
+                        else {}
+                    )
+                    prompt_tokens = meta.get("prompt_tokens") or usage.get(
+                        "promptTokenCount"
+                    )
+                    completion_tokens = meta.get("completion_tokens") or usage.get(
+                        "candidatesTokenCount"
+                    )
                     meta["prompt_tokens"] = prompt_tokens
                     meta["completion_tokens"] = completion_tokens
                 self._record_session_metrics(session_id, "gcp", result)
@@ -177,7 +199,7 @@ class LLMService:
                         model_id,
                         max_tokens,
                         temperature,
-                    )
+                    ),
                 )
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
@@ -193,7 +215,7 @@ class LLMService:
                         max_tokens,
                         temperature,
                         max_input_length,
-                    )
+                    ),
                 )
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
@@ -209,18 +231,27 @@ class LLMService:
                         max_tokens,
                         temperature,
                         system_message,
-                    )
+                    ),
                 )
                 self._record_session_metrics(session_id, "macbook", result)
                 return result
             else:
-                return {"success": False, "error": f"Unsupported model type: {model_type}"}
+                return {
+                    "success": False,
+                    "error": f"Unsupported model type: {model_type}",
+                }
         except asyncio.TimeoutError:
-            return {"success": False, "error": f"Request timed out for {model_type} model"}
+            return {
+                "success": False,
+                "error": f"Request timed out for {model_type} model",
+            }
         except Exception as e:
             # Log other errors that might be timeout-related
             error_msg = str(e).lower()
-            if any(keyword in error_msg for keyword in ['timeout', 'timed out', 'deadline', 'connection']):
+            if any(
+                keyword in error_msg
+                for keyword in ["timeout", "timed out", "deadline", "connection"]
+            ):
                 # This was already logged by _call_with_timeout_logging
                 pass
             return {"success": False, "error": str(e)}
@@ -277,7 +308,10 @@ class LLMService:
             self._record_session_metrics(session_id, "azure", result)
             return result
         else:
-            return {"success": False, "error": f"Unsupported model type for vision: {model_type}"}
+            return {
+                "success": False,
+                "error": f"Unsupported model type for vision: {model_type}",
+            }
 
     async def generate_paragraph(
         self,
@@ -365,7 +399,9 @@ class LLMService:
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
 
-    def _record_session_metrics(self, session_id: Optional[str], provider: str, result: Dict[str, Any]) -> None:
+    def _record_session_metrics(
+        self, session_id: Optional[str], provider: str, result: Dict[str, Any]
+    ) -> None:
         if not result or not result.get("success"):
             return
         try:

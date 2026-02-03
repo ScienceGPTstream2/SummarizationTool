@@ -47,7 +47,9 @@ def transform_keys_to_snake_case(data: Any) -> Any:
 
 @router.post("/process/file/{file_id}", dependencies=[Depends(get_current_user)])
 async def process_uploaded_file(
-    file_id: str, request: ProcessFileRequest = ProcessFileRequest(), http_request: Request = None
+    file_id: str,
+    request: ProcessFileRequest = ProcessFileRequest(),
+    http_request: Request = None,
 ):
     """
     Process an uploaded file to markdown using specified or auto-selected processor
@@ -74,7 +76,9 @@ async def process_uploaded_file(
         try:
             from services.telemetry.cost_tracker import cost_tracker
 
-            session_id = http_request.headers.get("X-Session-Id") if http_request else None
+            session_id = (
+                http_request.headers.get("X-Session-Id") if http_request else None
+            )
             metadata = result.get("metadata", {})
             cost_tracker.record_call(
                 session_id=session_id,
@@ -181,17 +185,21 @@ async def get_enhanced_document_content(document_id: str, processor_used: str = 
             # Create a map of figure summaries
             figure_summaries = {}
             for figure in figures:
-                if figure.get("scientific_summary") and figure["scientific_summary"].get("summary"):
+                if figure.get("scientific_summary") and figure[
+                    "scientific_summary"
+                ].get("summary"):
                     figure_summaries[figure["id"]] = {
                         "summary": figure["scientific_summary"]["summary"],
                         "caption": figure.get("caption", ""),
-                        "page": figure.get("page")
+                        "page": figure.get("page"),
                     }
 
             if figure_summaries:
                 has_enhancements = True
                 # Insert summaries inline near figure references
-                enhanced_markdown = await _insert_figure_summaries_inline(base_markdown, figure_summaries)
+                enhanced_markdown = await _insert_figure_summaries_inline(
+                    base_markdown, figure_summaries
+                )
 
         return JSONResponse(
             status_code=200,
@@ -199,7 +207,7 @@ async def get_enhanced_document_content(document_id: str, processor_used: str = 
                 "document_id": document_id,
                 "markdown_content": enhanced_markdown,
                 "has_enhancements": has_enhancements,
-                "base_content": base_markdown
+                "base_content": base_markdown,
             },
         )
 
@@ -207,7 +215,8 @@ async def get_enhanced_document_content(document_id: str, processor_used: str = 
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error retrieving enhanced document content: {str(e)}"
+            status_code=500,
+            detail=f"Error retrieving enhanced document content: {str(e)}",
         )
 
 
@@ -267,9 +276,13 @@ Include sample sizes, p-values, time points if visible. Keep total response unde
                 # Retry attempts - add cache buster and slight variations
                 summary_prompt = f"{base_prompt}\n\nCACHE_BUSTER_ID: {cache_buster}_{attempt}\nEnsure complete response - do not truncate important data."
                 system_message = f"You are an expert scientific data analyst. Extract and summarize quantitative data from scientific figures with precision and clarity. Focus on the most important findings and statistical details. This is attempt #{attempt + 1} - provide a complete, detailed summary."
-                current_temperature = min(0.3, temperature + 0.1 * attempt)  # Slight temperature increase on retries
+                current_temperature = min(
+                    0.3, temperature + 0.1 * attempt
+                )  # Slight temperature increase on retries
 
-            print(f"[SUMMARY] Attempt {attempt + 1}/{max_retries + 1} for figure {figure_id} (cache_buster: {cache_buster})")
+            print(
+                f"[SUMMARY] Attempt {attempt + 1}/{max_retries + 1} for figure {figure_id} (cache_buster: {cache_buster})"
+            )
 
             # Generate summary
             result = await llm_service.extract_content_from_image(
@@ -292,21 +305,38 @@ Include sample sizes, p-values, time points if visible. Keep total response unde
             summary_content = result["content"]
 
             # Check for truncation
-            truncation_indicators = ["...", "…", "comet assay", "data", "figure", "results", "significant"]
+            truncation_indicators = [
+                "...",
+                "…",
+                "comet assay",
+                "data",
+                "figure",
+                "results",
+                "significant",
+            ]
             is_likely_truncated = (
-                len(summary_content) > 300 and  # Long enough to potentially be truncated
-                any(summary_content.lower().endswith(indicator) for indicator in truncation_indicators) or
-                not summary_content.strip().endswith(('.', '!', '?', ')', ']')) or  # Doesn't end with proper punctuation
-                summary_content.count('**') % 2 != 0  # Unmatched bold markers
+                len(summary_content) > 300  # Long enough to potentially be truncated
+                and any(
+                    summary_content.lower().endswith(indicator)
+                    for indicator in truncation_indicators
+                )
+                or not summary_content.strip().endswith(
+                    (".", "!", "?", ")", "]")
+                )  # Doesn't end with proper punctuation
+                or summary_content.count("**") % 2 != 0  # Unmatched bold markers
             )
 
             if is_likely_truncated and attempt < max_retries:
-                print(f"[SUMMARY] ⚠️ Detected potential truncation on attempt {attempt + 1}, retrying...")
+                print(
+                    f"[SUMMARY] ⚠️ Detected potential truncation on attempt {attempt + 1}, retrying..."
+                )
                 time.sleep(1.0)  # Longer pause for truncation retry
                 continue
 
             # Success - return the result
-            print(f"[SUMMARY] ✅ Successfully generated summary for figure {figure_id} on attempt {attempt + 1}")
+            print(
+                f"[SUMMARY] ✅ Successfully generated summary for figure {figure_id} on attempt {attempt + 1}"
+            )
             return result
 
         except Exception as e:
@@ -316,10 +346,14 @@ Include sample sizes, p-values, time points if visible. Keep total response unde
             time.sleep(0.5)
 
     # This should not be reached, but just in case
-    raise Exception(f"All {max_retries + 1} attempts failed to generate summary for figure {figure_id}")
+    raise Exception(
+        f"All {max_retries + 1} attempts failed to generate summary for figure {figure_id}"
+    )
 
 
-async def _insert_figure_summaries_inline(markdown_content: str, figure_summaries: dict) -> str:
+async def _insert_figure_summaries_inline(
+    markdown_content: str, figure_summaries: dict
+) -> str:
     """
     Insert figure summaries inline near figure references in the markdown content
 
@@ -333,7 +367,7 @@ async def _insert_figure_summaries_inline(markdown_content: str, figure_summarie
     import re
 
     # Split into lines for processing
-    lines = markdown_content.split('\n')
+    lines = markdown_content.split("\n")
     enhanced_lines = []
     inserted_summaries = set()  # Track which summaries we've already inserted
 
@@ -345,10 +379,10 @@ async def _insert_figure_summaries_inline(markdown_content: str, figure_summarie
 
         # Pattern to match various figure reference formats
         patterns = [
-            r'\bFigure\s+(\d+(?:\.\d+)*)',  # "Figure 1.1", "Figure 2"
-            r'\bFig\.?\s+(\d+(?:\.\d+)*)',  # "Fig 1.1", "Fig. 2.3"
-            r'\bFIGURE\s+(\d+(?:\.\d+)*)',  # "FIGURE 1.1"
-            r'\bFIG\.?\s+(\d+(?:\.\d+)*)',  # "FIG 1.1"
+            r"\bFigure\s+(\d+(?:\.\d+)*)",  # "Figure 1.1", "Figure 2"
+            r"\bFig\.?\s+(\d+(?:\.\d+)*)",  # "Fig 1.1", "Fig. 2.3"
+            r"\bFIGURE\s+(\d+(?:\.\d+)*)",  # "FIGURE 1.1"
+            r"\bFIG\.?\s+(\d+(?:\.\d+)*)",  # "FIG 1.1"
         ]
 
         for pattern in patterns:
@@ -402,7 +436,7 @@ async def _insert_figure_summaries_inline(markdown_content: str, figure_summarie
 
             enhanced_lines.append(summary_block)
 
-    return '\n'.join(enhanced_lines)
+    return "\n".join(enhanced_lines)
 
 
 @router.get("/{document_id}/figures", dependencies=[Depends(get_current_user)])
@@ -604,7 +638,7 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
 @router.post(
     "/{document_id}/figures/{figure_id}/generate-summary",
-    dependencies=[Depends(get_current_user)]
+    dependencies=[Depends(get_current_user)],
 )
 async def generate_figure_summary(
     document_id: str,
@@ -655,11 +689,19 @@ async def generate_figure_summary(
 
         # Get the full image path
         base_path = Path(__file__).resolve().parents[2]
-        image_path = base_path / "output" / "azure_doc_intelligence" / document_id / figure["image_path"]
+        image_path = (
+            base_path
+            / "output"
+            / "azure_doc_intelligence"
+            / document_id
+            / figure["image_path"]
+        )
 
         if not image_path.exists():
             # Try legacy path for backward compatibility
-            legacy_path = base_path / "output" / "docling" / document_id / figure["image_path"]
+            legacy_path = (
+                base_path / "output" / "docling" / document_id / figure["image_path"]
+            )
             if legacy_path.exists():
                 image_path = legacy_path
             else:
@@ -711,14 +753,23 @@ async def generate_figure_summary(
         # Check for potential truncation and retry with more focused prompt if detected
         truncation_indicators = ["...", "…", "comet assay", "data", "figure", "results"]
         is_likely_truncated = (
-            len(summary_content) > 500 and  # Long enough to potentially be truncated
-            any(summary_content.lower().endswith(indicator) for indicator in truncation_indicators) or
-            not summary_content.strip().endswith(('.', '!', '?'))  # Doesn't end with proper punctuation
+            len(summary_content) > 500  # Long enough to potentially be truncated
+            and any(
+                summary_content.lower().endswith(indicator)
+                for indicator in truncation_indicators
+            )
+            or not summary_content.strip().endswith(
+                (".", "!", "?")
+            )  # Doesn't end with proper punctuation
         )
 
         # If truncated and we haven't exceeded max retries, try again with focused prompt
-        if is_likely_truncated and max_tokens <= 4096:  # Only retry if not already at high limit
-            print(f"[SUMMARY] ⚠️ Detected potential truncation in summary for figure {figure_id}, retrying with focused prompt...")
+        if (
+            is_likely_truncated and max_tokens <= 4096
+        ):  # Only retry if not already at high limit
+            print(
+                f"[SUMMARY] ⚠️ Detected potential truncation in summary for figure {figure_id}, retrying with focused prompt..."
+            )
 
             # Retry with more focused prompt and higher token limit
             focused_result = await _generate_figure_summary_with_retry(
@@ -727,20 +778,28 @@ async def generate_figure_summary(
                 model_type=model_type,
                 model_id=model_id,
                 max_tokens=min(max_tokens * 2, 8192),  # Double token limit, max 8K
-                temperature=max(temperature, 0.1),  # Slight temperature increase for more complete responses
+                temperature=max(
+                    temperature, 0.1
+                ),  # Slight temperature increase for more complete responses
                 max_retries=1,  # Only one additional retry for truncation
             )
 
             if focused_result["success"]:
                 focused_content = focused_result["content"]
                 # Check if the focused attempt is significantly longer and more complete
-                if len(focused_content) > len(summary_content) * 1.2:  # At least 20% longer
+                if (
+                    len(focused_content) > len(summary_content) * 1.2
+                ):  # At least 20% longer
                     summary_content = focused_content
                     result = focused_result
                     is_likely_truncated = False
-                    print(f"[SUMMARY] ✅ Successfully regenerated longer summary for figure {figure_id}")
+                    print(
+                        f"[SUMMARY] ✅ Successfully regenerated longer summary for figure {figure_id}"
+                    )
                 else:
-                    print(f"[SUMMARY] ⚠️ Focused retry did not produce significantly longer summary, keeping original")
+                    print(
+                        f"[SUMMARY] ⚠️ Focused retry did not produce significantly longer summary, keeping original"
+                    )
 
         if is_likely_truncated:
             summary_content += "\n\n⚠️ *Note: This summary may be truncated due to length limits. Consider regenerating with a more focused prompt.*"
@@ -760,18 +819,31 @@ async def generate_figure_summary(
         try:
             # Find the metadata file for this conversion
             metadata_paths = [
-                base_path / "output" / "azure_doc_intelligence" / document_id / "metadata.json",
+                base_path
+                / "output"
+                / "azure_doc_intelligence"
+                / document_id
+                / "metadata.json",
                 base_path / "output" / "docling" / document_id / "metadata.json",
                 # Legacy paths
-                base_path / "markdown_output" / "azure_doc_intelligence" / document_id / "metadata.json",
-                base_path / "markdown_output" / "docling" / document_id / "metadata.json",
+                base_path
+                / "markdown_output"
+                / "azure_doc_intelligence"
+                / document_id
+                / "metadata.json",
+                base_path
+                / "markdown_output"
+                / "docling"
+                / document_id
+                / "metadata.json",
             ]
 
             metadata_updated = False
             for metadata_path in metadata_paths:
                 if metadata_path.exists():
                     import json
-                    with open(metadata_path, 'r') as f:
+
+                    with open(metadata_path, "r") as f:
                         metadata = json.load(f)
 
                     # Update the specific figure with the summary
@@ -783,9 +855,11 @@ async def generate_figure_summary(
                                 break
 
                     if metadata_updated:
-                        with open(metadata_path, 'w') as f:
+                        with open(metadata_path, "w") as f:
                             json.dump(metadata, f, indent=2)
-                        print(f"[SUMMARY] ✅ Stored summary for figure {figure_id} in {metadata_path}")
+                        print(
+                            f"[SUMMARY] ✅ Stored summary for figure {figure_id} in {metadata_path}"
+                        )
                         break
 
         except Exception as e:
@@ -802,7 +876,7 @@ async def generate_figure_summary(
                     "caption": figure.get("caption"),
                     "page": figure.get("page"),
                     "image_path": figure["image_path"],
-                }
+                },
             },
         )
 
@@ -818,7 +892,7 @@ async def generate_figure_summary(
 # Legacy endpoint for backward compatibility
 @router.post(
     "/{document_id}/figures/{figure_id}/extract-content",
-    dependencies=[Depends(get_current_user)]
+    dependencies=[Depends(get_current_user)],
 )
 async def extract_figure_content(
     document_id: str,
