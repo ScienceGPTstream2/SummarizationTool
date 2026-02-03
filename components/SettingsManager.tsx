@@ -249,7 +249,7 @@ export class SettingsManager {
               : model.provider?.toLowerCase().includes("anthropic")
                 ? "anthropic"
                 : model.provider?.toLowerCase().includes("meta") ||
-                  model.provider?.toLowerCase().includes("llama")
+                    model.provider?.toLowerCase().includes("llama")
                   ? "meta"
                   : model.provider?.toLowerCase().includes("macbook")
                     ? "macbook"
