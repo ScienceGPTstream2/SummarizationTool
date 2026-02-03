@@ -1,0 +1,200 @@
+import json
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional, List
+
+
+@dataclass
+class CallMetric:
+    provider: str
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    duration: float
+    cost: float
+    timestamp: str
+
+
+@dataclass
+class SessionMetrics:
+    session_id: str
+    total_cost: float = 0.0
+    total_latency: float = 0.0
+    total_calls: int = 0
+    calls: List[CallMetric] = field(default_factory=list)
+
+
+class CostTracker:
+    def __init__(self) -> None:
+        self._pricing = self._load_pricing()
+        self._sessions: Dict[str, SessionMetrics] = {}
+
+    def _load_pricing(self) -> Dict[str, Dict[str, float]]:
+        pricing_path = Path(__file__).resolve().parents[2] / "config" / "pricing.json"
+        if not pricing_path.exists():
+            return {}
+        with open(pricing_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("models", {})
+
+    def _compute_cost(
+        self,
+        provider: str,
+        model: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        page_count: Optional[int] = None,
+        duration: Optional[float] = None,
+    ) -> float:
+        prompt_tokens = int(prompt_tokens or 0)
+        completion_tokens = int(completion_tokens or 0)
+        page_count_value = int(page_count or 0)
+
+        normalized_key = self._normalize_model_key(model, provider)
+        pricing = self._pricing.get(normalized_key, self._pricing.get(model, {}))
+        if not pricing:
+            print(
+                "[COST_TRACKER] No pricing found for model",
+                {"provider": provider, "model": model, "normalized": normalized_key},
+            )
+        if prompt_tokens == 0 and completion_tokens == 0:
+            print(
+                "[COST_TRACKER] Token usage missing or zero",
+                {
+                    "provider": provider,
+                    "model": model,
+                    "normalized": normalized_key,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                },
+            )
+        prompt_rate = pricing.get("input_per_million") or pricing.get(
+            "prompt_cost_per_1k_tokens", 0.0
+        )
+        completion_rate = pricing.get("output_per_million") or pricing.get(
+            "completion_cost_per_1k_tokens", 0.0
+        )
+        if "input_per_million" in pricing or "output_per_million" in pricing:
+            base_cost = (prompt_tokens / 1_000_000.0) * float(prompt_rate or 0.0)
+            base_cost += (completion_tokens / 1_000_000.0) * float(
+                completion_rate or 0.0
+            )
+        else:
+            base_cost = (prompt_tokens / 1000.0) * float(prompt_rate or 0.0)
+            base_cost += (completion_tokens / 1000.0) * float(completion_rate or 0.0)
+
+        per_page_rate = pricing.get("cost_per_page", 0.0)
+        page_cost = page_count_value * float(per_page_rate or 0.0)
+        cost_per_minute = pricing.get("cost_per_minute", 0.0)
+        duration_minutes = max(float(duration or 0.0), 0.0) / 60.0
+        compute_cost = duration_minutes * float(cost_per_minute or 0.0)
+        return base_cost + page_cost + compute_cost
+
+    def estimate_call_cost(
+        self,
+        provider: str,
+        model: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        page_count: Optional[int] = None,
+        duration: Optional[float] = None,
+    ) -> float:
+        return self._compute_cost(
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            page_count=page_count,
+            duration=duration,
+        )
+
+    def _normalize_model_key(self, model: str, provider: Optional[str]) -> str:
+        if not model:
+            return ""
+        model_lower = model.lower()
+        if provider == "azure":
+            if model_lower in {"azure_doc_intelligence", "docling"}:
+                return model_lower
+            if model_lower.startswith("azure:"):
+                return model_lower
+            return f"azure:{model_lower}"
+        if provider == "gcp":
+            if model_lower.startswith("vertex:"):
+                return model_lower
+            if model_lower.startswith("publishers/google/models/"):
+                model_lower = model_lower.replace("publishers/google/models/", "")
+            if model_lower.startswith("claude-"):
+                model_lower = model_lower.split("@")[0]
+                model_lower = model_lower.replace(
+                    "claude-sonnet-4-5", "claude-sonnet-4.5"
+                )
+                model_lower = model_lower.replace("claude-opus-4-1", "claude-opus-4.1")
+            if model_lower.startswith("meta/llama-"):
+                model_lower = model_lower.replace("meta/llama-", "llama-")
+            if "llama-4-maverick" in model_lower:
+                model_lower = "llama-4-maverick-17b"
+            if "llama-4-scout" in model_lower:
+                model_lower = "llama-4-scout-17b-16e"
+            if "llama-3.3-70b" in model_lower:
+                model_lower = "llama-3.3-70b"
+            if "llama-3.1-405b" in model_lower:
+                model_lower = "llama-3.1-405b"
+            return f"vertex:{model_lower}"
+        return model
+
+    def record_call(
+        self,
+        session_id: Optional[str],
+        provider: str,
+        model: str,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        duration: Optional[float],
+        page_count: Optional[int] = None,
+    ) -> None:
+        if not session_id:
+            return
+        duration = float(duration or 0.0)
+        cost = self._compute_cost(
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            page_count=page_count,
+            duration=duration,
+        )
+
+        metrics = self._sessions.get(session_id)
+        if not metrics:
+            metrics = SessionMetrics(session_id=session_id)
+            self._sessions[session_id] = metrics
+
+        metrics.total_cost += cost
+        metrics.total_latency += duration
+        metrics.total_calls += 1
+        metrics.calls.append(
+            CallMetric(
+                provider=provider,
+                model=model,
+                prompt_tokens=int(prompt_tokens or 0),
+                completion_tokens=int(completion_tokens or 0),
+                duration=duration,
+                cost=cost,
+                timestamp=datetime.utcnow().isoformat(),
+            )
+        )
+
+    def get_session_metrics(
+        self, session_id: Optional[str]
+    ) -> Optional[SessionMetrics]:
+        if not session_id:
+            return None
+        return self._sessions.get(session_id)
+
+    def clear_session(self, session_id: Optional[str]) -> None:
+        if not session_id:
+            return
+        self._sessions.pop(session_id, None)
+
+
+cost_tracker = CostTracker()

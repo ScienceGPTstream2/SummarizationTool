@@ -1,0 +1,17 @@
+{
+  "deny": [
+    "*embedding*",
+    "*reranker*",
+    "*vision*",
+    "*llava*",
+    "*clip*",
+    "*bge*",
+    "*e5*",
+    "*gte*",
+    "*embed*",
+    "*snowflake*",
+    "*mxbai*",
+    "*minicpm-v*",
+    "*openbiollm-llava*"
+  ]
+}

@@ -1,7 +1,10 @@
 """Entity extraction API endpoints"""
 
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends
+import os
+from datetime import datetime
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 
 from core.dependencies import get_current_user
@@ -10,6 +13,7 @@ from services.document.document_service import DocumentService
 from services.llm.llm_service import LLMService
 from services.document.processors.azure_doc_intelligence.bounding_box_matcher import (
     match_references_to_bounding_boxes as match_azure_references,
+    match_figure_references_to_bounding_boxes as match_azure_figure_references,
 )
 from services.document.processors.docling.bounding_box_matcher import (
     match_references_to_bounding_boxes as match_docling_references,
@@ -25,13 +29,43 @@ document_service = DocumentService()
 llm_service = LLMService()
 session_service = get_session_service()
 
+# Timeout logging setup
+TIMEOUT_LOG_DIR = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
+TIMEOUT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+TIMEOUT_LOG_FILE = TIMEOUT_LOG_DIR / "timeout_log.txt"
+
+
+def log_timeout_event(operation: str, details: str, duration: float = None):
+    """
+    Log timeout events to a file for monitoring API request issues.
+
+    Args:
+        operation: The operation that timed out (e.g., "entity_extraction", "figure_ocr")
+        details: Additional details about the timeout
+        duration: How long it took before timing out (if available)
+    """
+    timestamp = datetime.now().isoformat()
+    duration_str = f" ({duration:.2f}s)" if duration else ""
+
+    log_entry = f"[{timestamp}] TIMEOUT - {operation}{duration_str}: {details}\n"
+
+    try:
+        with open(TIMEOUT_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+        print(f"[TIMEOUT_LOG] {log_entry.strip()}")
+    except Exception as e:
+        print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
+
 
 @router.post("/extract", dependencies=[Depends(get_current_user)])
 async def extract_entities(
-    request: ExtractRequest, user_model=Depends(get_current_user)
+    request: ExtractRequest,
+    http_request: Request,
+    user_model=Depends(get_current_user),
 ):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
+    Includes figure content for comprehensive analysis and figure referencing.
     """
     # Create a semaphore to limit concurrency
     sem = asyncio.Semaphore(50)
@@ -60,12 +94,51 @@ async def extract_entities(
                 status_code=404, detail="Conversion markdown not found or not ready"
             )
 
+        # Fetch and include figure content for enhanced analysis
+        figures_content = ""
+        figures = None
+        try:
+            figures = await document_service.get_figures_for_conversion(
+                request.conversion_id
+            )
+            print(
+                f"[EXTRACTION] Found {len(figures) if figures else 0} figures for document {request.conversion_id}"
+            )
+            if figures:
+                # Debug: print figure IDs
+                figure_ids = [f.get("id", "unknown") for f in figures]
+                print(
+                    f"[EXTRACTION] Figure IDs from Azure Doc Intelligence: {figure_ids}"
+                )
+                figures_content = await _build_figures_context(
+                    figures, request.conversion_id
+                )
+                print(
+                    f"[EXTRACTION] Generated {len(figures_content)} characters of figure content"
+                )
+        except Exception as e:
+            print(f"Warning: Could not load figure content for analysis: {e}")
+
+        # Combine document content with figure content
+        enhanced_markdown = markdown
+        if figures_content:
+            enhanced_markdown = f"{markdown}\n\n--- FIGURES ---\n{figures_content}"
+
         async def run_extraction(entity: Entity):
             nonlocal raw_analysis  # Allow access to outer scope variable
 
             async with sem:
+                print(
+                    f"[EXTRACTION] Running extraction for entity '{entity.name}' with model {request.model_type}"
+                )
+                print(f"[EXTRACTION] Prompt preview: {entity.prompt[:100]}...")
+                print(
+                    f"[EXTRACTION] Enhanced markdown length: {len(enhanced_markdown)}"
+                )
+
+                session_id = http_request.headers.get("X-Session-Id")
                 result = await llm_service.extract_entities_from_markdown(
-                    markdown=markdown,
+                    markdown=enhanced_markdown,
                     extraction_prompt=entity.prompt,
                     model_type=request.model_type,
                     model_id=request.model_id,
@@ -79,6 +152,14 @@ async def extract_entities(
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
                     system_message=entity.system_prompt,
+                    session_id=session_id,
+                )
+
+                print(
+                    f"[EXTRACTION] LLM response for '{entity.name}': {result.get('content', '')[:200]}..."
+                )
+                print(
+                    f"[EXTRACTION] References found: {len(result.get('references', []))}"
                 )
             if result.get("success"):
                 response_data = {
@@ -105,10 +186,23 @@ async def extract_entities(
                             if raw_analysis:
                                 # Match references to bounding boxes based on processor
                                 if request.processor_used == "azure_doc_intelligence":
-                                    matched_references = match_azure_references(
-                                        references=references,
-                                        raw_analysis=raw_analysis,
+                                    # Get figures for figure reference matching
+                                    figures = await document_service.get_figures_for_conversion(
+                                        request.conversion_id
                                     )
+                                    if figures:
+                                        matched_references = (
+                                            match_azure_figure_references(
+                                                references=references,
+                                                raw_analysis=raw_analysis,
+                                                figures=figures,
+                                            )
+                                        )
+                                    else:
+                                        matched_references = match_azure_references(
+                                            references=references,
+                                            raw_analysis=raw_analysis,
+                                        )
                                 elif request.processor_used == "docling":
                                     matched_references = match_docling_references(
                                         references=references,
@@ -217,3 +311,64 @@ async def extract_entities(
         raise HTTPException(
             status_code=500, detail=f"Error extracting entities: {str(e)}"
         )
+
+
+async def _build_figures_context(figures: list, conversion_id: str) -> str:
+    """
+    Build a formatted context string containing figure information for entity extraction.
+
+    Args:
+        figures: List of figure metadata dictionaries
+        conversion_id: The conversion ID for API calls
+
+    Returns:
+        Formatted string with figure information and OCR content
+    """
+    if not figures:
+        return ""
+
+    context_parts = []
+
+    for figure in figures:
+        figure_id = figure.get("id", "unknown")
+        page = figure.get("page")
+        caption = figure.get("caption", "")
+
+        # Start building figure context
+        figure_context = f"Figure {figure_id}:"
+
+        # Add page information if available
+        if page:
+            figure_context += f" (Page {page})"
+
+        figure_context += "\n"
+
+        # Add caption if available
+        if caption:
+            figure_context += f"Caption: {caption}\n"
+
+        # Try to get scientific summary - this is the new preferred method
+        try:
+            # Check if we have a stored scientific summary (preferred)
+            if figure.get("scientific_summary") and figure["scientific_summary"].get(
+                "summary"
+            ):
+                summary_content = figure["scientific_summary"]["summary"]
+                figure_context += f"Summary: {summary_content}\n"
+            # Fallback to legacy OCR content if no summary exists
+            elif figure.get("extracted_content") and figure["extracted_content"].get(
+                "content"
+            ):
+                ocr_content = figure["extracted_content"]["content"]
+                figure_context += f"Content: {ocr_content}\n"
+            else:
+                # No summary or OCR content available
+                figure_context += "Summary: [No summary generated - use 'Generate Summary' to analyze this figure]\n"
+        except Exception as e:
+            print(f"Warning: Could not get figure content for figure {figure_id}: {e}")
+            figure_context += "Summary: [Figure analysis not available]\n"
+
+        context_parts.append(figure_context)
+
+    # Join all figure contexts with double newlines
+    return "\n\n".join(context_parts)

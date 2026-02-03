@@ -4,7 +4,8 @@ This follows the official DeepEval documentation pattern using Anthropic Vertex 
 """
 
 import os
-from typing import Optional
+import time
+from typing import Optional, Dict, Any, List
 from deepeval.models.base_model import DeepEvalBaseLLM
 from anthropic import AnthropicVertex, AsyncAnthropicVertex
 
@@ -51,12 +52,48 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
         self.location = location
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.call_history: List[Dict[str, Any]] = []
 
         # Initialize Anthropic Vertex client
         self.client = AnthropicVertex(region=self.location, project_id=self.project)
         self.async_client = AsyncAnthropicVertex(
             region=self.location, project_id=self.project
         )
+
+    def _record_call(self, duration: float, usage: Dict[str, Any]) -> None:
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+        self.call_history.append(
+            {
+                "model": self._model_name,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "duration": duration,
+            }
+        )
+
+    def _extract_usage(self, message) -> Dict[str, Any]:
+        usage = getattr(message, "usage", None) or {}
+        extracted = {
+            "prompt_tokens": getattr(usage, "input_tokens", None)
+            or usage.get("input_tokens")
+            or usage.get("prompt_tokens"),
+            "completion_tokens": getattr(usage, "output_tokens", None)
+            or usage.get("output_tokens")
+            or usage.get("completion_tokens"),
+            "total_tokens": getattr(usage, "total_tokens", None)
+            or usage.get("total_tokens"),
+        }
+        if not extracted.get("prompt_tokens") and not extracted.get(
+            "completion_tokens"
+        ):
+            print(
+                "[AnthropicAdapter] Missing token usage in response",
+                {"usage": usage, "model": self._model_name},
+            )
+        return extracted
 
     def load_model(self):
         """Load the Anthropic Vertex client"""
@@ -86,7 +123,10 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
             request_params["temperature"] = self.temperature
 
         # Make the API call
+        start_time = time.perf_counter()
         message = client.messages.create(**request_params)
+        duration = time.perf_counter() - start_time
+        self._record_call(duration, self._extract_usage(message))
 
         # Extract content from response
         if message.content and len(message.content) > 0:
@@ -115,7 +155,10 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
             request_params["temperature"] = self.temperature
 
         # Make the API call
+        start_time = time.perf_counter()
         message = await self.async_client.messages.create(**request_params)
+        duration = time.perf_counter() - start_time
+        self._record_call(duration, self._extract_usage(message))
 
         # Extract content from response
         if message.content and len(message.content) > 0:

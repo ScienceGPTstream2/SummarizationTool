@@ -46,6 +46,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { downloadEvaluationReport } from "../utils/wordExport";
+import { authenticatedFetch } from "../utils/authUtils";
 import {
   Accordion,
   AccordionContent,
@@ -73,6 +74,7 @@ export interface ResultRow {
   relevance: number | null;
   safety: number | null;
   humanEval: number | null; // Changed to number 0-100
+  cost: string;
 }
 
 const formatModelName = (modelId: string) => {
@@ -107,6 +109,13 @@ const getMetricScore = (result: any, metricName: string): number | null => {
     m.metric_name.toLowerCase().includes(metricName.toLowerCase())
   );
   return metric ? Math.round(metric.score * 100) : null;
+};
+
+const formatCost = (value: number | undefined | null): string => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "";
+  }
+  return Number(value).toFixed(6);
 };
 
 // Transform documentData to flat rows
@@ -202,6 +211,7 @@ export function transformToRows(documentData: any): ResultRow[] {
                   ? Math.round(extractionHumanScore * 100)
                   : extractionHumanScore
                 : null,
+            cost: "",
           });
         } else {
           for (const result of evalResults) {
@@ -235,6 +245,7 @@ export function transformToRows(documentData: any): ResultRow[] {
                     ? Math.round(humanScore * 100)
                     : humanScore
                   : null,
+              cost: formatCost(result.evaluation_cost),
             });
           }
         }
@@ -271,6 +282,7 @@ const ALL_COLUMNS = [
   { key: "relevance", label: "Relevance", type: "score" },
   { key: "safety", label: "Safety", type: "score" },
   { key: "humanEval", label: "Human Eval", type: "label" },
+  { key: "cost", label: "Cost", type: "text" },
 ] as const;
 
 type SortDirection = "asc" | "desc" | null;
@@ -452,8 +464,115 @@ export default function BatchResultsPage({
 
   // Export filtered results to Excel
   const exportToExcel = async () => {
+    const sessionMetrics = await (async () => {
+      try {
+        const response = await authenticatedFetch(
+          "/api/server/session-metrics"
+        );
+        const data = await response.json();
+        return data.metrics || null;
+      } catch (error) {
+        console.warn("Failed to fetch session metrics for export:", error);
+        return null;
+      }
+    })();
+
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Filtered Results");
+
+    if (sessionMetrics) {
+      const metricsSheet = workbook.addWorksheet("Session Metrics");
+      metricsSheet.columns = [
+        { header: "Metric", key: "metric", width: 30 },
+        { header: "Value", key: "value", width: 30 },
+      ];
+      metricsSheet.addRows([
+        { metric: "Total Cost", value: sessionMetrics.total_cost?.toFixed(6) },
+        {
+          metric: "Total Latency (s)",
+          value: sessionMetrics.total_latency?.toFixed(3),
+        },
+        { metric: "Total Calls", value: sessionMetrics.total_calls },
+      ]);
+
+      metricsSheet.addRow([]);
+      metricsSheet.addRow(["By Provider"]);
+      metricsSheet.addRow([
+        "Provider",
+        "Calls",
+        "Avg Latency (s)",
+        "Total Cost",
+      ]);
+
+      const providerStats = new Map<
+        string,
+        { calls: number; totalCost: number; totalLatency: number }
+      >();
+      (sessionMetrics.calls || []).forEach((call: any) => {
+        const key = call.provider || "Unknown";
+        const entry = providerStats.get(key) || {
+          calls: 0,
+          totalCost: 0,
+          totalLatency: 0,
+        };
+        entry.calls += 1;
+        entry.totalCost += call.cost || 0;
+        entry.totalLatency += call.duration || 0;
+        providerStats.set(key, entry);
+      });
+
+      providerStats.forEach((stats, provider) => {
+        metricsSheet.addRow([
+          provider,
+          stats.calls,
+          (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2),
+          stats.totalCost.toFixed(6),
+        ]);
+      });
+
+      metricsSheet.addRow([]);
+      metricsSheet.addRow(["By Model"]);
+      metricsSheet.addRow([
+        "Model",
+        "Provider",
+        "Calls",
+        "Avg Latency (s)",
+        "Total Cost",
+      ]);
+
+      const modelStats = new Map<
+        string,
+        {
+          provider: string;
+          calls: number;
+          totalCost: number;
+          totalLatency: number;
+        }
+      >();
+      (sessionMetrics.calls || []).forEach((call: any) => {
+        const key = call.model || "Unknown";
+        const entry = modelStats.get(key) || {
+          provider: call.provider || "Unknown",
+          calls: 0,
+          totalCost: 0,
+          totalLatency: 0,
+        };
+        entry.calls += 1;
+        entry.totalCost += call.cost || 0;
+        entry.totalLatency += call.duration || 0;
+        modelStats.set(key, entry);
+      });
+
+      modelStats.forEach((stats, model) => {
+        metricsSheet.addRow([
+          model,
+          stats.provider,
+          stats.calls,
+          (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2),
+          stats.totalCost.toFixed(6),
+        ]);
+      });
+    }
 
     // Define columns (only visible ones)
     const visibleColumnDefs = ALL_COLUMNS.filter((col) =>
@@ -801,6 +920,11 @@ export default function BatchResultsPage({
                         }
                         className={`h-8 text-sm w-20 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
                       />
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("cost") && (
+                    <TableCell className="text-right text-sm text-gray-600">
+                      {row.cost || "—"}
                     </TableCell>
                   )}
                   {/* Compare button removed, row is clickable */}

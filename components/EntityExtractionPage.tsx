@@ -78,6 +78,7 @@ import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
 import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { authenticatedFetch } from "../utils/authUtils";
 
 interface Reference {
   text: string;
@@ -250,6 +251,7 @@ export function EntityExtractionPage({
   const [focusedReferenceByEntity, setFocusedReferenceByEntity] = useState<
     Record<number, number | null>
   >({});
+  const [figures, setFigures] = useState<any[]>([]);
 
   // Track processing status for each file independently
   const [fileProcessingStatus, setFileProcessingStatus] = useState<
@@ -458,8 +460,6 @@ export function EntityExtractionPage({
       pendingFiles.length,
       "files"
     );
-    const token =
-      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
 
     // Import PDF.js dynamically
     // @ts-ignore
@@ -481,7 +481,6 @@ export function EntityExtractionPage({
         // Load through PDF.js to match EntityPDFViewerBeta's caching
         const loadingTask = pdfjsLib.getDocument({
           url: `/api/files/${file.fileId}`,
-          httpHeaders: { Authorization: `Bearer ${token}` },
           disableAutoFetch: false,
           disableStream: false,
         });
@@ -581,8 +580,6 @@ export function EntityExtractionPage({
       (m) => m.id === primaryModelId
     );
 
-    const token =
-      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
     const updatedEntities = [...(file.entities || [])];
 
     // Process entities for this file
@@ -610,7 +607,6 @@ export function EntityExtractionPage({
             entity,
             conversionId,
             modelsToUse,
-            token,
             file.processingResult?.processorUsed || documentData.processorUsed,
             undefined, // signal
             sessionIdRef.current || undefined
@@ -665,15 +661,19 @@ export function EntityExtractionPage({
     try {
       // Determine model type for summary
       let modelTypeToUse = "azure";
-      if (primaryModelObj?.category === "google") modelTypeToUse = "gemini";
-      else if (primaryModelObj?.category === "anthropic")
+      const provider = primaryModelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
+        modelTypeToUse = "gemini";
+      } else if (provider.includes("anthropic")) {
         modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
+      }
 
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           entities: updatedEntities,
@@ -790,6 +790,46 @@ export function EntityExtractionPage({
       startBatchProcessing();
     }
   }, [availableModels]);
+
+  // Fetch figures for PDF viewer
+  useEffect(() => {
+    const fetchFigures = async () => {
+      if (!currentFile.processingResult?.conversionId) return;
+
+      try {
+        const response = await authenticatedFetch(
+          `/api/documents/${currentFile.processingResult.conversionId}/figures`,
+          {}
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          setFigures(data.figures || []);
+          console.log(
+            `[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`
+          );
+        }
+      } catch (err) {
+        console.error("Error fetching figures:", err);
+      }
+    };
+
+    fetchFigures();
+  }, [currentFile.processingResult?.conversionId]);
+
+  // Debug: Log figures when they change
+  useEffect(() => {
+    if (figures.length > 0) {
+      console.log(
+        "[EntityExtractionPage] Figures loaded for PDF viewer:",
+        figures.map((f) => ({
+          id: f.id,
+          page: f.page,
+          caption: f.caption?.substring(0, 50),
+        }))
+      );
+    }
+  }, [figures]);
 
   useEffect(() => {
     if (
@@ -1046,16 +1086,14 @@ export function EntityExtractionPage({
       deployment?: string;
       apiVersion?: string;
     },
-    token: string,
     processorUsed?: string,
     signal?: AbortSignal,
     sessionId?: string
   ) => {
-    const resp = await fetch("/api/extract", {
+    const resp = await authenticatedFetch("/api/extract", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         conversion_id: conversionId,
@@ -1113,7 +1151,6 @@ export function EntityExtractionPage({
     entity: Entity,
     conversionId: string,
     selectedModelIds: string[],
-    token: string,
     processorUsed?: string,
     signal?: AbortSignal,
     sessionId?: string
@@ -1126,7 +1163,7 @@ export function EntityExtractionPage({
         return { modelId, result: null };
       }
 
-      // Map provider to backend model_type ("azure", "gemini", "anthropic")
+      // Map provider to backend model_type ("azure", "gemini", "anthropic", "llama")
       let modelType = "azure";
       const provider = modelObj.provider?.toLowerCase() || "";
 
@@ -1136,6 +1173,10 @@ export function EntityExtractionPage({
         modelType = "anthropic";
       } else if (provider.includes("azure")) {
         modelType = "azure";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelType = "llama";
+      } else if (provider.includes("macbook")) {
+        modelType = "macbook";
       }
 
       const modelConfig = {
@@ -1152,7 +1193,6 @@ export function EntityExtractionPage({
           entity,
           conversionId,
           modelConfig,
-          token,
           processorUsed,
           signal,
           sessionId
@@ -1204,8 +1244,7 @@ export function EntityExtractionPage({
     index: number,
     signal: AbortSignal,
     conversionId: string,
-    selectedModelIds: string[],
-    token: string
+    selectedModelIds: string[]
   ) => {
     try {
       // Mark entity as extracting
@@ -1216,7 +1255,6 @@ export function EntityExtractionPage({
           entity,
           conversionId,
           selectedModelIds,
-          token,
           currentFile.processingResult?.processorUsed ||
             documentData.processorUsed,
           signal,
@@ -1297,8 +1335,7 @@ export function EntityExtractionPage({
       modelId?: string;
       deployment?: string;
       apiVersion?: string;
-    },
-    token: string
+    }
   ) => {
     try {
       // Mark entity as extracting
@@ -1308,7 +1345,6 @@ export function EntityExtractionPage({
         entity,
         conversionId,
         modelConfig,
-        token,
         currentFile.processingResult?.processorUsed ||
         documentData.processorUsed,
         signal
@@ -1387,10 +1423,6 @@ export function EntityExtractionPage({
         );
       }
 
-      const token =
-        (await import("../utils/authUtils").then((m) => m.getValidToken())) ||
-        "";
-
       // Get pre-selected models
       const preSelectedModels =
         currentFile?.selectedModels || documentData.selectedModels || [];
@@ -1415,8 +1447,7 @@ export function EntityExtractionPage({
         index,
         abortControllerRef.current.signal,
         conversionId,
-        modelsToUse,
-        token
+        modelsToUse
       );
 
       // Save single entity result
@@ -1479,20 +1510,25 @@ export function EntityExtractionPage({
   // NEW: Generate summary only (without extraction)
   const generateSummaryOnly = async () => {
     setIsGeneratingParagraph(true);
-    const token =
-      (await import("../utils/authUtils").then((m) => m.getValidToken())) || "";
 
     try {
       const modelObj = availableModels.find((m) => m.id === selectedModel);
       let modelTypeToUse = "azure";
-      if (modelObj?.category === "google") modelTypeToUse = "gemini";
-      else if (modelObj?.category === "anthropic") modelTypeToUse = "anthropic";
+      const provider = modelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
+        modelTypeToUse = "gemini";
+      } else if (provider.includes("anthropic")) {
+        modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
+      } else if (provider.includes("macbook")) {
+        modelTypeToUse = "macbook";
+      }
 
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           entities: entities,
@@ -1605,20 +1641,21 @@ export function EntityExtractionPage({
       }
 
       const modelObj = availableModels.find((m) => m.id === selectedModel);
-      // Determine model_type based on category
+      // Determine model_type based on provider
       let modelTypeToUse = "azure"; // default
-      if (modelObj?.category === "google") {
+      const provider = modelObj?.provider?.toLowerCase() || "";
+      if (provider.includes("google") || provider.includes("gemini")) {
         modelTypeToUse = "gemini";
-      } else if (modelObj?.category === "anthropic") {
+      } else if (provider.includes("anthropic")) {
         modelTypeToUse = "anthropic";
+      } else if (provider.includes("meta") || provider.includes("llama")) {
+        modelTypeToUse = "llama";
+      } else if (provider.includes("macbook")) {
+        modelTypeToUse = "macbook";
       }
       const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
-
-      const token =
-        (await import("../utils/authUtils").then((m) => m.getValidToken())) ||
-        "";
 
       // Create session if not exists
       if (!sessionIdRef.current) {
@@ -1629,11 +1666,8 @@ export function EntityExtractionPage({
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
         console.log("[Pre-fetch] Caching PDF before entity extraction...");
-        const pdfResponse = await fetch(
-          `/ api / files / ${currentFile.fileId} `,
-          {
-            headers: { Authorization: `Bearer ${token} ` },
-          }
+        const pdfResponse = await authenticatedFetch(
+          `/api/files/${currentFile.fileId}`
         );
         if (pdfResponse.ok) {
           await pdfResponse.blob(); // Force browser to cache
@@ -1722,8 +1756,7 @@ export function EntityExtractionPage({
               i,
               signal,
               conversionId,
-              modelsToUse,
-              token
+              modelsToUse
             );
             updatedEntities[i] = updatedEntity;
 
@@ -1759,11 +1792,10 @@ export function EntityExtractionPage({
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Generate the paragraph summary after all entities are extracted
-      const summaryResp = await fetch("/api/generate_paragraph", {
+      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token} `,
         },
         body: JSON.stringify({
           entities: updatedEntities,
@@ -2628,6 +2660,7 @@ export function EntityExtractionPage({
                                   focusedReferenceIndex={
                                     focusedReferenceByEntity[index] ?? null
                                   }
+                                  figures={figures}
                                 />
                               </div>
                             ) : (

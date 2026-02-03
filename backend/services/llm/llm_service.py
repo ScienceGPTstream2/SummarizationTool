@@ -1,8 +1,13 @@
 import os
+import asyncio
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
 from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
+from .llama import LlamaLLMClient
+from .macbook import MacbookLLMClient
 import toml
 
 # The load_secrets_to_env function is moved to backend/main.py to ensure early loading.
@@ -33,6 +38,74 @@ class LLMService:
         self.azure_client = AzureLLMClient()
         self.gemini_client = GeminiLLMClient()
         self.anthropic_client = AnthropicLLMClient()
+        self.llama_client = LlamaLLMClient()
+        self.macbook_client = MacbookLLMClient()
+
+        # Timeout logging setup
+        self.timeout_log_dir = (
+            Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
+        )
+        self.timeout_log_dir.mkdir(parents=True, exist_ok=True)
+        self.timeout_log_file = self.timeout_log_dir / "timeout_log.txt"
+
+    def _log_timeout(self, operation: str, details: str, duration: float = None):
+        """
+        Log timeout events to a file for monitoring API request issues.
+
+        Args:
+            operation: The operation that timed out (e.g., "entity_extraction", "figure_ocr")
+            details: Additional details about the timeout
+            duration: How long it took before timing out (if available)
+        """
+        timestamp = datetime.now().isoformat()
+        duration_str = f" ({duration:.2f}s)" if duration else ""
+
+        log_entry = f"[{timestamp}] TIMEOUT - {operation}{duration_str}: {details}\n"
+
+        try:
+            with open(self.timeout_log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+            print(f"[TIMEOUT_LOG] {log_entry.strip()}")
+        except Exception as e:
+            print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
+
+    async def _call_with_timeout_logging(
+        self, operation: str, coro, timeout_seconds: int = 120
+    ):
+        """
+        Call an async function with timeout detection and logging.
+
+        Args:
+            operation: Name of the operation for logging
+            coro: The coroutine to call
+            timeout_seconds: Timeout in seconds
+
+        Returns:
+            The result of the coroutine
+        """
+        start_time = datetime.now()
+
+        try:
+            result = await asyncio.wait_for(coro, timeout=timeout_seconds)
+            return result
+        except asyncio.TimeoutError:
+            duration = (datetime.now() - start_time).total_seconds()
+            self._log_timeout(
+                operation, f"Request timed out after {timeout_seconds}s", duration
+            )
+            raise
+        except Exception as e:
+            # For other errors, also log if they seem timeout-related
+            duration = (datetime.now() - start_time).total_seconds()
+            error_msg = str(e).lower()
+            if any(
+                keyword in error_msg
+                for keyword in ["timeout", "timed out", "deadline", "connection"]
+            ):
+                self._log_timeout(
+                    operation, f"Timeout-related error: {str(e)}", duration
+                )
+            raise
 
     async def extract_entities_from_markdown(
         self,
@@ -50,15 +123,179 @@ class LLMService:
         max_tokens: int = 8048,
         temperature: float = 0.0,
         system_message: Optional[str] = None,  # Custom system prompt
+        max_input_length: int = 128000,  # Max input length for Llama (128K tokens ≈ 96K chars)
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Extract entities from markdown using the specified LLM.
         """
-        if model_type == "azure":
+        operation_name = f"entity_extraction_{model_type}"
+
+        try:
+            if model_type == "azure":
+                if self.azure_client.disabled:
+                    return {
+                        "success": False,
+                        "error": "Azure OpenAI is not configured.",
+                    }
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.azure_client.extract_entities_with_azure(
+                        markdown,
+                        extraction_prompt,
+                        deployment,
+                        api_version,
+                        endpoint_override,
+                        api_key_override,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                )
+                self._record_session_metrics(session_id, "azure", result)
+                return result
+            elif model_type == "gemini":
+                if self.gemini_client.disabled:
+                    return {"success": False, "error": "Gemini is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.gemini_client.extract_entities_with_gemini(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        gemini_project_id_override,
+                        gemini_location_override,
+                        system_instruction=system_message,
+                    ),
+                )
+                # Gemini responses include usageMetadata; ensure meta has tokens for downstream UI
+                meta = result.get("meta") if isinstance(result, dict) else None
+                if meta is not None:
+                    usage = (
+                        result.get("raw", {}).get("usageMetadata", {})
+                        if isinstance(result.get("raw"), dict)
+                        else {}
+                    )
+                    prompt_tokens = meta.get("prompt_tokens") or usage.get(
+                        "promptTokenCount"
+                    )
+                    completion_tokens = meta.get("completion_tokens") or usage.get(
+                        "candidatesTokenCount"
+                    )
+                    meta["prompt_tokens"] = prompt_tokens
+                    meta["completion_tokens"] = completion_tokens
+                self._record_session_metrics(session_id, "gcp", result)
+                return result
+            elif model_type == "anthropic":
+                if self.anthropic_client.disabled:
+                    return {"success": False, "error": "Anthropic is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.anthropic_client.extract_entities_with_anthropic(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                    ),
+                )
+                self._record_session_metrics(session_id, "gcp", result)
+                return result
+            elif model_type == "llama":
+                if self.llama_client.disabled:
+                    return {"success": False, "error": "Llama is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.llama_client.extract_entities_with_llama(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        max_input_length,
+                    ),
+                )
+                self._record_session_metrics(session_id, "gcp", result)
+                return result
+            elif model_type == "macbook":
+                if self.macbook_client.disabled:
+                    return {"success": False, "error": "Macbook LLM is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.macbook_client.extract_entities_with_macbook(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                )
+                self._record_session_metrics(session_id, "macbook", result)
+                return result
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unsupported model type: {model_type}",
+                }
+        except asyncio.TimeoutError:
+            return {
+                "success": False,
+                "error": f"Request timed out for {model_type} model",
+            }
+        except Exception as e:
+            # Log other errors that might be timeout-related
+            error_msg = str(e).lower()
+            if any(
+                keyword in error_msg
+                for keyword in ["timeout", "timed out", "deadline", "connection"]
+            ):
+                # This was already logged by _call_with_timeout_logging
+                pass
+            return {"success": False, "error": str(e)}
+
+    async def extract_content_from_image(
+        self,
+        image_path: str,
+        extraction_prompt: str,
+        model_type: str,  # e.g., "gemini", "azure"
+        model_id: Optional[str] = None,  # for Gemini
+        deployment: Optional[str] = None,  # for Azure
+        api_version: Optional[str] = None,  # for Azure
+        endpoint_override: Optional[str] = None,  # for Azure
+        api_key_override: Optional[str] = None,  # for Azure
+        gemini_project_id_override: Optional[str] = None,  # for Gemini
+        gemini_location_override: Optional[str] = None,  # for Gemini
+        max_tokens: int = 8048,
+        temperature: float = 0.0,
+        system_message: Optional[str] = None,  # Custom system prompt
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Extract content from an image using vision-capable LLMs.
+        """
+        if model_type == "gemini":
+            if self.gemini_client.disabled:
+                return {"success": False, "error": "Gemini is not configured."}
+            result = await self.gemini_client.extract_content_from_image(
+                image_path,
+                extraction_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+                gemini_project_id_override,
+                gemini_location_override,
+                system_instruction=system_message,
+            )
+            self._record_session_metrics(session_id, "gcp", result)
+            return result
+        elif model_type == "azure":
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
-            return await self.azure_client.extract_entities_with_azure(
-                markdown,
+            result = await self.azure_client.extract_content_from_image(
+                image_path,
                 extraction_prompt,
                 deployment,
                 api_version,
@@ -68,31 +305,13 @@ class LLMService:
                 temperature,
                 system_message,
             )
-        elif model_type == "gemini":
-            if self.gemini_client.disabled:
-                return {"success": False, "error": "Gemini is not configured."}
-            return await self.gemini_client.extract_entities_with_gemini(
-                markdown,
-                extraction_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-                gemini_project_id_override,
-                gemini_location_override,
-                system_instruction=system_message,
-            )
-        elif model_type == "anthropic":
-            if self.anthropic_client.disabled:
-                return {"success": False, "error": "Anthropic is not configured."}
-            return await self.anthropic_client.extract_entities_with_anthropic(
-                markdown,
-                extraction_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-            )
+            self._record_session_metrics(session_id, "azure", result)
+            return result
         else:
-            return {"success": False, "error": f"Unsupported model type: {model_type}"}
+            return {
+                "success": False,
+                "error": f"Unsupported model type for vision: {model_type}",
+            }
 
     async def generate_paragraph(
         self,
@@ -109,6 +328,7 @@ class LLMService:
         max_tokens: int = 8048,
         temperature: float = 0.0,
         system_message: Optional[str] = None,  # Custom system prompt
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a paragraph using the specified LLM.
@@ -116,7 +336,7 @@ class LLMService:
         if model_type == "azure":
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
-            return await self.azure_client.generate_paragraph_with_azure(
+            result = await self.azure_client.generate_paragraph_with_azure(
                 user_prompt,
                 deployment,
                 api_version,
@@ -126,10 +346,12 @@ class LLMService:
                 temperature,
                 system_message,
             )
+            self._record_session_metrics(session_id, "azure", result)
+            return result
         elif model_type == "gemini":
             if self.gemini_client.disabled:
                 return {"success": False, "error": "Gemini is not configured."}
-            return await self.gemini_client.generate_paragraph_with_gemini(
+            result = await self.gemini_client.generate_paragraph_with_gemini(
                 user_prompt,
                 model_id,
                 max_tokens,
@@ -138,14 +360,72 @@ class LLMService:
                 gemini_location_override,
                 system_instruction=system_message,
             )
+            self._record_session_metrics(session_id, "gcp", result)
+            return result
         elif model_type == "anthropic":
             if self.anthropic_client.disabled:
                 return {"success": False, "error": "Anthropic is not configured."}
-            return await self.anthropic_client.generate_paragraph_with_anthropic(
+            result = await self.anthropic_client.generate_paragraph_with_anthropic(
                 user_prompt,
                 model_id,
                 max_tokens,
                 temperature,
             )
+            self._record_session_metrics(session_id, "gcp", result)
+            return result
+        elif model_type == "llama":
+            if self.llama_client.disabled:
+                return {"success": False, "error": "Llama is not configured."}
+            result = await self.llama_client.generate_paragraph_with_llama(
+                user_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+            )
+            self._record_session_metrics(session_id, "gcp", result)
+            return result
+        elif model_type == "macbook":
+            if self.macbook_client.disabled:
+                return {"success": False, "error": "Macbook LLM is not configured."}
+            result = await self.macbook_client.generate_paragraph_with_macbook(
+                user_prompt,
+                model_id,
+                max_tokens,
+                temperature,
+                system_message,
+            )
+            self._record_session_metrics(session_id, "macbook", result)
+            return result
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
+
+    def _record_session_metrics(
+        self, session_id: Optional[str], provider: str, result: Dict[str, Any]
+    ) -> None:
+        if not result or not result.get("success"):
+            return
+        try:
+            from services.telemetry.cost_tracker import cost_tracker
+
+            meta = result.get("meta", {}) if isinstance(result, dict) else {}
+            model = meta.get("model") or meta.get("deployment") or "unknown"
+            if provider == "macbook":
+                cost_tracker.record_call(
+                    session_id=session_id,
+                    provider=provider,
+                    model=model,
+                    prompt_tokens=meta.get("prompt_tokens"),
+                    completion_tokens=meta.get("completion_tokens"),
+                    duration=meta.get("duration"),
+                )
+                return
+            cost_tracker.record_call(
+                session_id=session_id,
+                provider=provider,
+                model=model,
+                prompt_tokens=meta.get("prompt_tokens"),
+                completion_tokens=meta.get("completion_tokens"),
+                duration=meta.get("duration"),
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to record session metrics: {e}")

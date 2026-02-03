@@ -175,6 +175,7 @@ class EvaluationService:
         threshold: float = 0.5,
         strict_mode: bool = False,
         custom_evaluation_steps: Optional[Dict[str, List[str]]] = None,
+        session_id: Optional[str] = None,
         **model_kwargs,
     ) -> Dict[str, Any]:
         """
@@ -264,6 +265,50 @@ class EvaluationService:
             metric_tasks = [evaluate_single_metric(metric) for metric in metric_objects]
             results = await asyncio.gather(*metric_tasks)
 
+            call_history = getattr(eval_model, "call_history", []) or []
+            if not call_history:
+                print(
+                    f"[COST_TRACKER] No call history recorded for provider={provider} model={eval_model.get_model_name()}"
+                )
+            try:
+                from services.telemetry.cost_tracker import cost_tracker
+
+                provider_key = "azure" if provider == "azure_openai" else "gcp"
+                call_costs = []
+                for call in call_history:
+                    print(
+                        "[COST_TRACKER] Eval call usage:",
+                        {
+                            "provider": provider_key,
+                            "model": call.get("model") or eval_model.get_model_name(),
+                            "prompt_tokens": call.get("prompt_tokens"),
+                            "completion_tokens": call.get("completion_tokens"),
+                            "duration": call.get("duration"),
+                        },
+                    )
+                    call_cost = cost_tracker.estimate_call_cost(
+                        provider=provider_key,
+                        model=call.get("model") or eval_model.get_model_name(),
+                        prompt_tokens=call.get("prompt_tokens"),
+                        completion_tokens=call.get("completion_tokens"),
+                    )
+                    if call_cost == 0.0:
+                        print(
+                            "[COST_TRACKER] Estimated 0 cost for call; check pricing key/token usage",
+                        )
+                    call_costs.append(call_cost)
+                    cost_tracker.record_call(
+                        session_id=session_id,
+                        provider=provider_key,
+                        model=call.get("model") or eval_model.get_model_name(),
+                        prompt_tokens=call.get("prompt_tokens"),
+                        completion_tokens=call.get("completion_tokens"),
+                        duration=call.get("duration"),
+                    )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to record evaluation metrics: {e}")
+                call_costs = []
+
             # Calculate aggregate score
             avg_score = sum(r["score"] for r in results) / len(results)
             all_passed = all(r["success"] for r in results)
@@ -279,6 +324,9 @@ class EvaluationService:
                 "model": eval_model.get_model_name(),
                 "timestamp": start_time.isoformat(),
                 "evaluation_time": evaluation_time,
+                "call_metrics": call_history,
+                "call_costs": call_costs,
+                "evaluation_cost": sum(call_costs) if call_costs else 0.0,
                 "test_case": {
                     "input": extraction_prompt,
                     "actual_output": actual_output,
@@ -323,6 +371,7 @@ class EvaluationService:
         threshold: float = 0.5,
         metrics: Optional[List[str]] = None,
         batch_size: int = 50,
+        session_id: Optional[str] = None,
         **model_kwargs,
     ) -> Dict[str, Any]:
         """
@@ -357,6 +406,7 @@ class EvaluationService:
                     metrics=metrics,
                     provider=provider,
                     threshold=threshold,
+                    session_id=session_id,
                     **model_kwargs,
                 )
 

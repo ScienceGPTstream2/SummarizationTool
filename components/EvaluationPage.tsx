@@ -72,7 +72,7 @@ import {
 } from "./ui/table";
 
 import { DocumentData } from "../App";
-import { getValidToken } from "../utils/authUtils";
+import { authenticatedFetch, getValidToken } from "../utils/authUtils";
 import { toast } from "sonner";
 import BatchResultsPage from "./BatchResultsPage";
 
@@ -1075,7 +1075,7 @@ export function EvaluationPage({
   const evaluateSingleEntity = async (
     entity: any,
     providers: string[],
-    token: string,
+    _token: string,
     signal: AbortSignal
   ) => {
     const entityIndex = (currentFile.entities || []).findIndex(
@@ -1823,7 +1823,7 @@ export function EvaluationPage({
         backoff = 1000
       ) => {
         try {
-          const res = await fetch(url, options);
+          const res = await authenticatedFetch(url, options);
           if (res.status === 429) {
             if (retries <= 0) throw new Error("Rate limit exceeded (429)");
             const retryAfter = res.headers.get("Retry-After");
@@ -1899,7 +1899,6 @@ export function EvaluationPage({
             const response = await fetchWithRetry("/api/evaluations/evaluate", {
               method: "POST",
               headers: {
-                Authorization: `Bearer ${token}`,
                 "Content-Type": "application/json",
               },
               body: JSON.stringify(requestBody),

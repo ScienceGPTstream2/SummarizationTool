@@ -1,68 +1,153 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
-import { Code, AlertCircle, Download } from "lucide-react";
+import { Code, AlertCircle, Download, Sparkles, FileText } from "lucide-react";
 import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
 import { getValidToken } from "../utils/authUtils";
 
 interface RawOutputViewerProps {
   conversionId: string | null;
   processorUsed: string | null;
+  onContentUpdate?: () => void; // Callback when content is updated (e.g., figure summaries)
+}
+
+type MarkdownView = "base" | "enhanced";
+
+interface MarkdownData {
+  markdown_content: string;
+  has_enhancements?: boolean;
+  base_content?: string;
 }
 
 export function RawOutputViewer({
   conversionId,
   processorUsed,
+  onContentUpdate,
 }: RawOutputViewerProps) {
-  const [markdownContent, setMarkdownContent] = useState<string>("");
+  const [markdownData, setMarkdownData] = useState<MarkdownData | null>(null);
+  const [currentView, setCurrentView] = useState<MarkdownView>("base");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchMarkdownContent = async () => {
+  const fetchMarkdownContent = useCallback(
+    async (forceRefresh = false) => {
       if (!conversionId) {
         setLoading(false);
         return;
       }
 
       try {
+        setLoading(true);
         const token = await getValidToken();
-        const response = await fetch(`/api/documents/${conversionId}/content`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+
+        // Always fetch enhanced content, which includes both base and enhanced versions
+        const response = await fetch(
+          `/api/documents/${conversionId}/enhanced-content`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
 
         if (!response.ok) {
-          console.warn("Markdown content not available");
+          console.warn(
+            "Enhanced markdown content not available, trying base content"
+          );
+          // Fallback to base content
+          const baseResponse = await fetch(
+            `/api/documents/${conversionId}/content`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+
+          if (!baseResponse.ok) {
+            setLoading(false);
+            return;
+          }
+
+          const baseData = await baseResponse.json();
+          setMarkdownData({
+            markdown_content: baseData.markdown_content || "",
+            has_enhancements: false,
+            base_content: baseData.markdown_content || "",
+          });
           setLoading(false);
           return;
         }
 
         const data = await response.json();
-        // Display the markdown content
-        setMarkdownContent(data.markdown_content || "");
+        setMarkdownData({
+          markdown_content: data.markdown_content || "",
+          has_enhancements: data.has_enhancements || false,
+          base_content: data.base_content || data.markdown_content || "",
+        });
+
+        // Notify parent component that content was updated
+        if (onContentUpdate && forceRefresh) {
+          onContentUpdate();
+        }
+
         setLoading(false);
       } catch (err: any) {
         console.error("Error fetching markdown output:", err);
         setError(err.message || "Failed to load markdown output");
         setLoading(false);
       }
-    };
+    },
+    [conversionId, onContentUpdate]
+  );
 
+  useEffect(() => {
     fetchMarkdownContent();
-  }, [conversionId]);
+  }, [fetchMarkdownContent]);
+
+  // Refresh content when requested (e.g., after figure summary generation)
+  const refreshContent = useCallback(() => {
+    fetchMarkdownContent(true);
+  }, [fetchMarkdownContent]);
+
+  // Expose refresh method for parent components
+  useEffect(() => {
+    if (window) {
+      (window as any).refreshMarkdownContent = refreshContent;
+    }
+    return () => {
+      if (window) {
+        delete (window as any).refreshMarkdownContent;
+      }
+    };
+  }, [refreshContent]);
+
+  const getCurrentMarkdown = () => {
+    if (!markdownData) return "";
+
+    if (currentView === "enhanced") {
+      return markdownData.markdown_content;
+    } else {
+      return markdownData.base_content || markdownData.markdown_content;
+    }
+  };
 
   const handleDownload = () => {
-    if (!markdownContent) return;
-    const blob = new Blob([markdownContent], { type: "text/markdown" });
+    const content = getCurrentMarkdown();
+    if (!content) return;
+
+    const viewSuffix = currentView === "enhanced" ? "_enhanced" : "_base";
+    const blob = new Blob([content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${conversionId || "document"}.md`;
+    a.download = `${conversionId || "document"}${viewSuffix}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const toggleView = (view: MarkdownView) => {
+    setCurrentView(view);
   };
 
   if (error) {
@@ -83,29 +168,99 @@ export function RawOutputViewer({
     );
   }
 
+  const currentMarkdown = getCurrentMarkdown();
+  const hasEnhancements = markdownData?.has_enhancements || false;
+
   return (
     <Card className="border-gray-200 shadow-sm">
       <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Code className="h-5 w-5 text-purple-600" />
-            <span className="font-bold">Markdown Output</span>
-            {processorUsed && (
-              <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200">
-                {processorUsed}
+        <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between w-full gap-3">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              {currentView === "enhanced" ? (
+                <Sparkles className="h-5 w-5 text-purple-600" />
+              ) : (
+                <Code className="h-5 w-5 text-purple-600" />
+              )}
+              <span className="font-bold">
+                {currentView === "enhanced"
+                  ? "Enhanced Markdown"
+                  : "Base Markdown"}
               </span>
+              {processorUsed && (
+                <span className="text-xs font-normal text-purple-700 bg-purple-50 px-2 py-1 rounded-full border border-purple-200 whitespace-nowrap">
+                  {processorUsed}
+                </span>
+              )}
+              {currentView === "enhanced" && hasEnhancements && (
+                <Badge
+                  variant="secondary"
+                  className="text-xs bg-green-100 text-green-800 whitespace-nowrap"
+                >
+                  Figure Summaries Included
+                </Badge>
+              )}
+            </CardTitle>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto xl:justify-end">
+            {/* View Toggle */}
+            <div className="flex rounded-md border border-gray-200 overflow-hidden w-full sm:w-auto">
+              <Button
+                variant={currentView === "base" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => toggleView("base")}
+                className="rounded-none border-0 h-8 px-3 text-xs flex-1 sm:flex-none"
+              >
+                <FileText className="h-3 w-3 mr-1" />
+                Base
+              </Button>
+              <Button
+                variant={currentView === "enhanced" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => toggleView("enhanced")}
+                disabled={!hasEnhancements}
+                className="rounded-none border-0 h-8 px-3 text-xs flex-1 sm:flex-none"
+                title={
+                  !hasEnhancements
+                    ? "No figure summaries available"
+                    : "View with figure summaries"
+                }
+              >
+                <Sparkles className="h-3 w-3 mr-1" />
+                Enhanced
+              </Button>
+            </div>
+
+            {/* Download Button */}
+            {currentMarkdown && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownload}
+                className="w-full sm:w-auto"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download MD
+              </Button>
             )}
-          </CardTitle>
-          {markdownContent && (
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="h-4 w-4 mr-2" />
-              Download MD
+
+            {/* Refresh Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={refreshContent}
+              title="Refresh content (useful after generating figure summaries)"
+              className="w-full sm:w-auto"
+            >
+              🔄
             </Button>
-          )}
+          </div>
         </div>
       </CardHeader>
+
       <CardContent className="pt-6">
-        {!markdownContent && !loading && (
+        {!currentMarkdown && !loading && (
           <Alert className="bg-blue-50 border-blue-200">
             <AlertDescription className="text-blue-800">
               💡 Markdown output will be available after processing the
@@ -113,6 +268,18 @@ export function RawOutputViewer({
             </AlertDescription>
           </Alert>
         )}
+
+        {!hasEnhancements &&
+          currentView === "base" &&
+          !loading &&
+          currentMarkdown && (
+            <Alert className="bg-amber-50 border-amber-200 mb-4">
+              <AlertDescription className="text-amber-800">
+                📊 Generate figure summaries in the Figure Gallery above to see
+                enhanced content with inline summaries.
+              </AlertDescription>
+            </Alert>
+          )}
 
         {loading ? (
           <div className="flex items-center justify-center h-[1130px]">
@@ -123,10 +290,10 @@ export function RawOutputViewer({
               </p>
             </div>
           </div>
-        ) : markdownContent ? (
-          <ScrollArea className="h-[1130px] border-2 rounded-lg bg-white">
-            <pre className="p-6 text-sm font-mono text-gray-800 whitespace-pre-wrap break-words">
-              {markdownContent}
+        ) : currentMarkdown ? (
+          <ScrollArea className="h-[1100px] border-2 rounded-lg bg-white">
+            <pre className="p-6 text-sm font-mono text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+              {currentMarkdown}
             </pre>
           </ScrollArea>
         ) : null}

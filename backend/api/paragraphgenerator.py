@@ -1,6 +1,6 @@
 """API endpoints for generating paragraph summaries"""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
@@ -32,9 +32,11 @@ class ParagraphGenerationRequest(BaseModel):
     temperature: float = 0.0  # Added temperature
 
 
-@router.post("/generate_paragraph")
+@router.post("/generate_paragraph", dependencies=[Depends(get_current_user)])
 async def generate_paragraph(
-    request: ParagraphGenerationRequest, user: Dict = Depends(get_current_user)
+    request: ParagraphGenerationRequest,
+    http_request: Request,
+    user: Dict = Depends(get_current_user),
 ):
     """
     Generate a paragraph from a list of extracted entities.
@@ -59,6 +61,7 @@ async def generate_paragraph(
         print(f"[Summarize] Final user prompt:\n{user_prompt}")
 
         # Call the LLM service to generate the summary
+        session_id = http_request.headers.get("X-Session-Id")
         result = await llm_service.generate_paragraph(
             user_prompt=user_prompt,
             model_type=request.model_type,
@@ -73,6 +76,7 @@ async def generate_paragraph(
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             system_message=request.system_prompt,
+            session_id=session_id,
         )
 
         if result.get("success"):

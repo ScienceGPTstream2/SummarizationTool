@@ -4,7 +4,14 @@ export interface ModelConfig {
   provider: string;
   description: string;
   requiredApiKey: string;
-  category: "openai" | "google" | "anthropic" | "meta" | "other" | "azure";
+  category:
+    | "openai"
+    | "google"
+    | "anthropic"
+    | "meta"
+    | "other"
+    | "azure"
+    | "macbook";
   // Optional runtime fields for deployments (used for custom Azure models)
   deployment?: string;
   api_version?: string;
@@ -189,10 +196,12 @@ export class SettingsManager {
     is_azure_openai_configured: boolean;
     is_gemini_configured: boolean;
     is_azure_document_intelligence_configured: boolean;
+    is_macbook_configured?: boolean;
   } = {
     is_azure_openai_configured: false,
     is_gemini_configured: false,
     is_azure_document_intelligence_configured: false,
+    is_macbook_configured: false,
   };
 
   constructor() {
@@ -216,25 +225,39 @@ export class SettingsManager {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
-        const backendModels = await response.json();
+        const backendModels: Array<{
+          id: string;
+          name: string;
+          provider: string;
+          description?: string;
+          deployment?: string;
+          api_version?: string;
+          project_id?: string;
+          location?: string;
+        }> = await response.json();
         // Convert backend model format to ModelConfig format
-        return backendModels.map((m: any) => ({
-          id: m.id,
-          name: m.name,
-          provider: m.provider,
-          description: m.description || "",
+        return backendModels.map((model) => ({
+          id: model.id,
+          name: model.name,
+          provider: model.provider,
+          description: model.description || "",
           requiredApiKey: "", // No API key required - uses backend secrets
-          category: m.provider?.toLowerCase().includes("azure")
+          category: model.provider?.toLowerCase().includes("azure")
             ? "azure"
-            : m.provider?.toLowerCase().includes("google")
+            : model.provider?.toLowerCase().includes("google")
               ? "google"
-              : m.provider?.toLowerCase().includes("anthropic")
+              : model.provider?.toLowerCase().includes("anthropic")
                 ? "anthropic"
-                : "other",
-          deployment: m.deployment,
-          api_version: m.api_version,
-          project_id: m.project_id,
-          location: m.location,
+                : model.provider?.toLowerCase().includes("meta") ||
+                    model.provider?.toLowerCase().includes("llama")
+                  ? "meta"
+                  : model.provider?.toLowerCase().includes("macbook")
+                    ? "macbook"
+                    : "other",
+          deployment: model.deployment,
+          api_version: model.api_version,
+          project_id: model.project_id,
+          location: model.location,
         }));
       }
     } catch (error) {

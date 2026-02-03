@@ -41,10 +41,17 @@ class ExtractionResult(BaseModel):
 class GeminiLLMClient:
     def __init__(self):
         # Load from environment variables or secrets.toml
-        self.project_id = os.environ.get("GEMINI_PROJECT_ID") or os.environ.get(
-            "GEMINI_PROJECT"
+        # Check both GEMINI_ and VERTEX_AI_ prefixes for compatibility
+        self.project_id = (
+            os.environ.get("GEMINI_PROJECT_ID")
+            or os.environ.get("GEMINI_PROJECT")
+            or os.environ.get("VERTEX_AI_PROJECT")
         )
-        self.location = os.environ.get("GEMINI_LOCATION", "us-central1")
+        self.location = (
+            os.environ.get("GEMINI_LOCATION")
+            or os.environ.get("VERTEX_AI_LOCATION")
+            or "us-central1"
+        )
 
         # Find service account file
         self.service_account_path = self._find_service_account_file()
@@ -358,6 +365,10 @@ class GeminiLLMClient:
             print(f"[LLMService] Gemini content extraction error: {e}, Raw: {raw}")
             return {"success": False, "error": f"Unexpected response format: {raw}"}
 
+        usage = raw.get("usageMetadata", {}) if isinstance(raw, dict) else {}
+        prompt_tokens = usage.get("promptTokenCount")
+        completion_tokens = usage.get("candidatesTokenCount")
+
         result = {
             "success": True,
             "content": content,  # Keep for backward compatibility
@@ -366,6 +377,8 @@ class GeminiLLMClient:
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model_id,
                 "duration": duration,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
             },
         }
 
@@ -461,7 +474,6 @@ Prompt:
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
-            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
@@ -499,3 +511,116 @@ Prompt:
             service_account_path_override,
             response_json_schema=None,  # No structured output for paragraph generation
         )
+
+    async def extract_content_from_image(
+        self,
+        image_path: str,
+        extraction_prompt: str,
+        model_id: Optional[str] = None,
+        max_tokens: int = 8048,
+        temperature: float = 0.0,
+        project_id_override: Optional[str] = None,
+        location_override: Optional[str] = None,
+        service_account_path_override: Optional[Path] = None,
+        system_instruction: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Extract content from an image using Gemini vision capabilities.
+
+        Args:
+            image_path: Path to the image file
+            extraction_prompt: Instructions for what to extract from the image
+            model_id: Gemini model ID to use
+            max_tokens: Maximum tokens in response
+            temperature: Sampling temperature
+            project_id_override: Override for project ID
+            location_override: Override for location
+            service_account_path_override: Override for service account path
+            system_instruction: Custom system instruction
+
+        Returns:
+            Dict with extraction results
+        """
+        # Supported vision models
+        vision_models = [
+            "publishers/google/models/gemini-2.5-pro",
+            "publishers/google/models/gemini-2.5-flash",
+        ]
+
+        # Handle model ID mapping
+        if model_id and not model_id.startswith("publishers/google/models/"):
+            model_mapping = {
+                "gemini-2.5-pro": "publishers/google/models/gemini-2.5-pro",
+                "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
+                "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
+            }
+            model_id = model_mapping.get(model_id, model_id)
+
+        used_model_id = (
+            model_id
+            if model_id and model_id in vision_models
+            else "publishers/google/models/gemini-2.5-flash"  # Default to flash for vision
+        )
+
+        # Default system instruction for image content extraction
+        default_system_instruction = "You are an expert at analyzing scientific figures, charts, and images. Extract all relevant textual information, data points, labels, and content from the provided image. Be precise and comprehensive in your analysis."
+        used_system_instruction = (
+            system_instruction if system_instruction else default_system_instruction
+        )
+
+        # Check if image file exists
+        if not Path(image_path).exists():
+            return {
+                "success": False,
+                "error": f"Image file not found: {image_path}",
+            }
+
+        try:
+            # Read image file and convert to base64
+            import base64
+
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+
+            # Determine MIME type from file extension
+            file_ext = Path(image_path).suffix.lower()
+            mime_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(
+                file_ext, "image/png"
+            )  # Default to PNG
+
+            # Prepare multimodal content
+            contents = [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"inline_data": {"mime_type": mime_type, "data": image_data}},
+                        {
+                            "text": f"Please analyze this image and extract the requested information:\n\n{extraction_prompt}"
+                        },
+                    ],
+                }
+            ]
+
+            return await self._call_gemini_api(
+                used_model_id,
+                contents,
+                max_tokens,
+                temperature,
+                used_system_instruction,
+                project_id_override,
+                location_override,
+                service_account_path_override,
+                response_json_schema=None,  # Free-form response for image analysis
+            )
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to process image: {str(e)}",
+            }
