@@ -12,12 +12,6 @@
     "*snowflake*",
     "*mxbai*",
     "*minicpm-v*",
-    "*openbiollm-llava*",
-    "llama3.2-vision:11b-instruct-q4_k_m",
-    "llama3.1:405b-instruct-q2_k",
-    "llama3.1:8b-instruct-q4_k_m",
-    "mistral-7b-instruct-v0.3-q4_k_m:latest",
-    "mistral-large:123b",
-    "mistral-nemo:12b"
+    "*openbiollm-llava*"
   ]
 }
