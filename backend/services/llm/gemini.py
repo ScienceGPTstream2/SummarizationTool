@@ -406,6 +406,7 @@ class GeminiLLMClient:
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
+            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
@@ -416,7 +417,6 @@ class GeminiLLMClient:
                 "gemini-2.5-flash": "publishers/google/models/gemini-2.5-flash",
                 "gemini-2.5-flash-lite": "publishers/google/models/gemini-2.5-flash-lite",
                 "gemini-3-pro-preview": "publishers/google/models/gemini-3-pro-preview",
-                "gemini-3-flash-preview": "publishers/google/models/gemini-3-flash-preview",
             }
             model_id = model_mapping.get(model_id, model_id)
 
@@ -435,17 +435,13 @@ class GeminiLLMClient:
         contents = [
             {
                 "role": "user",
-                "parts": [
-                    {
-                        "text": f"""<markdown study>
+                "parts": [{"text": f"""<markdown study>
 {markdown}
 </markdown study>
 
 Prompt:
 {extraction_prompt}
-"""
-                    }
-                ],
+"""}],
             }
         ]
 

@@ -10,6 +10,7 @@ Usage:
     # Or for a local file
     python scripts/ingest_doc.py --file /path/to/file.pdf
 """
+
 import argparse
 from pathlib import Path
 import sys

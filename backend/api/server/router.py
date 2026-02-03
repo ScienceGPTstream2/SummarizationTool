@@ -107,7 +107,6 @@ async def get_server_config():
             is_macbook_healthy = True  # optimistic; real fetch happens in /models
         except Exception:
             is_macbook_healthy = False
-
     return ServerConfig(
         is_azure_openai_configured=is_azure_openai_configured,
         is_gemini_configured=is_gemini_configured,
@@ -249,10 +248,10 @@ async def get_available_models():
                 "location": gemini_location,
             },
             {
-                "id": "publishers/google/models/gemini-3-flash-preview",
-                "name": "Gemini 3 Flash",
+                "id": "publishers/google/models/gemini-3-pro-preview",
+                "name": "Gemini 3 Pro Preview",
                 "provider": "Google Gemini",
-                "description": "Ultra-fast + Ultra-Smart",
+                "description": "Next-gen reasoning",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
             },
