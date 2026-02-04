@@ -817,13 +817,20 @@ export default function BatchResultsPage({
                   )}
                   {visibleColumns.has("llmSource") && (
                     <TableCell className="max-w-[100px]">
-                      <Badge variant="outline" className="text-xs truncate max-w-[90px]" title={formatModelName(row.llmSource)}>
+                      <Badge
+                        variant="outline"
+                        className="text-xs truncate max-w-[90px]"
+                        title={formatModelName(row.llmSource)}
+                      >
                         {formatModelName(row.llmSource)}
                       </Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("ingestion") && (
-                    <TableCell className="text-xs text-gray-600 max-w-[80px] truncate" title={row.ingestion}>
+                    <TableCell
+                      className="text-xs text-gray-600 max-w-[80px] truncate"
+                      title={row.ingestion}
+                    >
                       {row.ingestion}
                     </TableCell>
                   )}
@@ -845,7 +852,13 @@ export default function BatchResultsPage({
                   )}
                   {visibleColumns.has("entity") && (
                     <TableCell className="max-w-[100px]">
-                      <Badge variant="secondary" className="text-xs truncate max-w-[90px]" title={row.entity}>{row.entity}</Badge>
+                      <Badge
+                        variant="secondary"
+                        className="text-xs truncate max-w-[90px]"
+                        title={row.entity}
+                      >
+                        {row.entity}
+                      </Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("actualOutput") && (
@@ -902,7 +915,10 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("humanEval") && (
-                    <TableCell onClick={(e) => e.stopPropagation()} className="px-1">
+                    <TableCell
+                      onClick={(e) => e.stopPropagation()}
+                      className="px-1"
+                    >
                       <Input
                         type="number"
                         min={0}

@@ -796,7 +796,9 @@ export default function App() {
                 extracted: result?.extracted_text || "",
                 references: result?.references || [],
                 // Top-level token/duration for display (from first/default extraction result)
-                duration: result?.duration_ms ? result.duration_ms / 1000 : undefined,
+                duration: result?.duration_ms
+                  ? result.duration_ms / 1000
+                  : undefined,
                 promptTokens: result?.prompt_tokens,
                 completionTokens: result?.completion_tokens,
                 groundTruth: groundTruth,
@@ -885,7 +887,9 @@ export default function App() {
                       // Token usage and cost tracking
                       promptTokens: r.prompt_tokens,
                       completionTokens: r.completion_tokens,
-                      duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
+                      duration: r.duration_ms
+                        ? r.duration_ms / 1000
+                        : undefined,
                       cost: r.cost,
                       // Evaluations specific to this source model
                       evaluationResults: modelEvalResults,
@@ -1035,7 +1039,9 @@ export default function App() {
             extracted: result?.extracted_text || "",
             references: result?.references || [],
             // Top-level token/duration for display (from first/default extraction result)
-            duration: result?.duration_ms ? result.duration_ms / 1000 : undefined,
+            duration: result?.duration_ms
+              ? result.duration_ms / 1000
+              : undefined,
             promptTokens: result?.prompt_tokens,
             completionTokens: result?.completion_tokens,
             groundTruth: groundTruth,

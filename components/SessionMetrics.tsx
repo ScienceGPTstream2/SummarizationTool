@@ -172,8 +172,7 @@ export function SessionMetrics() {
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Badge variant="secondary">Session Metrics</Badge>
             <span className="text-muted-foreground">
-              Cost:{" "}
-              <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
+              Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
             </span>
             <span className="text-muted-foreground">
               Latency:{" "}
