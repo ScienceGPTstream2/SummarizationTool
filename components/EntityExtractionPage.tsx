@@ -349,6 +349,13 @@ export function EntityExtractionPage({
         for (const [modelId, data] of Object.entries(
           entity.extractionsByModel
         )) {
+          const modelData = data as {
+            extracted?: string;
+            references?: any[];
+            promptTokens?: number;
+            completionTokens?: number;
+            duration?: number;
+          };
           await fetch(
             `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
             {
@@ -360,11 +367,15 @@ export function EntityExtractionPage({
               body: JSON.stringify({
                 entity_name: entity.name,
                 model_id: modelId,
-                extracted_text: data.extracted,
-                references: data.references || [],
+                extracted_text: modelData.extracted,
+                references: modelData.references || [],
                 status: "completed",
                 extracted_at: new Date().toISOString(),
                 file_hash: fileId,
+                // Include token usage data
+                prompt_tokens: modelData.promptTokens,
+                completion_tokens: modelData.completionTokens,
+                duration_ms: modelData.duration ? Math.round(modelData.duration * 1000) : undefined,
               }),
             }
           );
@@ -387,6 +398,10 @@ export function EntityExtractionPage({
               status: "completed",
               extracted_at: new Date().toISOString(),
               file_hash: fileId,
+              // Include token usage data
+              prompt_tokens: entity.promptTokens,
+              completion_tokens: entity.completionTokens,
+              duration_ms: entity.duration ? Math.round(entity.duration * 1000) : undefined,
             }),
           }
         );
@@ -2599,7 +2614,7 @@ export function EntityExtractionPage({
                                       </div>
                                     </div>
 
-                                    {entity.duration && (
+                                    {(entity.duration != null || entity.promptTokens != null || entity.completionTokens != null) && (
                                       <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm flex flex-wrap gap-6">
                                         <div className="flex items-center gap-2">
                                           <Hash className="h-4 w-4 text-blue-600" />
@@ -2621,7 +2636,7 @@ export function EntityExtractionPage({
                                               Time
                                             </Label>
                                             <div className="text-base font-semibold text-gray-900">
-                                              {entity.duration.toFixed(2)}s
+                                              {entity.duration != null ? entity.duration.toFixed(2) : "-"}s
                                             </div>
                                           </div>
                                         </div>

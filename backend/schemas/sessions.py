@@ -51,6 +51,19 @@ class ExtractionResult(BaseModel):
     error_message: Optional[str] = None
     extracted_at: Optional[datetime] = None
     file_hash: Optional[str] = None
+    # Token usage and cost tracking
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    duration_ms: Optional[int] = None
+    cost: Optional[float] = None
+
+
+class SessionMetrics(BaseModel):
+    """Aggregated session metrics (stored in sessions table)"""
+
+    total_cost: float = 0.0
+    total_latency: float = 0.0
+    total_calls: int = 0
 
 
 class EvaluationScore(BaseModel):
@@ -102,6 +115,9 @@ class Session(BaseModel):
 
     # Evaluation results
     evaluation_results: List[EvaluationResult] = Field(default_factory=list)
+
+    # Session metrics (LLM call tracking)
+    session_metrics: Optional[SessionMetrics] = None
 
 
 # Request/Response schemas for API

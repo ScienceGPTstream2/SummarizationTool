@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { getValidToken } from "../utils/authUtils";
 import { Button } from "./ui/button";
 import { AuroraText } from "./ui/aurora-text";
 import { SparklesCore } from "./ui/shadcn-io/sparkles";
@@ -263,7 +264,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   const uploadFile = async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    const token = localStorage.getItem("token");
+    const token = await getValidToken();
 
     const response = await fetch(`/api/upload`, {
       method: "POST",
@@ -276,7 +277,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   };
 
   const ingestDocument = async (fileId: string) => {
-    const token = localStorage.getItem("token");
+    const token = await getValidToken();
     const response = await fetch(`/api/documents/process/file/${fileId}`, {
       method: "POST",
       headers: {
@@ -294,7 +295,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   };
 
   const extractEntities = async (conversionId: string) => {
-    const token = localStorage.getItem("token");
+    const token = await getValidToken();
     const { entities } = loadStudyTypeTemplate(studyType);
     const modelObj = availableModels.find((m) => m.id === selectedModel);
 
@@ -351,7 +352,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   };
 
   const generateSummary = async (extractionData: any) => {
-    const token = localStorage.getItem("token");
+    const token = await getValidToken();
     const { summaryPrompt } = loadStudyTypeTemplate(studyType);
     const modelObj = availableModels.find((m) => m.id === selectedModel);
 

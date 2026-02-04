@@ -92,6 +92,13 @@ async def generate_paragraph(
                     user_id = user.get("id")
 
                     if user_id:
+                        # Extract token and duration info from meta
+                        meta = result.get("meta", {}) or {}
+                        prompt_tokens = meta.get("prompt_tokens")
+                        completion_tokens = meta.get("completion_tokens")
+                        duration = meta.get("duration")
+                        duration_ms = int(duration * 1000) if duration else None
+
                         # Create extraction result object
                         summary_result = ExtractionResult(
                             entity_name="__paragraph_summary__",
@@ -99,6 +106,9 @@ async def generate_paragraph(
                             extracted_text=summary_text,
                             status="completed",
                             file_hash=request.file_hash,  # CRITICAL: Include file_hash for multi-doc sessions
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            duration_ms=duration_ms,
                         )
 
                         # Save using the service

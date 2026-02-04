@@ -340,6 +340,10 @@ class SupabaseDBService:
         bbox_references: Optional[List[Dict[str, Any]]] = None,
         status: str = "pending",
         error_message: Optional[str] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        duration_ms: Optional[int] = None,
+        cost: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Create or update an extraction result"""
         data = {
@@ -351,6 +355,10 @@ class SupabaseDBService:
             "bbox_references": bbox_references,
             "status": status,
             "error_message": error_message,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "duration_ms": duration_ms,
+            "cost": cost,
         }
 
         if status == "completed":
@@ -536,6 +544,82 @@ class SupabaseDBService:
         )
 
         return len(result.data) > 0 if result.data else False
+
+    # ==========================================
+    # Session Metrics Operations
+    # ==========================================
+
+    def increment_session_metrics(
+        self,
+        session_id: str,
+        cost: float = 0.0,
+        latency: float = 0.0,
+    ) -> bool:
+        """Increment session metrics (total_cost, total_latency, total_calls)"""
+        try:
+            # Use RPC to atomically increment values
+            # First get current values
+            result = (
+                self.client.table("sessions")
+                .select("total_cost, total_latency, total_calls")
+                .eq("id", session_id)
+                .execute()
+            )
+
+            if not result.data:
+                print(f"[DB] Session {session_id} not found for metrics update")
+                return False
+
+            current = result.data[0]
+            new_cost = float(current.get("total_cost") or 0) + cost
+            new_latency = float(current.get("total_latency") or 0) + latency
+            new_calls = int(current.get("total_calls") or 0) + 1
+
+            # Update with new values
+            self.client.table("sessions").update(
+                {
+                    "total_cost": new_cost,
+                    "total_latency": new_latency,
+                    "total_calls": new_calls,
+                }
+            ).eq("id", session_id).execute()
+
+            return True
+        except Exception as e:
+            print(f"[DB] Failed to increment session metrics: {e}")
+            return False
+
+    def get_session_metrics(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session metrics from sessions table"""
+        try:
+            result = (
+                self.client.table("sessions")
+                .select("total_cost, total_latency, total_calls")
+                .eq("id", session_id)
+                .execute()
+            )
+
+            if result.data:
+                return result.data[0]
+            return None
+        except Exception as e:
+            print(f"[DB] Failed to get session metrics: {e}")
+            return None
+
+    def reset_session_metrics(self, session_id: str) -> bool:
+        """Reset session metrics to zero"""
+        try:
+            self.client.table("sessions").update(
+                {
+                    "total_cost": 0,
+                    "total_latency": 0,
+                    "total_calls": 0,
+                }
+            ).eq("id", session_id).execute()
+            return True
+        except Exception as e:
+            print(f"[DB] Failed to reset session metrics: {e}")
+            return False
 
 
 # Singleton instance

@@ -50,7 +50,11 @@ CREATE TABLE IF NOT EXISTS public.sessions (
     evaluation_config JSONB DEFAULT '{}',
     files_config JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Session metrics (aggregated from LLM calls)
+    total_cost DECIMAL DEFAULT 0,
+    total_latency DECIMAL DEFAULT 0,
+    total_calls INTEGER DEFAULT 0
 );
 
 -- Documents (per-file tracking)
@@ -94,6 +98,11 @@ CREATE TABLE IF NOT EXISTS public.extraction_results (
     error_message TEXT,
     extracted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Token usage and cost tracking
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    duration_ms INTEGER,
+    cost DECIMAL,
     
     UNIQUE(document_id, entity_name, model_id)
 );

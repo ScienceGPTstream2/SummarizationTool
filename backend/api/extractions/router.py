@@ -258,6 +258,13 @@ async def extract_entities(
                         ].startswith("Error:"):
                             continue
 
+                        # Extract token and duration info from meta
+                        meta = entity_res.get("meta", {}) or {}
+                        prompt_tokens = meta.get("prompt_tokens")
+                        completion_tokens = meta.get("completion_tokens")
+                        duration = meta.get("duration")
+                        duration_ms = int(duration * 1000) if duration else None
+
                         # Convert to ExtractionResult schema
                         result_obj = ExtractionResult(
                             entity_name=entity_res["name"],
@@ -268,6 +275,9 @@ async def extract_entities(
                             references=entity_res.get("references"),
                             status="completed",
                             extracted_at=None,  # will happen in add_extraction_result
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            duration_ms=duration_ms,
                         )
 
                         # Save to DB

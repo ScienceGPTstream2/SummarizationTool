@@ -339,6 +339,10 @@ class SessionService:
             bbox_references=result.references,
             status=result.status,
             error_message=result.error_message,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            duration_ms=result.duration_ms,
+            cost=result.cost,
         )
 
         return True
@@ -519,6 +523,11 @@ class SessionService:
                         if ext.get("extracted_at")
                         else None
                     ),
+                    # Token usage and cost tracking
+                    prompt_tokens=ext.get("prompt_tokens"),
+                    completion_tokens=ext.get("completion_tokens"),
+                    duration_ms=ext.get("duration_ms"),
+                    cost=ext.get("cost"),
                 )
             )
 

@@ -26,6 +26,11 @@ export interface ExtractionResult {
   status: "pending" | "completed" | "error";
   error_message?: string | null;
   extracted_at?: string | null;
+  // Token usage and cost tracking
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  duration_ms?: number | null;
+  cost?: number | null;
 }
 
 export interface EvaluationScore {

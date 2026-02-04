@@ -187,6 +187,8 @@ export function transformToRows(documentData: any): ResultRow[] {
           extractionData.humanScore ?? extractionData.human_score ?? null;
 
         if (evalResults.length === 0) {
+          // For rows without evaluation, show extraction cost if available
+          const extractionCost = extractionData.cost || null;
           rows.push({
             id: `row-${idCounter++}`,
             fileId: fileId,
@@ -211,7 +213,7 @@ export function transformToRows(documentData: any): ResultRow[] {
                   ? Math.round(extractionHumanScore * 100)
                   : extractionHumanScore
                 : null,
-            cost: "",
+            cost: formatCost(extractionCost),
           });
         } else {
           for (const result of evalResults) {
@@ -803,21 +805,21 @@ export default function BatchResultsPage({
                 >
                   {visibleColumns.has("studyName") && (
                     <TableCell
-                      className="max-w-[200px] truncate"
+                      className="max-w-[140px] truncate text-xs"
                       title={row.studyName}
                     >
                       {row.studyName}
                     </TableCell>
                   )}
                   {visibleColumns.has("llmSource") && (
-                    <TableCell>
-                      <Badge variant="outline">
+                    <TableCell className="max-w-[100px]">
+                      <Badge variant="outline" className="text-xs truncate max-w-[90px]" title={formatModelName(row.llmSource)}>
                         {formatModelName(row.llmSource)}
                       </Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("ingestion") && (
-                    <TableCell className="text-sm text-gray-600">
+                    <TableCell className="text-xs text-gray-600 max-w-[80px] truncate" title={row.ingestion}>
                       {row.ingestion}
                     </TableCell>
                   )}
@@ -838,34 +840,35 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("entity") && (
-                    <TableCell>
-                      <Badge variant="secondary">{row.entity}</Badge>
+                    <TableCell className="max-w-[100px]">
+                      <Badge variant="secondary" className="text-xs truncate max-w-[90px]" title={row.entity}>{row.entity}</Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("actualOutput") && (
-                    <TableCell className="max-w-[180px]">
+                    <TableCell className="max-w-[120px]">
                       <ExpandableTextCell
                         text={row.actualOutput}
                         title={`Actual Output - ${row.entity}`}
-                        maxWidth="160px"
+                        maxWidth="100px"
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("groundTruth") && (
-                    <TableCell className="max-w-[180px]">
+                    <TableCell className="max-w-[60px]">
                       <ExpandableTextCell
                         text={row.groundTruth}
                         title={`Ground Truth - ${row.entity}`}
-                        maxWidth="160px"
+                        maxWidth="50px"
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("judge") && (
-                    <TableCell>
+                    <TableCell className="max-w-[90px]">
                       {row.judge ? (
                         <Badge
                           variant="outline"
-                          className="text-purple-600 border-purple-300"
+                          className="text-xs text-purple-600 border-purple-300 truncate max-w-[80px]"
+                          title={row.judge}
                         >
                           {row.judge}
                         </Badge>
@@ -875,27 +878,27 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("correctness") && (
-                    <TableCell className="text-center">
+                    <TableCell className="text-xs px-1">
                       {renderScoreCell(row.correctness)}
                     </TableCell>
                   )}
                   {visibleColumns.has("completeness") && (
-                    <TableCell className="text-center">
+                    <TableCell className="text-xs px-1">
                       {renderScoreCell(row.completeness)}
                     </TableCell>
                   )}
                   {visibleColumns.has("relevance") && (
-                    <TableCell className="text-center">
+                    <TableCell className="text-xs px-1">
                       {renderScoreCell(row.relevance)}
                     </TableCell>
                   )}
                   {visibleColumns.has("safety") && (
-                    <TableCell className="text-center">
+                    <TableCell className="text-xs px-1">
                       {renderScoreCell(row.safety)}
                     </TableCell>
                   )}
                   {visibleColumns.has("humanEval") && (
-                    <TableCell onClick={(e) => e.stopPropagation()}>
+                    <TableCell onClick={(e) => e.stopPropagation()} className="px-1">
                       <Input
                         type="number"
                         min={0}
@@ -918,12 +921,12 @@ export default function BatchResultsPage({
                             ? "Run evaluation first to enable human scoring"
                             : "Enter human evaluation score (0-100)"
                         }
-                        className={`h-8 text-sm w-20 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
+                        className={`h-7 text-xs w-14 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("cost") && (
-                    <TableCell className="text-right text-sm text-gray-600">
+                    <TableCell className="text-right text-xs text-gray-600 px-1">
                       {row.cost || "—"}
                     </TableCell>
                   )}

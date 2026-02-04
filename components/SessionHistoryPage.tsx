@@ -180,7 +180,7 @@ export function SessionHistoryPage({
           </p>
         </div>
         <Button variant="outline" onClick={onBack}>
-          Back to Dashboard
+          Create New Session
         </Button>
       </div>
 

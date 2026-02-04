@@ -470,6 +470,10 @@ export default function App() {
         uploadedFiles: [],
       });
       sessionCreationInProgressRef.current = false;
+      // Reset client session ID to start fresh metrics
+      import("./utils/session").then(({ resetSessionId }) => {
+        resetSessionId();
+      });
       setCurrentStep("upload");
     } else if (currentStep === "history") {
       // Clear document data when going back from history to start fresh
@@ -485,6 +489,10 @@ export default function App() {
         uploadedFiles: [],
       });
       sessionCreationInProgressRef.current = false;
+      // Reset client session ID to start fresh metrics
+      import("./utils/session").then(({ resetSessionId }) => {
+        resetSessionId();
+      });
       setCurrentStep("upload");
     }
   };
@@ -787,6 +795,10 @@ export default function App() {
                 systemPrompt: e.system_prompt,
                 extracted: result?.extracted_text || "",
                 references: result?.references || [],
+                // Top-level token/duration for display (from first/default extraction result)
+                duration: result?.duration_ms ? result.duration_ms / 1000 : undefined,
+                promptTokens: result?.prompt_tokens,
+                completionTokens: result?.completion_tokens,
                 groundTruth: groundTruth,
                 evaluationResults: evaluationResults,
                 extractionsByModel: sessionData.extraction_results
@@ -870,6 +882,11 @@ export default function App() {
                     acc[r.model_id] = {
                       extracted: r.extracted_text,
                       references: r.references || [],
+                      // Token usage and cost tracking
+                      promptTokens: r.prompt_tokens,
+                      completionTokens: r.completion_tokens,
+                      duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
+                      cost: r.cost,
                       // Evaluations specific to this source model
                       evaluationResults: modelEvalResults,
                       // Use ?? instead of || to preserve human_score of 0
@@ -1017,6 +1034,10 @@ export default function App() {
             prompt: e.prompt,
             extracted: result?.extracted_text || "",
             references: result?.references || [],
+            // Top-level token/duration for display (from first/default extraction result)
+            duration: result?.duration_ms ? result.duration_ms / 1000 : undefined,
+            promptTokens: result?.prompt_tokens,
+            completionTokens: result?.completion_tokens,
             groundTruth: groundTruth,
             evaluationResults: evaluationResults,
             extractionsByModel: sessionData.extraction_results
@@ -1097,6 +1118,11 @@ export default function App() {
                 acc[r.model_id] = {
                   extracted: r.extracted_text,
                   references: r.references || [],
+                  // Token usage and cost tracking
+                  promptTokens: r.prompt_tokens,
+                  completionTokens: r.completion_tokens,
+                  duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
+                  cost: r.cost,
                   // Evaluations specific to this source model
                   evaluationResults: modelEvalResults,
                   // Use ?? instead of || to preserve human_score of 0
@@ -1110,6 +1136,39 @@ export default function App() {
 
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
       sessionCreationInProgressRef.current = false; // Reset in case it was stuck
+
+      // Load session metrics from database to populate the in-memory cache
+      try {
+        const token = await import("./utils/authUtils").then((m) =>
+          m.getValidToken()
+        );
+        const metricsResponse = await fetch(
+          "/api/server/session-metrics/load",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Session-Id": sessionData.session_id,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ session_id: sessionData.session_id }),
+          }
+        );
+        if (metricsResponse.ok) {
+          const metricsData = await metricsResponse.json();
+          if (metricsData.metrics) {
+            console.log(
+              "Session metrics restored:",
+              metricsData.metrics.total_calls,
+              "calls, cost: $" + metricsData.metrics.total_cost
+            );
+          }
+        }
+      } catch (metricsError) {
+        console.warn("Failed to load session metrics:", metricsError);
+        // Don't fail the session restore if metrics fail
+      }
+
       toast.success("Session restored successfully");
 
       // Determine the step to restore to
@@ -1293,7 +1352,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            {currentStep !== "settings" && currentStep !== "executive" && (
+            {currentStep !== "executive" && (
               <div className="flex flex-wrap items-center gap-4 mt-2">
                 <div
                   className={`flex items-center gap-2 ${currentStep === "upload" ? "text-foreground" : "text-muted-foreground"}`}
@@ -1337,7 +1396,7 @@ export default function App() {
                 </div>
               </div>
             )}
-            {currentStep !== "settings" && currentStep !== "executive" && (
+            {currentStep !== "executive" && (
               <div className="mt-4">
                 <SessionMetrics />
               </div>

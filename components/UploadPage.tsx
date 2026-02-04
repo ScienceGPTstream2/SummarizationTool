@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { DocumentData } from "../App";
 import { toast } from "sonner";
-import { getValidToken, authenticatedFetch } from "../utils/authUtils";
+import { authenticatedFetch } from "../utils/authUtils";
 import {
   Select,
   SelectContent,
