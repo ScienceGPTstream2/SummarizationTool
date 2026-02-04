@@ -302,8 +302,17 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
 
     // Map provider to internal type
     let modelTypeToUse = "azure";
-    if (modelObj.category === "google") modelTypeToUse = "gemini";
-    else if (modelObj.category === "anthropic") modelTypeToUse = "anthropic";
+    const provider = modelObj.provider?.toLowerCase() || "";
+    
+    if (modelObj.category === "google" || provider.includes("google") || provider.includes("gemini")) {
+      modelTypeToUse = "gemini";
+    } else if (modelObj.category === "anthropic" || provider.includes("anthropic")) {
+      modelTypeToUse = "anthropic";
+    } else if (modelObj.category === "meta" || provider.includes("meta") || provider.includes("llama")) {
+      modelTypeToUse = "llama";
+    } else if (modelObj.category === "macbook" || provider.includes("macbook")) {
+      modelTypeToUse = "macbook";
+    }
 
     const response = await fetch("/api/extract", {
       method: "POST",
@@ -358,8 +367,17 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
     if (!modelObj) throw new Error("Model not found");
 
     let modelTypeToUse = "azure";
-    if (modelObj.category === "google") modelTypeToUse = "gemini";
-    else if (modelObj.category === "anthropic") modelTypeToUse = "anthropic";
+    const provider = modelObj.provider?.toLowerCase() || "";
+    
+    if (modelObj.category === "google" || provider.includes("google") || provider.includes("gemini")) {
+      modelTypeToUse = "gemini";
+    } else if (modelObj.category === "anthropic" || provider.includes("anthropic")) {
+      modelTypeToUse = "anthropic";
+    } else if (modelObj.category === "meta" || provider.includes("meta") || provider.includes("llama")) {
+      modelTypeToUse = "llama";
+    } else if (modelObj.category === "macbook" || provider.includes("macbook")) {
+      modelTypeToUse = "macbook";
+    }
 
     const response = await fetch("/api/generate_paragraph", {
       method: "POST",
@@ -742,9 +760,15 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                                                 {entity.name}
                                               </TableCell>
                                               <TableCell className="align-top whitespace-pre-wrap text-lg py-4">
-                                                {entity.answer ||
-                                                  entity.extracted ||
-                                                  "-"}
+                                                {(() => {
+                                                  const val =
+                                                    entity.answer ||
+                                                    entity.extracted ||
+                                                    "-";
+                                                  return typeof val === "object"
+                                                    ? JSON.stringify(val, null, 2)
+                                                    : val;
+                                                })()}
                                               </TableCell>
                                             </TableRow>
                                           )

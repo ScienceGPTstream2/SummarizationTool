@@ -148,7 +148,7 @@ async def extract_entities(request: ExtractRequest, http_request: Request):
                 )
 
                 print(
-                    f"[EXTRACTION] LLM response for '{entity.name}': {result.get('content', '')[:200]}..."
+                    f"[EXTRACTION] LLM response for '{entity.name}': {str(result.get('content', ''))[:200]}..."
                 )
                 print(
                     f"[EXTRACTION] References found: {len(result.get('references', []))}"
