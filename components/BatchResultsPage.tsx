@@ -142,8 +142,12 @@ export function transformToRows(documentData: any): ResultRow[] {
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
     const fileId = fileItem.fileId || "";
+    // Check multiple places for processorUsed
     const ingestionTool =
-      fileItem.processorUsed || documentData.processorUsed || "";
+      fileItem.processorUsed ||
+      fileItem.processingResult?.processorUsed ||
+      documentData.processorUsed ||
+      "";
     const entities = fileItem.entities || [];
 
     for (const entity of entities) {
@@ -926,7 +930,7 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("cost") && (
-                    <TableCell className="text-right text-xs text-gray-600 px-1">
+                    <TableCell className="text-xs text-gray-600 px-1">
                       {row.cost || "—"}
                     </TableCell>
                   )}
