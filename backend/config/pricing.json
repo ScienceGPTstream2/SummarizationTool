@@ -1,5 +1,5 @@
 {
-  "currency": "USD",
+  "currency": "CAD",
   "models": {
     "azure:gpt-5.2": {
       "provider": "azure",
