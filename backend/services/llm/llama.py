@@ -38,6 +38,35 @@ class ExtractionResult(BaseModel):
     )
 
 
+def _normalize_references(raw_references: Any) -> List[Dict[str, str]]:
+    """Normalize references into a list of {"text": ...} dicts.
+
+    Llama sometimes returns references as a list of strings. This helper coerces
+    strings into dicts and drops invalid entries to avoid validation errors.
+    """
+
+    if raw_references is None:
+        return []
+
+    # If a single string was returned, wrap it in a list
+    if isinstance(raw_references, str):
+        return [{"text": raw_references}]
+
+    if not isinstance(raw_references, list):
+        return []
+
+    normalized: List[Dict[str, str]] = []
+    for ref in raw_references:
+        if isinstance(ref, dict) and "text" in ref:
+            normalized.append({"text": str(ref["text"])})
+        elif isinstance(ref, str):
+            normalized.append({"text": ref})
+        elif ref is not None:
+            normalized.append({"text": str(ref)})
+
+    return normalized
+
+
 class LlamaLLMClient:
     def __init__(self):
         # Load from environment variables
@@ -503,7 +532,7 @@ Return JSON only:"""
         ]
 
         # Call with JSON mode and max_tokens matching other models
-        safe_max_tokens = min(max_tokens, 8048)  # Match Azure/Gemini limits
+        safe_max_tokens = min(max_tokens, 2048)  # Reduce Llama max_tokens for speed/stability
 
         response = await self._call_llama_api(
             model_name,
@@ -521,6 +550,10 @@ Return JSON only:"""
         content = response["content"]
         try:
             parsed_json = json.loads(content.strip())
+            if "references" in parsed_json:
+                parsed_json["references"] = _normalize_references(
+                    parsed_json.get("references")
+                )
             result = ExtractionResult.model_validate(parsed_json)
 
             return {
@@ -608,6 +641,10 @@ Text: {essential_markdown}"""
         content = response["content"]
         try:
             parsed_json = json.loads(content.strip())
+            if "references" in parsed_json:
+                parsed_json["references"] = _normalize_references(
+                    parsed_json.get("references")
+                )
             result = ExtractionResult.model_validate(parsed_json)
 
             return {
@@ -684,10 +721,10 @@ Text: {essential_markdown}"""
                     fragment = json.loads(json_match.group())
                     if "answer" in fragment:
                         fallback_answer = fragment["answer"]
-                    if "references" in fragment and isinstance(
-                        fragment["references"], list
-                    ):
-                        fallback_references = fragment["references"]
+                    if "references" in fragment:
+                        fallback_references = _normalize_references(
+                            fragment.get("references")
+                        )
                 except:
                     pass
 

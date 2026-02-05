@@ -1,0 +1,11 @@
+{
+  "allow": [
+    "phi4-reasoning:14b",
+    "openbiollm-llama-3:8b-q6_k",
+    "gpt-oss:20b",
+    "medaibase/medgemma1.5:4b",
+    "qwen3:30b-a3b-q4_k_m",
+    "ministral-3:14b-instruct-2512-q4_k_m"
+  ],
+  "deny": []
+}
