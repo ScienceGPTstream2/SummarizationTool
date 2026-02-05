@@ -898,10 +898,10 @@ export default function App() {
                       };
                     });
 
-                    // Get human score from evaluations for this model (legacy fallback for extraction-level human_score)
-                    const humanScore = modelEvaluations.find(
-                      (ev: any) => ev.human_score != null
-                    )?.human_score;
+                    // NOTE: Do NOT set extraction-level humanScore here.
+                    // Each judge's evaluation has its own human_score in evaluationResults.
+                    // Setting a top-level humanScore would cause it to "leak" to other judges
+                    // in BatchResultsPage when they don't have their own human_score.
 
                     acc[r.model_id] = {
                       extracted: r.extracted_text,
@@ -915,8 +915,6 @@ export default function App() {
                       cost: r.cost,
                       // Evaluations specific to this source model
                       evaluationResults: modelEvalResults,
-                      // Use ?? instead of || to preserve human_score of 0
-                      humanScore: humanScore ?? undefined,
                     };
                     return acc;
                   }, {}),

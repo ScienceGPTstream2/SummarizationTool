@@ -221,12 +221,7 @@ export function transformToRows(documentData: any): ResultRow[] {
           });
         } else {
           for (const result of evalResults) {
-            // Read human_score from evaluation result first, fallback to extraction level
-            const humanScore =
-              result.human_score ??
-              result.humanScore ??
-              extractionHumanScore ??
-              null;
+            const humanScore = result.human_score ?? result.humanScore ?? null;
             rows.push({
               id: `row-${idCounter++}`,
               fileId: fileId,
