@@ -60,7 +60,11 @@ class DoclingService:
         self.executor = ThreadPoolExecutor(max_workers=50)
 
     async def convert_document_to_markdown(
-        self, source: Union[str, Path], source_type: str = "file", **kwargs
+        self,
+        source: Union[str, Path],
+        source_type: str = "file",
+        output_dir: Optional[Path] = None,
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Convert a document to markdown using Docling
@@ -68,6 +72,7 @@ class DoclingService:
         Args:
             source: File path or URL to the document
             source_type: Type of source ("file", "url")
+            output_dir: Optional output directory. If provided, saves directly here.
             **kwargs: Additional arguments (e.g., extract_figures) - accepted for API compatibility
 
         Returns:
@@ -77,9 +82,14 @@ class DoclingService:
             # Generate unique conversion ID
             conversion_id = str(uuid.uuid4())
 
-            # Create conversion-specific directory: output/docling/{conversion_id}/
-            conversion_dir = self.output_base_dir / conversion_id
-            conversion_dir.mkdir(parents=True, exist_ok=True)
+            # Use provided output_dir or fall back to legacy UUID-based path
+            if output_dir:
+                conversion_dir = output_dir
+                conversion_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Legacy: output/docling/{conversion_id}/
+                conversion_dir = self.output_base_dir / conversion_id
+                conversion_dir.mkdir(parents=True, exist_ok=True)
 
             # Define all file paths within the conversion directory
             log_path = conversion_dir / "conversion.log"

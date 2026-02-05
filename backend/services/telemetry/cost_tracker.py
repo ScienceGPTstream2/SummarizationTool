@@ -29,6 +29,18 @@ class CostTracker:
     def __init__(self) -> None:
         self._pricing = self._load_pricing()
         self._sessions: Dict[str, SessionMetrics] = {}
+        self._db_service = None  # Lazy-loaded to avoid circular imports
+
+    def _get_db_service(self):
+        """Lazy-load the database service to avoid circular imports"""
+        if self._db_service is None:
+            try:
+                from services.database.supabase_db_service import get_db_service
+
+                self._db_service = get_db_service()
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to load DB service: {e}")
+        return self._db_service
 
     def _load_pricing(self) -> Dict[str, Dict[str, float]]:
         pricing_path = Path(__file__).resolve().parents[2] / "config" / "pricing.json"
@@ -155,6 +167,8 @@ class CostTracker:
         if not session_id:
             return
         duration = float(duration or 0.0)
+        prompt_tokens_int = int(prompt_tokens or 0)
+        completion_tokens_int = int(completion_tokens or 0)
         cost = self._compute_cost(
             provider=provider,
             model=model,
@@ -176,13 +190,25 @@ class CostTracker:
             CallMetric(
                 provider=provider,
                 model=model,
-                prompt_tokens=int(prompt_tokens or 0),
-                completion_tokens=int(completion_tokens or 0),
+                prompt_tokens=prompt_tokens_int,
+                completion_tokens=completion_tokens_int,
                 duration=duration,
                 cost=cost,
                 timestamp=datetime.utcnow().isoformat(),
             )
         )
+
+        # Update session metrics in database
+        try:
+            db = self._get_db_service()
+            if db:
+                db.increment_session_metrics(
+                    session_id=session_id,
+                    cost=cost,
+                    latency=duration,
+                )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to update session metrics in DB: {e}")
 
     def get_session_metrics(
         self, session_id: Optional[str]
@@ -191,10 +217,48 @@ class CostTracker:
             return None
         return self._sessions.get(session_id)
 
+    def load_session_metrics_from_db(
+        self, session_id: Optional[str]
+    ) -> Optional[SessionMetrics]:
+        """Load session metrics from the database (for session restore)"""
+        if not session_id:
+            return None
+
+        try:
+            db = self._get_db_service()
+            if not db:
+                return None
+
+            db_metrics = db.get_session_metrics(session_id)
+            if not db_metrics:
+                return None
+
+            # Build SessionMetrics from database (aggregates only, no individual calls)
+            metrics = SessionMetrics(session_id=session_id)
+            metrics.total_cost = float(db_metrics.get("total_cost") or 0)
+            metrics.total_latency = float(db_metrics.get("total_latency") or 0)
+            metrics.total_calls = int(db_metrics.get("total_calls") or 0)
+            # Note: individual calls are not stored, so calls list will be empty
+
+            # Cache in memory
+            self._sessions[session_id] = metrics
+            return metrics
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to load metrics from DB: {e}")
+            return None
+
     def clear_session(self, session_id: Optional[str]) -> None:
         if not session_id:
             return
         self._sessions.pop(session_id, None)
+
+        # Reset metrics in database
+        try:
+            db = self._get_db_service()
+            if db:
+                db.reset_session_metrics(session_id)
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to reset session metrics in DB: {e}")
 
 
 cost_tracker = CostTracker()

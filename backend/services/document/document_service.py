@@ -7,6 +7,7 @@ processor for a given document or allow explicit processor selection.
 """
 
 import asyncio
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from schemas.enums import ProcessorType
@@ -14,6 +15,7 @@ from .processors.docling import DoclingService
 from .processors.azure_doc_intelligence.azure_doc_intelligence_service import (
     AzureDocIntelligenceService,
 )
+from services.document.organized_file_service import get_organized_file_service
 
 
 class DocumentService:
@@ -37,6 +39,7 @@ class DocumentService:
         source: str,
         source_type: str = "file",
         processor: ProcessorType = ProcessorType.AUTO,
+        output_dir: Optional[Path] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -46,6 +49,7 @@ class DocumentService:
             source: File path or URL
             source_type: "file" or "url"
             processor: Which processor to use (auto, docling, azure_doc_intelligence)
+            output_dir: Optional output directory. If provided, saves directly here.
             **kwargs: Additional processor-specific arguments
 
         Returns:
@@ -61,20 +65,20 @@ class DocumentService:
             ]:
                 processor = ProcessorType.DOCLING
                 result = await self.docling_service.convert_document_to_markdown(
-                    source, source_type, **kwargs
+                    source, source_type, output_dir=output_dir, **kwargs
                 )
                 result["processor_used"] = ProcessorType.DOCLING.value
                 result["processor_fallback"] = True
                 result["fallback_reason"] = "Azure Document Intelligence not available"
             else:
                 result = await self.azure_doc_intelligence_service.convert_document_to_markdown(
-                    source, source_type, **kwargs
+                    source, source_type, output_dir=output_dir, **kwargs
                 )
                 result["processor_used"] = ProcessorType.AZURE_DOC_INTELLIGENCE.value
 
         else:
             result = await self.docling_service.convert_document_to_markdown(
-                source, source_type, **kwargs
+                source, source_type, output_dir=output_dir, **kwargs
             )
             result["processor_used"] = ProcessorType.DOCLING.value
 
@@ -151,15 +155,16 @@ class DocumentService:
     ) -> Optional[Dict[str, Any]]:
         """Get conversion info by ID from any processor"""
 
-        result = await self.docling_service.get_conversion_by_id(conversion_id)
-        if result:
-            return result
+        # Try OrganizedFileService first (New Structure)
+        org_service = get_organized_file_service()
+        # get_file_metadata will check the global file path which includes metadata.json
+        # However, for conversion specific metadata we might need to check processed output
 
-        result = await self.azure_doc_intelligence_service.get_conversion_by_id(
-            conversion_id
-        )
-        if result:
-            return result
+        # This part requires deeper integration with OrganizedFileService if we want full parity,
+        # but for now, assuming conversion_id is file_hash:
+        metadata = await org_service.get_file_metadata(conversion_id)
+        if metadata:
+            return metadata
 
         return None
 
@@ -174,32 +179,30 @@ class DocumentService:
             processor_used: The processor that was used (if known) - improves efficiency
         """
 
-        # If we know which processor was used, check that one first
+        # Try OrganizedFileService first (New Structure)
+        # Note: conversion_id is treated as file_hash in the new structure
+        org_service = get_organized_file_service()
+
         if processor_used:
-            if processor_used == ProcessorType.AZURE_DOC_INTELLIGENCE.value:
-                content = (
-                    await self.azure_doc_intelligence_service.get_markdown_content(
-                        conversion_id
-                    )
-                )
-                if content:
-                    return content
-            elif processor_used == ProcessorType.DOCLING.value:
-                content = await self.docling_service.get_markdown_content(conversion_id)
-                if content:
-                    return content
+            # Try specific processor
+            content = await org_service.get_processed_content(
+                conversion_id, processor_used
+            )
+            if content:
+                return content
+        else:
+            # Try Azure then Docling
+            content = await org_service.get_processed_content(
+                conversion_id, ProcessorType.AZURE_DOC_INTELLIGENCE
+            )
+            if content:
+                return content
 
-        # Fallback: Try both processors (for backward compatibility or if processor_used is unknown)
-        # Check Azure first since it's our default
-        content = await self.azure_doc_intelligence_service.get_markdown_content(
-            conversion_id
-        )
-        if content:
-            return content
-
-        content = await self.docling_service.get_markdown_content(conversion_id)
-        if content:
-            return content
+            content = await org_service.get_processed_content(
+                conversion_id, ProcessorType.DOCLING
+            )
+            if content:
+                return content
 
         return None
 
@@ -217,15 +220,34 @@ class DocumentService:
         Returns:
             List of figure metadata dictionaries or None if not found
         """
-        # Try Docling first
-        figures = await self.docling_service.get_figures_for_conversion(conversion_id)
+        # Try OrganizedFileService first
+        org_service = get_organized_file_service()
+
+        # Helper to check organized storage for figures
+        async def check_organized_figures(processor):
+            try:
+                path = (
+                    org_service.get_processing_output_path(conversion_id, processor)
+                    / "metadata.json"
+                )
+                if path.exists():
+                    import json
+                    import aiofiles
+
+                    async with aiofiles.open(path, "r") as f:
+                        data = json.loads(await f.read())
+                        if "figures" in data:
+                            return data["figures"]
+            except Exception:
+                pass
+            return None
+
+        # Try Azure then Docling in organized storage
+        figures = await check_organized_figures(ProcessorType.AZURE_DOC_INTELLIGENCE)
         if figures is not None:
             return figures
 
-        # Try Azure Document Intelligence
-        figures = await self.azure_doc_intelligence_service.get_figures_for_conversion(
-            conversion_id
-        )
+        figures = await check_organized_figures(ProcessorType.DOCLING)
         if figures is not None:
             return figures
 
@@ -260,15 +282,33 @@ class DocumentService:
         Returns:
             Complete analysis result dictionary or None if not found
         """
-        # Try Azure Document Intelligence first
-        result = await self.azure_doc_intelligence_service.get_raw_analysis_result(
-            conversion_id
-        )
+        # Try OrganizedFileService first
+        org_service = get_organized_file_service()
+
+        # Helper to check organized storage for raw analysis
+        async def check_organized_analysis(processor):
+            try:
+                # Azure stores as raw_analysis.json, Docling might differ but let's assume raw_analysis.json standard
+                path = (
+                    org_service.get_processing_output_path(conversion_id, processor)
+                    / "raw_analysis.json"
+                )
+                if path.exists():
+                    import json
+                    import aiofiles
+
+                    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                        return json.loads(await f.read())
+            except Exception:
+                pass
+            return None
+
+        # Try Azure then Docling in organized storage
+        result = await check_organized_analysis(ProcessorType.AZURE_DOC_INTELLIGENCE)
         if result:
             return result
 
-        # Try Docling
-        result = await self.docling_service.get_raw_analysis_result(conversion_id)
+        result = await check_organized_analysis(ProcessorType.DOCLING)
         if result:
             return result
 
