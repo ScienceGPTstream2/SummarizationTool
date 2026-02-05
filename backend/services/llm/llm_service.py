@@ -70,7 +70,11 @@ class LLMService:
             print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
 
     async def _call_with_timeout_logging(
-        self, operation: str, coro, timeout_seconds: int = 120
+        self,
+        operation: str,
+        coro,
+        timeout_seconds: int = 120,
+        timeout_env_var: Optional[str] = None,
     ):
         """
         Call an async function with timeout detection and logging.
@@ -79,11 +83,21 @@ class LLMService:
             operation: Name of the operation for logging
             coro: The coroutine to call
             timeout_seconds: Timeout in seconds
+            timeout_env_var: Optional environment variable name to override timeout
 
         Returns:
             The result of the coroutine
         """
         start_time = datetime.now()
+        if timeout_env_var:
+            try:
+                timeout_seconds = int(
+                    os.environ.get(timeout_env_var, str(timeout_seconds))
+                )
+            except ValueError:
+                print(
+                    f"[LLMService] Invalid timeout override for {timeout_env_var}. Using default {timeout_seconds}s"
+                )
 
         try:
             result = await asyncio.wait_for(coro, timeout=timeout_seconds)
@@ -216,6 +230,8 @@ class LLMService:
                         temperature,
                         max_input_length,
                     ),
+                    timeout_seconds=180,
+                    timeout_env_var="LLM_TIMEOUT_LLAMA_SECONDS",
                 )
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
@@ -232,6 +248,8 @@ class LLMService:
                         temperature,
                         system_message,
                     ),
+                    timeout_seconds=360,
+                    timeout_env_var="LLM_TIMEOUT_MACBOOK_SECONDS",
                 )
                 self._record_session_metrics(session_id, "macbook", result)
                 return result
