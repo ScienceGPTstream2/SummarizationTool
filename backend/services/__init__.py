@@ -8,12 +8,12 @@ This package contains all business logic services organized by domain:
 """
 
 # Import all services for backward compatibility
-from .auth import AuthService
+from .auth import SupabaseAuthService
 from .document import DoclingService, FileService
 from .llm import LLMService, AzureLLMClient, GeminiLLMClient
 
 __all__ = [
-    "AuthService",
+    "SupabaseAuthService",
     "DoclingService",
     "FileService",
     "LLMService",

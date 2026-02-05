@@ -450,6 +450,39 @@ async def get_session_metrics(http_request: Request):
     )
 
 
+@router.post("/server/session-metrics/load", dependencies=[Depends(get_current_user)])
+async def load_session_metrics_from_db(http_request: Request):
+    """Load session metrics from database (used when restoring a session)"""
+    body = await http_request.json()
+    session_id = body.get("session_id")
+    if not session_id:
+        return JSONResponse(
+            status_code=200, content={"message": "No session id", "metrics": None}
+        )
+
+    from services.telemetry.cost_tracker import cost_tracker
+
+    # Load from database and cache in memory
+    metrics = cost_tracker.load_session_metrics_from_db(session_id)
+    if not metrics:
+        return JSONResponse(
+            status_code=200, content={"session_id": session_id, "metrics": None}
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "session_id": session_id,
+            "metrics": {
+                "total_cost": round(metrics.total_cost, 6),
+                "total_latency": round(metrics.total_latency, 3),
+                "total_calls": metrics.total_calls,
+                "calls": [],  # Individual calls not stored in DB anymore
+            },
+        },
+    )
+
+
 @router.delete("/server/session-metrics", dependencies=[Depends(get_current_user)])
 async def clear_session_metrics(http_request: Request):
     session_id = http_request.headers.get("X-Session-Id")

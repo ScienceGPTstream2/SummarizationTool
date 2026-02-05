@@ -12,6 +12,16 @@ export function getSessionId(): string {
   return newId;
 }
 
+export function resetSessionId(): string {
+  // Generate a new session ID to start fresh
+  const newId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  sessionStorage.setItem("session_id", newId);
+  return newId;
+}
+
 export function shouldAttachSessionHeader(url: string): boolean {
   if (url.startsWith("/api")) {
     return true;
