@@ -434,6 +434,18 @@ class SessionService:
                         # This can happen if the source model wasn't evaluated with this judge
             else:
                 # Regular evaluation scores - save each one
+                # Calculate per-score cost/time (distribute evenly across metrics)
+                num_scores = len(result.scores) if result.scores else 1
+                per_score_cost = (
+                    (result.evaluation_cost / num_scores)
+                    if result.evaluation_cost
+                    else None
+                )
+                per_score_time = (
+                    (result.evaluation_time / num_scores)
+                    if result.evaluation_time
+                    else None
+                )
                 for score in result.scores:
                     self.db.upsert_evaluation_result(
                         extraction_result_id=extraction_id,
@@ -443,6 +455,8 @@ class SessionService:
                         judge_model=score.judge_model,
                         human_score=result.human_score,
                         ground_truth=result.ground_truth,
+                        evaluation_cost=per_score_cost,
+                        evaluation_time=per_score_time,
                     )
         elif result.human_score is not None:
             # If no scores but we have human_score, update ALL existing evaluations for this extraction
@@ -572,9 +586,9 @@ class SessionService:
                             "score": eval_res.get("score"),
                             "reasoning": eval_res.get("reasoning"),
                             "judge_model": eval_res.get("judge_model"),
-                            "human_score": eval_res.get(
-                                "human_score"
-                            ),  # Include per-judge human_score
+                            "human_score": eval_res.get("human_score"),
+                            "evaluation_cost": eval_res.get("evaluation_cost"),
+                            "evaluation_time": eval_res.get("evaluation_time"),
                         }
                     )
                     break

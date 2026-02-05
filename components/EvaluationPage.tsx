@@ -708,6 +708,7 @@ export function EvaluationPage({
       aggregate_score: number;
       all_passed: boolean;
       evaluation_time: number;
+      evaluation_cost?: number;
     }>,
     humanScore?: number,
     documentId?: string // Add document_id for multi-file support
@@ -767,6 +768,15 @@ export function EvaluationPage({
             ground_truth: groundTruth,
             scores: scores,
             human_score: humanScore,
+            // Sum up costs and times from all evaluation results
+            evaluation_cost: evaluationResults.reduce(
+              (sum, r) => sum + (r.evaluation_cost || 0),
+              0
+            ),
+            evaluation_time: evaluationResults.reduce(
+              (sum, r) => sum + (r.evaluation_time || 0),
+              0
+            ),
           }),
         }
       );
@@ -1256,6 +1266,7 @@ export function EvaluationPage({
               aggregate_score: result.aggregate_score,
               all_passed: result.all_passed,
               evaluation_time: result.evaluation_time,
+              evaluation_cost: result.evaluation_cost,
             };
 
             // Update entity-level evaluationResults (for backwards compatibility)

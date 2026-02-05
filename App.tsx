@@ -721,12 +721,20 @@ export default function App() {
                           metrics: [],
                           aggregate_score: 0,
                           all_passed: true,
-                          evaluation_time: 0,
+                          evaluation_time: scoreItem.evaluation_time || 0,
+                          evaluation_cost: scoreItem.evaluation_cost || 0,
                           human_score: itemHumanScore,
                         };
-                      } else if (itemHumanScore != null) {
-                        // Update with per-judge human_score if available
-                        acc[key].human_score = itemHumanScore;
+                      } else {
+                        // Accumulate cost and time from each metric
+                        acc[key].evaluation_time +=
+                          scoreItem.evaluation_time || 0;
+                        acc[key].evaluation_cost +=
+                          scoreItem.evaluation_cost || 0;
+                        if (itemHumanScore != null) {
+                          // Update with per-judge human_score if available
+                          acc[key].human_score = itemHumanScore;
+                        }
                       }
 
                       acc[key].metrics.push({
@@ -749,12 +757,18 @@ export default function App() {
                         metrics: [],
                         aggregate_score: 0,
                         all_passed: true,
-                        evaluation_time: 0,
+                        evaluation_time: ev.evaluation_time || 0,
+                        evaluation_cost: ev.evaluation_cost || 0,
                         human_score: ev.human_score,
                       };
-                    } else if (ev.human_score != null) {
-                      // Update human_score from subsequent evaluations if set
-                      acc[key].human_score = ev.human_score;
+                    } else {
+                      // Accumulate cost and time
+                      acc[key].evaluation_time += ev.evaluation_time || 0;
+                      acc[key].evaluation_cost += ev.evaluation_cost || 0;
+                      if (ev.human_score != null) {
+                        // Update human_score from subsequent evaluations if set
+                        acc[key].human_score = ev.human_score;
+                      }
                     }
                     if (ev.metric && ev.score !== null) {
                       acc[key].metrics.push({
@@ -835,12 +849,20 @@ export default function App() {
                                 metrics: [],
                                 aggregate_score: 0,
                                 all_passed: true,
-                                evaluation_time: 0,
+                                evaluation_time: scoreItem.evaluation_time || 0,
+                                evaluation_cost: scoreItem.evaluation_cost || 0,
                                 human_score: itemHumanScore,
                               };
-                            } else if (itemHumanScore != null) {
-                              // Update with per-judge human_score if available
-                              judgeAcc[key].human_score = itemHumanScore;
+                            } else {
+                              // Accumulate cost and time
+                              judgeAcc[key].evaluation_time +=
+                                scoreItem.evaluation_time || 0;
+                              judgeAcc[key].evaluation_cost +=
+                                scoreItem.evaluation_cost || 0;
+                              if (itemHumanScore != null) {
+                                // Update with per-judge human_score if available
+                                judgeAcc[key].human_score = itemHumanScore;
+                              }
                             }
                             judgeAcc[key].metrics.push({
                               metric_name: scoreItem.metric,

@@ -759,28 +759,40 @@ async def generate_figure_summary(
                 detail=f"Figure {figure_id} has no associated image",
             )
 
-        # Get the full image path
-        base_path = Path(__file__).resolve().parents[2]
-        image_path = (
-            base_path
-            / "output"
-            / "azure_doc_intelligence"
-            / document_id
-            / figure["image_path"]
-        )
+        # Get the full image path using the organized file service
+        # Try new organized file structure first, then legacy paths
+        figure_filename = figure["image_path"]
+        if "/" in figure_filename:
+            # Extract just the filename if it's a path like "figures/1.1.png"
+            figure_filename = Path(figure_filename).name
 
-        if not image_path.exists():
-            # Try legacy path for backward compatibility
-            legacy_path = (
-                base_path / "output" / "docling" / document_id / figure["image_path"]
+        possible_paths = [
+            # New organized file structure
+            file_service.get_processing_output_path(
+                document_id, "azure_doc_intelligence"
             )
-            if legacy_path.exists():
-                image_path = legacy_path
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Figure image not found: {figure['image_path']}",
-                )
+            / "figures"
+            / figure_filename,
+            file_service.get_processing_output_path(document_id, "docling")
+            / "figures"
+            / figure_filename,
+        ]
+
+        image_path = None
+        for path in possible_paths:
+            if path.exists():
+                image_path = path
+                print(f"[FIGURE SUMMARY] ✅ Found image at: {path}")
+                break
+
+        if not image_path:
+            print(
+                f"[FIGURE SUMMARY] Image not found. Tried paths: {[str(p) for p in possible_paths]}"
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Figure image not found: {figure['image_path']}",
+            )
 
         # Extract parameters from request
         model_type = request.get("model_type", "gemini")
@@ -889,24 +901,13 @@ async def generate_figure_summary(
 
         # Try to update the figure metadata file with the summary
         try:
-            # Find the metadata file for this conversion
+            # Find the metadata file for this conversion using new organized file structure
             metadata_paths = [
-                base_path
-                / "output"
-                / "azure_doc_intelligence"
-                / document_id
+                file_service.get_processing_output_path(
+                    document_id, "azure_doc_intelligence"
+                )
                 / "metadata.json",
-                base_path / "output" / "docling" / document_id / "metadata.json",
-                # Legacy paths
-                base_path
-                / "markdown_output"
-                / "azure_doc_intelligence"
-                / document_id
-                / "metadata.json",
-                base_path
-                / "markdown_output"
-                / "docling"
-                / document_id
+                file_service.get_processing_output_path(document_id, "docling")
                 / "metadata.json",
             ]
 

@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS public.evaluation_results (
     ground_truth TEXT,
     evaluated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Cost and time tracking
+    evaluation_cost DECIMAL,
+    evaluation_time DECIMAL,
     
     UNIQUE(extraction_result_id, metric, judge_model)
 );

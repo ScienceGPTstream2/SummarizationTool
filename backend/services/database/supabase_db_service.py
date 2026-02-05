@@ -411,6 +411,8 @@ class SupabaseDBService:
         judge_model: Optional[str] = None,
         human_score: Optional[float] = None,
         ground_truth: Optional[str] = None,
+        evaluation_cost: Optional[float] = None,
+        evaluation_time: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Create or update an evaluation result"""
         data = {
@@ -423,6 +425,11 @@ class SupabaseDBService:
             "ground_truth": ground_truth,
             "evaluated_at": datetime.utcnow().isoformat(),
         }
+        # Only include cost/time if provided (to avoid overwriting existing values)
+        if evaluation_cost is not None:
+            data["evaluation_cost"] = evaluation_cost
+        if evaluation_time is not None:
+            data["evaluation_time"] = evaluation_time
 
         result = (
             self.client.table("evaluation_results")

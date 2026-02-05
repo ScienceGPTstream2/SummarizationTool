@@ -74,6 +74,8 @@ class EvaluationScore(BaseModel):
     reasoning: Optional[str] = None
     judge_model: Optional[str] = None
     human_score: Optional[float] = None  # Per-judge human evaluation score
+    evaluation_cost: Optional[float] = None  # Cost of this evaluation metric
+    evaluation_time: Optional[float] = None  # Time taken for this evaluation metric
 
 
 class EvaluationResult(BaseModel):
@@ -89,6 +91,8 @@ class EvaluationResult(BaseModel):
     scores: List[EvaluationScore] = Field(default_factory=list)
     human_score: Optional[float] = None
     evaluated_at: Optional[datetime] = None
+    evaluation_cost: Optional[float] = None  # Cost of the evaluation call
+    evaluation_time: Optional[float] = None  # Time taken for the evaluation
 
 
 class Session(BaseModel):
