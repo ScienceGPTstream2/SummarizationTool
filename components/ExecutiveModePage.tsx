@@ -115,7 +115,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   useEffect(() => {
     const loadModels = async () => {
       await settingsManager.refreshServerConfig();
-      const models = await settingsManager.getAvailableModelsAsync();
+      const models = await settingsManager.getAvailableModelsForExecutiveAsync();
       setAvailableModels(models);
       if (models.length > 0 && !selectedModel) {
         setSelectedModel(models[0].id);

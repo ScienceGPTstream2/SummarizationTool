@@ -214,14 +214,15 @@ export class SettingsManager {
   }
 
   // Fetch models from backend API
-  async fetchBackendModels(): Promise<ModelConfig[]> {
+  async fetchBackendModels(mode?: "executive"): Promise<ModelConfig[]> {
     try {
       const token = localStorage.getItem("token");
       if (!token) {
         return [];
       }
 
-      const response = await fetch("/api/models", {
+      const url = mode === "executive" ? "/api/models?mode=executive" : "/api/models";
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
@@ -357,6 +358,39 @@ export class SettingsManager {
       }
 
       // For other providers, default to true (backend will handle validation)
+      return true;
+    });
+  }
+
+  // Executive mode model list (uses exec-only backend filtering)
+  async getAvailableModelsForExecutiveAsync(): Promise<ModelConfig[]> {
+    let backendModels = await this.fetchBackendModels("executive");
+    let isFallback = false;
+
+    if (backendModels.length === 0) {
+      console.warn("Exec backend models empty, falling back to local defaults");
+      backendModels = allModels;
+      isFallback = true;
+    }
+
+    return backendModels.filter((model) => {
+      if (isFallback) return true;
+
+      if (model.provider && model.provider.toLowerCase().includes("azure")) {
+        return this.serverConfig.is_azure_openai_configured;
+      }
+
+      if (model.provider && model.provider.toLowerCase().includes("gemini")) {
+        return this.serverConfig.is_gemini_configured;
+      }
+
+      if (
+        model.provider &&
+        model.provider.toLowerCase().includes("anthropic")
+      ) {
+        return true;
+      }
+
       return true;
     });
   }

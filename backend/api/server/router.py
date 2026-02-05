@@ -118,7 +118,7 @@ async def get_server_config():
 
 
 @router.get("/models", dependencies=[Depends(get_current_user)])
-async def get_available_models():
+async def get_available_models(mode: str | None = None):
     """
     Return list of models configured via environment (secrets.toml)
     """
@@ -379,6 +379,27 @@ async def get_available_models():
             if macbook_models:
                 _MACBOOK_MODELS_CACHE = macbook_models
                 _MACBOOK_MODELS_CACHE_TS = now_ts
+
+        if mode == "executive":
+            try:
+                exec_policy_path = (
+                    Path(__file__).resolve().parents[2]
+                    / "config"
+                    / "macbook_exec_model_policy.json"
+                )
+                if exec_policy_path.exists():
+                    with open(exec_policy_path, "r", encoding="utf-8") as f:
+                        exec_policy = json.load(f)
+                    allow_list = exec_policy.get("allow", [])
+                    allow_list = [str(name).lower() for name in allow_list if name]
+                    if allow_list:
+                        macbook_models = [
+                            model
+                            for model in macbook_models
+                            if str(model.get("id", "")).lower() in allow_list
+                        ]
+            except Exception as exc:
+                print(f"[MacbookLLM] Failed to apply exec policy: {exc}")
 
         if macbook_models:
             for model in macbook_models:
