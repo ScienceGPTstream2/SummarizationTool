@@ -147,15 +147,6 @@ export function EntityExtractionPage({
   documentData,
   setDocumentData,
 }: EntityExtractionPageProps) {
-  const sessionIdRef = useRef<string | null>(documentData.sessionId || null);
-
-  // Ensure ref stays in sync if documentData updates
-  useEffect(() => {
-    if (documentData.sessionId) {
-      sessionIdRef.current = documentData.sessionId;
-    }
-  }, [documentData.sessionId]);
-
   const [files, setFiles] = useState<any[]>(() => {
     if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
       return documentData.uploadedFiles;
@@ -178,36 +169,9 @@ export function EntityExtractionPage({
     ];
   });
 
-  // Track the last synced session
-  const lastSyncedSessionRef = useRef<string | null>(null);
-
   const [selectedFileId, setSelectedFileId] = useState<string>(
     files.length > 0 ? files[0].fileId : ""
   );
-
-  // Sync files when session changes (e.g., after session restore)
-  useEffect(() => {
-    if (
-      !documentData.sessionId ||
-      !documentData.uploadedFiles ||
-      documentData.uploadedFiles.length === 0
-    ) {
-      return;
-    }
-
-    if (lastSyncedSessionRef.current !== documentData.sessionId) {
-      console.log(
-        "[EntityExtractionPage] Session changed, syncing files:",
-        documentData.sessionId
-      );
-      setFiles(documentData.uploadedFiles);
-      lastSyncedSessionRef.current = documentData.sessionId;
-
-      if (documentData.uploadedFiles.length > 0) {
-        setSelectedFileId(documentData.uploadedFiles[0].fileId);
-      }
-    }
-  }, [documentData.sessionId]);
 
   const currentFile =
     files.find((f) => f.fileId === selectedFileId) || files[0];
@@ -260,160 +224,6 @@ export function EntityExtractionPage({
 
   // Batch processing state
   const [isBatchRunning, setIsBatchRunning] = useState(false);
-
-  // Helper to create session
-  const createSession = async () => {
-    // If we already have a session ID from App.tsx or previous creation, return it
-    if (sessionIdRef.current) return sessionIdRef.current;
-
-    try {
-      const user = await import("../utils/authUtils").then((m) =>
-        m.getCurrentUser()
-      );
-      if (!user) return null;
-
-      const token = await import("../utils/authUtils").then((m) =>
-        m.getValidToken()
-      );
-      if (!token) return null;
-
-      const response = await fetch("/api/sessions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          user_id: user.id,
-          name: `${currentFile.file?.name || "Extraction"} Session`,
-          configuration: {
-            study_type: selectedStudyType,
-            selected_models: availableModels
-              .filter(
-                (m) =>
-                  currentFile.selectedModels?.includes(m.id) ||
-                  m.id === selectedModel
-              )
-              .map((m) => m.id),
-            entities: entities.map((e) => ({
-              name: e.name,
-              prompt: e.prompt,
-              system_prompt: e.systemPrompt,
-            })),
-            summary_prompt: summaryPrompt,
-            temperature: 0.0,
-          },
-          documents: [
-            {
-              file_hash: currentFile.fileId, // Using fileId as hash for now based on file_info structure
-              filename: currentFile.file?.name || "Document",
-            },
-          ],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        sessionIdRef.current = data.session_id;
-        return data.session_id;
-      }
-    } catch (error) {
-      console.error("Error creating session:", error);
-    }
-    return null;
-  };
-
-  // Helper to save result
-  const saveExtractionResult = async (
-    sessionId: string,
-    entity: Entity,
-    fileId?: string
-  ) => {
-    try {
-      const user = await import("../utils/authUtils").then((m) =>
-        m.getCurrentUser()
-      );
-      if (!user) return;
-
-      const token = await import("../utils/authUtils").then((m) =>
-        m.getValidToken()
-      );
-      if (!token) return;
-
-      // Find which model produced the result
-      // simplified: assume first selected model or 'selectedModel' if singular
-      // For multi-model, we might need to iterate extractionsByModel
-
-      // If we have extractionsByModel, save each
-      if (entity.extractionsByModel) {
-        for (const [modelId, data] of Object.entries(
-          entity.extractionsByModel
-        )) {
-          const modelData = data as {
-            extracted?: string;
-            references?: any[];
-            promptTokens?: number;
-            completionTokens?: number;
-            duration?: number;
-          };
-          await fetch(
-            `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                entity_name: entity.name,
-                model_id: modelId,
-                extracted_text: modelData.extracted,
-                references: modelData.references || [],
-                status: "completed",
-                extracted_at: new Date().toISOString(),
-                file_hash: fileId,
-                // Include token usage data
-                prompt_tokens: modelData.promptTokens,
-                completion_tokens: modelData.completionTokens,
-                duration_ms: modelData.duration
-                  ? Math.round(modelData.duration * 1000)
-                  : undefined,
-              }),
-            }
-          );
-        }
-      } else {
-        // Legacy/Single fallback
-        await fetch(
-          `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              entity_name: entity.name,
-              model_id: selectedModel, // Best guess
-              extracted_text: entity.extracted,
-              references: entity.references || [],
-              status: "completed",
-              extracted_at: new Date().toISOString(),
-              file_hash: fileId,
-              // Include token usage data
-              prompt_tokens: entity.promptTokens,
-              completion_tokens: entity.completionTokens,
-              duration_ms: entity.duration
-                ? Math.round(entity.duration * 1000)
-                : undefined,
-            }),
-          }
-        );
-      }
-    } catch (error) {
-      console.error("Error saving extraction result:", error);
-    }
-  };
 
   // Sync state when selected file changes
   useEffect(() => {
@@ -527,8 +337,6 @@ export function EntityExtractionPage({
 
   // Parallel Batch Processing
   const startBatchProcessing = async () => {
-    // Ensure session exists
-    await createSession();
     setIsBatchRunning(true);
     const pendingFiles = files.filter((f) => f.studyType && !f.finalSummary);
 
@@ -626,9 +434,7 @@ export function EntityExtractionPage({
             entity,
             conversionId,
             modelsToUse,
-            file.processingResult?.processorUsed || documentData.processorUsed,
-            undefined, // signal
-            sessionIdRef.current || undefined
+            file.processingResult?.processorUsed || documentData.processorUsed
           );
 
         // Determine primary result for display/storage
@@ -647,15 +453,6 @@ export function EntityExtractionPage({
         };
 
         updatedEntities[i] = updatedEntity;
-
-        // Save result to session if we have one
-        if (sessionIdRef.current) {
-          await saveExtractionResult(
-            sessionIdRef.current,
-            updatedEntity,
-            file.fileId
-          );
-        }
 
         // Update files state incrementally to show progress
         setFiles((prev) =>
@@ -701,8 +498,6 @@ export function EntityExtractionPage({
           model_id: primaryModelObj?.id,
           deployment: primaryModelObj?.deployment,
           api_version: primaryModelObj?.api_version,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: file.fileId, // CRITICAL: Include file_hash for multi-document sessions
         }),
       });
 
@@ -863,143 +658,8 @@ export function EntityExtractionPage({
       } = loadStudyTypeTemplate(selectedStudyType);
       setEntities(templateEntities);
       setSummaryPrompt(templateSummaryPrompt);
-
-      // Sync to backend if session active to ensure configuration is saved
-      if (sessionIdRef.current) {
-        updateSessionConfiguration(
-          sessionIdRef.current,
-          templateEntities,
-          undefined,
-          templateSummaryPrompt,
-          "" // Default paragraph system prompt
-        );
-      }
     }
   }, [selectedStudyType, entities.length, currentFile]);
-
-  // Auto-save prompts and entities when they change (debounced)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (sessionIdRef.current) {
-        updateSessionConfiguration(
-          sessionIdRef.current,
-          entities,
-          undefined,
-          summaryPrompt,
-          paragraphSystemPrompt
-        );
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [summaryPrompt, paragraphSystemPrompt, entities]);
-
-  const updateSessionConfiguration = async (
-    sessionId: string,
-    currentEntities: Entity[],
-    overrideStudyType?: string,
-    currentSummaryPrompt?: string,
-    currentParagraphSystemPrompt?: string,
-    status?: string
-  ) => {
-    try {
-      const user = await import("../utils/authUtils").then((m) =>
-        m.getCurrentUser()
-      );
-      const token = await import("../utils/authUtils").then((m) =>
-        m.getValidToken()
-      );
-      if (!user || !token) return;
-
-      // Use override, or selectedStudyType, or fallback to currentFile's studyType
-      const studyTypeToSave =
-        overrideStudyType !== undefined
-          ? overrideStudyType
-          : selectedStudyType || currentFile?.studyType || "";
-
-      await fetch(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          user_id: user.id,
-          configuration: {
-            study_type: studyTypeToSave,
-            selected_models:
-              availableModels.length > 0
-                ? availableModels
-                    .filter(
-                      (m) =>
-                        currentFile.selectedModels?.includes(m.id) ||
-                        m.id === selectedModel
-                    )
-                    .map((m) => m.id)
-                : (currentFile.selectedModels || [selectedModel]).filter(
-                    Boolean
-                  ),
-            entities: currentEntities.map((e) => ({
-              name: e.name,
-              prompt: e.prompt,
-              system_prompt: e.systemPrompt,
-            })),
-            summary_prompt:
-              currentSummaryPrompt !== undefined
-                ? currentSummaryPrompt
-                : summaryPrompt,
-            paragraph_system_prompt:
-              currentParagraphSystemPrompt !== undefined
-                ? currentParagraphSystemPrompt
-                : paragraphSystemPrompt,
-            temperature: 0.0,
-            // Keep per-file config in sync
-            files_config: {
-              ...(documentData.uploadedFiles || []).reduce(
-                (acc: any, f: any) => {
-                  if (f.fileId === selectedFileId) {
-                    acc[f.fileId] = {
-                      study_type: studyTypeToSave,
-                      entities: currentEntities.map((e) => ({
-                        name: e.name,
-                        prompt: e.prompt,
-                        system_prompt: e.systemPrompt,
-                      })),
-                      summary_prompt:
-                        currentSummaryPrompt !== undefined
-                          ? currentSummaryPrompt
-                          : summaryPrompt,
-                      paragraph_system_prompt:
-                        currentParagraphSystemPrompt !== undefined
-                          ? currentParagraphSystemPrompt
-                          : paragraphSystemPrompt,
-                    };
-                  } else if (f.entities) {
-                    // Preserve existing if available
-                    acc[f.fileId] = {
-                      study_type: f.studyType,
-                      entities: f.entities.map((e: any) => ({
-                        name: e.name,
-                        prompt: e.prompt,
-                        system_prompt: e.systemPrompt,
-                      })),
-                      summary_prompt: f.summaryPrompt,
-                      paragraph_system_prompt: f.paragraphSystemPrompt,
-                    };
-                  }
-                  return acc;
-                },
-                {}
-              ),
-            },
-          },
-          status: status,
-        }),
-      });
-    } catch (error) {
-      console.error("Failed to sync session config:", error);
-    }
-  };
 
   const handleStudyTypeChange = (value: string) => {
     setSelectedStudyType(value);
@@ -1013,58 +673,14 @@ export function EntityExtractionPage({
     setExtractingEntities(new Set());
     setCompletedEntities(new Set());
     setCurrentEntityIndex(0);
-
-    // Update files state to persist changes locally when switching files
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.fileId === selectedFileId
-          ? {
-              ...f,
-              studyType: value,
-              entities: templateEntities,
-              summaryPrompt: templateSummaryPrompt,
-            }
-          : f
-      )
-    );
-
-    // Sync with backend if session active
-    if (sessionIdRef.current) {
-      updateSessionConfiguration(sessionIdRef.current, templateEntities, value);
-    }
   };
 
   const addEntity = () => {
-    const updated = [...entities, { name: "", prompt: "" }];
-    setEntities(updated);
-
-    // Update files state
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.fileId === selectedFileId ? { ...f, entities: updated } : f
-      )
-    );
-
-    if (sessionIdRef.current) {
-      updateSessionConfiguration(sessionIdRef.current, updated);
-    }
+    setEntities([...entities, { name: "", prompt: "" }]);
   };
 
   const removeEntity = (index: number) => {
-    const updated = entities.filter((_, i) => i !== index);
-    setEntities(updated);
-
-    // Update files state
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.fileId === selectedFileId ? { ...f, entities: updated } : f
-      )
-    );
-
-    // Sync with backend if session active
-    if (sessionIdRef.current) {
-      updateSessionConfiguration(sessionIdRef.current, updated);
-    }
+    setEntities(entities.filter((_, i) => i !== index));
   };
 
   const handleReferenceFocus = (entityIdx: number, refIdx: number) => {
@@ -1106,8 +722,7 @@ export function EntityExtractionPage({
       apiVersion?: string;
     },
     processorUsed?: string,
-    signal?: AbortSignal,
-    sessionId?: string
+    signal?: AbortSignal
   ) => {
     const resp = await authenticatedFetch("/api/extract", {
       method: "POST",
@@ -1130,7 +745,6 @@ export function EntityExtractionPage({
         max_tokens: 4096,
         temperature: 0.0,
         processor_used: processorUsed,
-        session_id: sessionId,
       }),
       signal,
     });
@@ -1171,8 +785,7 @@ export function EntityExtractionPage({
     conversionId: string,
     selectedModelIds: string[],
     processorUsed?: string,
-    signal?: AbortSignal,
-    sessionId?: string
+    signal?: AbortSignal
   ) => {
     // Run ALL selected models concurrently
     const modelPromises = selectedModelIds.map(async (modelId) => {
@@ -1213,8 +826,7 @@ export function EntityExtractionPage({
           conversionId,
           modelConfig,
           processorUsed,
-          signal,
-          sessionId
+          signal
         );
         return { modelId, result };
       } catch (error: any) {
@@ -1276,8 +888,7 @@ export function EntityExtractionPage({
           selectedModelIds,
           currentFile.processingResult?.processorUsed ||
             documentData.processorUsed,
-          signal,
-          sessionIdRef.current || undefined
+          signal
         );
 
       // Use the currently selected model's result as the main display
@@ -1469,21 +1080,6 @@ export function EntityExtractionPage({
         modelsToUse
       );
 
-      // Save single entity result
-      if (sessionIdRef.current) {
-        saveExtractionResult(
-          sessionIdRef.current,
-          updatedEntity,
-          currentFile.fileId
-        );
-      } else {
-        // Try create session lazily
-        const newId = await createSession();
-        if (newId) {
-          saveExtractionResult(newId, updatedEntity, currentFile.fileId);
-        }
-      }
-
       // Update parent state with the new entity
       // Update parent state with the new entity
       // (removed legacy setDocumentData call)
@@ -1559,9 +1155,6 @@ export function EntityExtractionPage({
           model_id: modelObj?.id,
           deployment: modelObj?.deployment,
           api_version: modelObj?.api_version,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
-          status: "completed", // Set session as completed when summary is done
         }),
       });
 
@@ -1572,24 +1165,11 @@ export function EntityExtractionPage({
       const summaryData = await summaryResp.json();
       const finalSummary = summaryData.summary;
 
-      // Persistence: Save specific CONFIGURATION (prompts) to DB
-      // The summary text itself is now saved by the backend during generation
-      if (sessionIdRef.current) {
-        await updateSessionConfiguration(
-          sessionIdRef.current,
-          entities,
-          undefined,
-          summaryPrompt,
-          paragraphSystemPrompt,
-          "completed" // Set status to completed
-        );
-      }
-
       // Update state
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? { ...f, finalSummary, summaryPrompt }
             : f
         )
       );
@@ -1597,7 +1177,7 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? { ...f, finalSummary, summaryPrompt }
             : f
         ),
       }));
@@ -1675,12 +1255,6 @@ export function EntityExtractionPage({
       const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
       const deploymentToUse = modelObj?.deployment; // For Azure models
       const apiVersionToUse = modelObj?.api_version; // For Azure models
-
-      // Create session if not exists
-      if (!sessionIdRef.current) {
-        await createSession();
-      }
-      const activeSessionId = sessionIdRef.current;
 
       // Pre-fetch the PDF to avoid backend bottleneck during entity extraction
       try {
@@ -1778,11 +1352,6 @@ export function EntityExtractionPage({
               modelsToUse
             );
             updatedEntities[i] = updatedEntity;
-
-            // Save result to session if we have one
-            if (activeSessionId) {
-              saveExtractionResult(activeSessionId, updatedEntity);
-            }
           } catch (err: any) {
             if (err.name === "AbortError") throw err;
             // Continue to next entity if one fails (unless aborted)
@@ -1825,8 +1394,6 @@ export function EntityExtractionPage({
           model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
         }),
         signal,
       });
@@ -2618,9 +2185,7 @@ export function EntityExtractionPage({
                                       </div>
                                     </div>
 
-                                    {(entity.duration != null ||
-                                      entity.promptTokens != null ||
-                                      entity.completionTokens != null) && (
+                                    {entity.duration && (
                                       <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm flex flex-wrap gap-6">
                                         <div className="flex items-center gap-2">
                                           <Hash className="h-4 w-4 text-blue-600" />
@@ -2642,10 +2207,7 @@ export function EntityExtractionPage({
                                               Time
                                             </Label>
                                             <div className="text-base font-semibold text-gray-900">
-                                              {entity.duration != null
-                                                ? entity.duration.toFixed(2)
-                                                : "-"}
-                                              s
+                                              {entity.duration.toFixed(2)}s
                                             </div>
                                           </div>
                                         </div>

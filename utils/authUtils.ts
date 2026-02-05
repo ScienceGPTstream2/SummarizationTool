@@ -1,141 +1,87 @@
 /**
- * Authentication Utilities (Supabase)
+ * Authentication Utilities
  *
- * Provides centralized authentication management using Supabase.
- * Replaces the previous custom JWT-based authentication.
+ * Provides centralized token management and automatic handling of expired tokens
  */
-
-import { supabase, Session } from "../lib/supabase";
 
 /**
- * Get the current session
+ * Decode JWT token without verification (client-side only)
  */
-export async function getSession(): Promise<Session | null> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session;
-}
-
-/**
- * Get valid access token from current session
- * Will attempt to refresh the session if no token is available
- */
-export async function getValidToken(): Promise<string | null> {
-  let session = await getSession();
-
-  // If no session or token is missing, try to refresh
-  if (!session?.access_token) {
-    console.log("[Auth] No access token, attempting session refresh...");
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) {
-      console.warn("[Auth] Session refresh failed:", error.message);
-      return null;
-    }
-    session = data.session;
-  }
-
-  return session?.access_token ?? null;
-}
-
-/**
- * Synchronous version - gets token from memory/storage if available
- * Use this for initial render checks, but prefer async version for API calls
- */
-export function getValidTokenSync(): string | null {
-  // Supabase stores session in localStorage with key format: sb-{project-ref}-auth-token
-  const keys = Object.keys(localStorage);
-  const supabaseKey = keys.find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-
-  if (!supabaseKey) return null;
-
+function decodeJWT(token: string): any {
   try {
-    const stored = localStorage.getItem(supabaseKey);
-    if (!stored) return null;
-
-    const parsed = JSON.parse(stored);
-    const accessToken = parsed?.access_token;
-    const expiresAt = parsed?.expires_at;
-
-    if (!accessToken) return null;
-
-    // Check if expired
-    if (expiresAt && Date.now() / 1000 > expiresAt) {
-      return null;
-    }
-
-    return accessToken;
-  } catch {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    console.error("Failed to decode JWT:", error);
     return null;
   }
 }
 
 /**
- * Check if token/session is expired
+ * Check if token is expired
  */
-export async function isTokenExpired(): Promise<boolean> {
-  const session = await getSession();
-  if (!session) return true;
+export function isTokenExpired(token: string): boolean {
+  const decoded = decodeJWT(token);
+  if (!decoded || !decoded.exp) {
+    return true; // Invalid token or no expiration = treat as expired
+  }
 
-  const expiresAt = session.expires_at;
-  if (!expiresAt) return true;
-
-  // expires_at is in seconds
-  return Date.now() / 1000 > expiresAt;
+  const now = Math.floor(Date.now() / 1000); // Current time in seconds
+  return decoded.exp < now;
 }
 
 /**
- * Sign out the current user
+ * Get valid token from localStorage, or null if expired/invalid
  */
-export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
+export function getValidToken(): string | null {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    return null;
+  }
+
+  if (isTokenExpired(token)) {
+    console.warn("Token has expired, clearing from storage");
+    localStorage.removeItem("token");
+    return null;
+  }
+
+  return token;
 }
 
 /**
- * Clear session and reload page (for error recovery)
+ * Clear token and trigger re-login
  */
-export function clearTokenAndReload(): void {
-  supabase.auth.signOut().then(() => {
-    window.location.reload();
-  });
-}
-
-/**
- * Sign in with GitHub OAuth
- */
-export async function signInWithGitHub(): Promise<{ error: Error | null }> {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: "github",
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      queryParams: {
-        prompt: "select_account",
-      },
-    },
-  });
-  return { error };
+export function clearTokenAndReload() {
+  localStorage.removeItem("token");
+  // Reload the page to trigger the login screen
+  window.location.reload();
 }
 
 /**
  * Enhanced fetch wrapper that handles authentication automatically
  *
- * - Gets token from Supabase session
+ * - Checks token expiration before making request
  * - Automatically handles 401 responses
- * - Clears expired sessions and forces re-login
+ * - Clears expired tokens and forces re-login
  */
 export async function authenticatedFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  // Get token from session
-  const token = await getValidToken();
+  // Check if we have a valid token
+  const token = getValidToken();
 
   if (!token) {
-    // No valid session, force re-login
+    // Token is expired or missing, force re-login
     clearTokenAndReload();
-    throw new Error("No valid session");
+    throw new Error("Token expired or missing");
   }
 
   // Add authorization header
@@ -161,7 +107,7 @@ export async function authenticatedFetch(
 
   // Handle 401 Unauthorized (expired or invalid token)
   if (response.status === 401) {
-    console.warn("Received 401 Unauthorized, session is invalid or expired");
+    console.warn("Received 401 Unauthorized, token is invalid or expired");
     clearTokenAndReload();
     throw new Error("Authentication failed");
   }
@@ -170,71 +116,27 @@ export async function authenticatedFetch(
 }
 
 /**
- * Record a login event in the history
+ * Check if user is authenticated (has valid token)
  */
-export async function recordLoginEvent(): Promise<void> {
-  try {
-    if (import.meta.env.VITE_API_URL) {
-      const apiUrl = import.meta.env.VITE_API_URL;
-      await authenticatedFetch(`${apiUrl}/auth/history`, {
-        method: "POST",
-      });
-      console.log("Login event recorded successfully");
-    } else {
-      console.warn("VITE_API_URL not defined, skipping login recording");
-    }
-  } catch (error) {
-    // Silently fail - analytics should not block user flow
-    console.error("Failed to record login event:", error);
+export function isAuthenticated(): boolean {
+  return getValidToken() !== null;
+}
+
+/**
+ * Get time until token expires (in seconds), or null if no valid token
+ */
+export function getTokenTimeToExpiry(): number | null {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    return null;
   }
-}
 
-/**
- * Check if user is authenticated (has valid session)
- */
-export async function isAuthenticated(): Promise<boolean> {
-  const session = await getSession();
-  return session !== null;
-}
-
-/**
- * Synchronous version for initial render checks
- */
-export function isAuthenticatedSync(): boolean {
-  return getValidTokenSync() !== null;
-}
-
-/**
- * Get time until session expires (in seconds), or null if no valid session
- */
-export async function getTokenTimeToExpiry(): Promise<number | null> {
-  const session = await getSession();
-  if (!session?.expires_at) return null;
+  const decoded = decodeJWT(token);
+  if (!decoded || !decoded.exp) {
+    return null;
+  }
 
   const now = Math.floor(Date.now() / 1000);
-  const timeLeft = session.expires_at - now;
+  const timeLeft = decoded.exp - now;
   return timeLeft > 0 ? timeLeft : 0;
-}
-
-/**
- * Get current user info from session
- */
-export async function getCurrentUser(): Promise<{
-  id: string;
-  email: string | undefined;
-  name: string | undefined;
-  avatar: string | undefined;
-} | null> {
-  const session = await getSession();
-  if (!session?.user) return null;
-
-  const user = session.user;
-  const metadata = user.user_metadata || {};
-
-  return {
-    id: user.id,
-    email: user.email,
-    name: metadata.full_name || metadata.name || metadata.user_name,
-    avatar: metadata.avatar_url,
-  };
 }

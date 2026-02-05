@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from "react";
-import { getValidToken } from "../utils/authUtils";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Checkbox } from "./ui/checkbox";
@@ -293,7 +292,7 @@ function EntityPDFViewerBetaComponent({
       }
 
       try {
-        const token = await getValidToken();
+        const token = localStorage.getItem("token");
         const response = await fetch(
           `/api/documents/${conversionId}/analysis`,
           {
@@ -381,7 +380,7 @@ function EntityPDFViewerBetaComponent({
           let loadingTaskPromise = pdfLoadingPromiseCache.get(fileId);
 
           if (!loadingTaskPromise) {
-            const token = await getValidToken();
+            const token = localStorage.getItem("token");
             const loadingTask = pdfjsLib.getDocument({
               url: `/api/files/${fileId}`,
               httpHeaders: { Authorization: `Bearer ${token}` },

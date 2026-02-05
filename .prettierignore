@@ -1,7 +1,3 @@
-# Supabase
-supabase-docker/
-supabase-docker
-
 # Dependencies
 node_modules
 package-lock.json
@@ -30,3 +26,4 @@ Thumbs.db
 coverage
 .env
 *.local
+

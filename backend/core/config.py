@@ -144,18 +144,16 @@ def load_config():
                         f"✅ Google Cloud credentials loaded from: {service_account_path.name}"
                     )
 
-                # Supabase configuration (for authentication)
-                supabase_cfg = cfg.get("supabase", {}) or {}
-                supabase_url = supabase_cfg.get("url")
-                supabase_jwt_secret = supabase_cfg.get("jwt_secret")
-                supabase_anon_key = supabase_cfg.get("anon_key")
-                if supabase_url:
-                    os.environ.setdefault("SUPABASE_URL", supabase_url)
-                if supabase_jwt_secret:
-                    os.environ.setdefault("SUPABASE_JWT_SECRET", supabase_jwt_secret)
-                    print("✅ Supabase JWT secret loaded")
-                if supabase_anon_key:
-                    os.environ.setdefault("SUPABASE_ANON_KEY", supabase_anon_key)
+                # Security configuration (JWT)
+                security_cfg = cfg.get("security", {}) or {}
+                jwt_secret = security_cfg.get("jwt_secret")
+                jwt_expiration_hours = security_cfg.get("jwt_expiration_hours")
+                if jwt_secret:
+                    os.environ.setdefault("JWT_SECRET", jwt_secret)
+                if jwt_expiration_hours:
+                    os.environ.setdefault(
+                        "JWT_EXPIRATION_HOURS", str(jwt_expiration_hours)
+                    )
 
     except Exception:
         pass

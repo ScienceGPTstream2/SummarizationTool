@@ -16,7 +16,6 @@ import {
 import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore - Vite handles ?url imports
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { getValidToken } from "../utils/authUtils";
 
 interface PDFBoundingBoxViewerProps {
   fileId: string;
@@ -189,7 +188,7 @@ export function PDFBoundingBoxViewer({
   useEffect(() => {
     const fetchPDF = async () => {
       try {
-        const token = await getValidToken();
+        const token = localStorage.getItem("token");
         const response = await fetch(`/api/files/${fileId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -235,7 +234,7 @@ export function PDFBoundingBoxViewer({
       }
 
       try {
-        const token = await getValidToken();
+        const token = localStorage.getItem("token");
         const response = await fetch(
           `/api/documents/${conversionId}/analysis`,
           {

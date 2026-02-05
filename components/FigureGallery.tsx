@@ -34,7 +34,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { getValidToken, authenticatedFetch } from "../utils/authUtils";
+import { authenticatedFetch } from "../utils/authUtils";
 
 // Component to lazy load images with authentication
 function FigureImage({
@@ -175,10 +175,6 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
     const filename = imagePath.split("/").pop();
     const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-    const token = await getValidToken();
-    if (!token) {
-      throw new Error("No authentication token found");
-    }
     const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
 
     console.log(`[FigureGallery] Fetching figure:`, {

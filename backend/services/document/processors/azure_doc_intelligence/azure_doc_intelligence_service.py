@@ -131,43 +131,20 @@ class AzureDocIntelligenceService:
         return result, result_id
 
     async def convert_document_to_markdown(
-        self,
-        source: str,
-        source_type: str = "file",
-        extract_figures: bool = True,
-        output_dir: Optional[Path] = None,
+        self, source: str, source_type: str = "file", extract_figures: bool = True
     ) -> Dict[str, Any]:
         """
         Convert document to markdown using Azure Document Intelligence (Non-blocking)
-
-        Args:
-            source: File path or URL to the document
-            source_type: Type of source ("file" or "url")
-            extract_figures: Whether to extract figures
-            output_dir: Optional output directory. If provided, saves directly here.
-                        If None, uses legacy UUID-based path in output/azure_doc_intelligence/
         """
         return await asyncio.to_thread(
-            self._convert_document_sync,
-            source,
-            source_type,
-            extract_figures,
-            output_dir,
+            self._convert_document_sync, source, source_type, extract_figures
         )
 
     def _convert_document_sync(
-        self,
-        source: str,
-        source_type: str = "file",
-        extract_figures: bool = True,
-        output_dir: Optional[Path] = None,
+        self, source: str, source_type: str = "file", extract_figures: bool = True
     ) -> Dict[str, Any]:
         """
         Synchronous implementation of document conversion
-
-        Args:
-            output_dir: If provided, save output directly to this directory.
-                        If None, uses legacy UUID-based path.
         """
         if not self.client:
             return {
@@ -180,14 +157,9 @@ class AzureDocIntelligenceService:
         start_time = datetime.now()
 
         try:
-            # Use provided output_dir or fall back to legacy UUID-based path
-            if output_dir:
-                conversion_dir = output_dir
-                conversion_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                # Legacy: output/azure_doc_intelligence/{conversion_id}/
-                conversion_dir = self.output_base_dir / conversion_id
-                conversion_dir.mkdir(parents=True, exist_ok=True)
+            # Create conversion-specific directory: output/azure_doc_intelligence/{conversion_id}/
+            conversion_dir = self.output_base_dir / conversion_id
+            conversion_dir.mkdir(parents=True, exist_ok=True)
 
             # Define all file paths within the conversion directory
             log_path = conversion_dir / "conversion.log"

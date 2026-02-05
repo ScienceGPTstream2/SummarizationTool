@@ -37,7 +37,7 @@ interface SessionMetricsData {
 
 export function SessionMetrics() {
   const [metrics, setMetrics] = useState<SessionMetricsData | null>(null);
-  const [_loading, setLoading] = useState(false); // Used internally for fetch state
+  const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   const summaries = useMemo(() => {
@@ -156,14 +156,9 @@ export function SessionMetrics() {
     }
   };
 
-  // Always show the metrics widget, even when there are no calls yet
-  // This provides a consistent UI and shows $0.00 until calls are made
-  const displayMetrics = metrics || {
-    total_cost: 0,
-    total_latency: 0,
-    total_calls: 0,
-    calls: [],
-  };
+  if (!metrics && !loading) {
+    return null;
+  }
 
   return (
     <Dialog>
@@ -172,14 +167,15 @@ export function SessionMetrics() {
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Badge variant="secondary">Session Metrics</Badge>
             <span className="text-muted-foreground">
-              Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
+              Cost:{" "}
+              <strong>${metrics?.total_cost.toFixed(4) ?? "0.0000"}</strong>
             </span>
             <span className="text-muted-foreground">
               Latency:{" "}
-              <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
+              <strong>{metrics?.total_latency.toFixed(2) ?? "0.00"}s</strong>
             </span>
             <span className="text-muted-foreground">
-              Calls: <strong>{displayMetrics.total_calls}</strong>
+              Calls: <strong>{metrics?.total_calls ?? 0}</strong>
             </span>
             <span className="text-xs text-muted-foreground">
               Click for details
