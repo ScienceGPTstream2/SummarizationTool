@@ -13,6 +13,7 @@ class Entity(BaseModel):
 
 class ExtractRequest(BaseModel):
     conversion_id: str
+    session_id: Optional[str] = None  # Added for history persistence
     deployment: Optional[str] = None
     entities: List[Entity]
     api_version: Optional[str] = None

@@ -216,7 +216,9 @@ export class SettingsManager {
   // Fetch models from backend API
   async fetchBackendModels(): Promise<ModelConfig[]> {
     try {
-      const token = localStorage.getItem("token");
+      // Import getValidToken to get the proper Supabase access token
+      const { getValidToken } = await import("../utils/authUtils");
+      const token = await getValidToken();
       if (!token) {
         return [];
       }
@@ -268,7 +270,9 @@ export class SettingsManager {
 
   private async loadServerConfig() {
     try {
-      const token = localStorage.getItem("token");
+      // Import getValidToken to get the proper Supabase access token
+      const { getValidToken } = await import("../utils/authUtils");
+      const token = await getValidToken();
       if (!token) {
         // No token available, skip loading server config
         return;
