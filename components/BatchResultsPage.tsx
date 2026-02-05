@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Fuse from "fuse.js";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -57,10 +57,8 @@ import {
 // Result row type matching Excel export structure
 export interface ResultRow {
   id: string;
-  fileId: string; // Document/file ID for per-document tracking
   studyName: string;
   llmSource: string;
-  sourceModelRaw: string; // Raw model ID for API calls
   ingestion: string;
   systemPrompt: string;
   promptTemplate: string;
@@ -68,7 +66,6 @@ export interface ResultRow {
   actualOutput: string;
   groundTruth: string;
   judge: string;
-  judgeRaw: string; // Raw judge model ID for API calls
   correctness: number | null;
   completeness: number | null;
   relevance: number | null;
@@ -141,13 +138,8 @@ export function transformToRows(documentData: any): ResultRow[] {
 
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
-    const fileId = fileItem.fileId || "";
-    // Check multiple places for processorUsed
     const ingestionTool =
-      fileItem.processorUsed ||
-      fileItem.processingResult?.processorUsed ||
-      documentData.processorUsed ||
-      "";
+      fileItem.processorUsed || documentData.processorUsed || "";
     const entities = fileItem.entities || [];
 
     for (const entity of entities) {
@@ -186,19 +178,11 @@ export function transformToRows(documentData: any): ResultRow[] {
         const actualOutput = extractionData.extracted || "";
         const evalResults = extractionData.evaluationResults || [];
 
-        // Human score can be at extraction level or inside each evaluation result
-        const extractionHumanScore =
-          extractionData.humanScore ?? extractionData.human_score ?? null;
-
         if (evalResults.length === 0) {
-          // For rows without evaluation, show extraction cost if available
-          const extractionCost = extractionData.cost || null;
           rows.push({
             id: `row-${idCounter++}`,
-            fileId: fileId,
             studyName: fileName,
             llmSource: getDisplayModelName(sourceModel),
-            sourceModelRaw: sourceModel,
             ingestion: ingestionTool,
             systemPrompt: systemPrompt,
             promptTemplate: promptTemplate,
@@ -206,33 +190,19 @@ export function transformToRows(documentData: any): ResultRow[] {
             actualOutput: actualOutput,
             groundTruth: groundTruth,
             judge: "",
-            judgeRaw: "",
             correctness: null,
             completeness: null,
             relevance: null,
             safety: null,
-            humanEval:
-              extractionHumanScore !== null
-                ? typeof extractionHumanScore === "number"
-                  ? Math.round(extractionHumanScore * 100)
-                  : extractionHumanScore
-                : null,
-            cost: formatCost(extractionCost),
+            humanEval: null,
+            cost: "",
           });
         } else {
           for (const result of evalResults) {
-            // Read human_score from evaluation result first, fallback to extraction level
-            const humanScore =
-              result.human_score ??
-              result.humanScore ??
-              extractionHumanScore ??
-              null;
             rows.push({
               id: `row-${idCounter++}`,
-              fileId: fileId,
               studyName: fileName,
               llmSource: getDisplayModelName(sourceModel),
-              sourceModelRaw: sourceModel,
               ingestion: ingestionTool,
               systemPrompt: systemPrompt,
               promptTemplate: promptTemplate,
@@ -240,17 +210,11 @@ export function transformToRows(documentData: any): ResultRow[] {
               actualOutput: actualOutput,
               groundTruth: groundTruth,
               judge: getDisplayModelName(result.model || "Unknown Judge"),
-              judgeRaw: result.model || "",
               correctness: getMetricScore(result, "correctness"),
               completeness: getMetricScore(result, "completeness"),
               relevance: getMetricScore(result, "relevance"),
               safety: getMetricScore(result, "safety"),
-              humanEval:
-                humanScore !== null
-                  ? typeof humanScore === "number"
-                    ? Math.round(humanScore * 100)
-                    : humanScore
-                  : null,
+              humanEval: null,
               cost: formatCost(result.evaluation_cost),
             });
           }
@@ -296,38 +260,16 @@ type SortDirection = "asc" | "desc" | null;
 interface BatchResultsPageProps {
   documentData: any;
   onBack?: () => void;
-  onSaveHumanScore?: (params: {
-    fileId: string;
-    entityName: string;
-    sourceModel: string;
-    judgeModel: string;
-    humanScore: number | null;
-    groundTruth: string;
-  }) => Promise<void>;
 }
 
 export default function BatchResultsPage({
   documentData,
   onBack,
-  onSaveHumanScore,
 }: BatchResultsPageProps) {
   // Transform data to rows
   const [rows, setRows] = useState<ResultRow[]>(() =>
     transformToRows(documentData)
   );
-
-  // Re-sync rows when documentData changes (e.g., after session restore)
-  const lastSessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    const sessionId = documentData?.sessionId;
-    if (sessionId && sessionId !== lastSessionIdRef.current) {
-      setRows(transformToRows(documentData));
-      lastSessionIdRef.current = sessionId;
-    }
-  }, [documentData?.sessionId, documentData?.uploadedFiles]);
-
-  // Ref for debounce timers per row
-  const saveTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Visible columns
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -420,52 +362,11 @@ export default function BatchResultsPage({
     }
   };
 
-  // Update human eval score (0-100) with debounced save
-  const updateHumanEval = useCallback(
-    (rowId: string, value: number | null) => {
-      // Find the row first (before state update, to capture current values)
-      const currentRow = rows.find((r) => r.id === rowId);
-
-      // Update local state immediately
-      setRows((prev) =>
-        prev.map((r) => (r.id === rowId ? { ...r, humanEval: value } : r))
-      );
-
-      // Clear any existing debounce timer for this row
-      if (saveTimersRef.current[rowId]) {
-        clearTimeout(saveTimersRef.current[rowId]);
-      }
-
-      // Debounce the save call
-      // Only save if we have a judge model - human scores are stored per (entity, source_model, judge_model)
-      if (currentRow && onSaveHumanScore && currentRow.judgeRaw) {
-        // Capture row data now to avoid stale closure
-        const saveData = {
-          fileId: currentRow.fileId,
-          entityName: currentRow.entity,
-          sourceModel: currentRow.sourceModelRaw,
-          judgeModel: currentRow.judgeRaw,
-          humanScore: value,
-          groundTruth: currentRow.groundTruth,
-        };
-
-        saveTimersRef.current[rowId] = setTimeout(() => {
-          onSaveHumanScore(saveData).catch((err) => {
-            console.error("Failed to save human score:", err);
-          });
-        }, 500); // 500ms debounce
-      }
-    },
-    [rows, onSaveHumanScore]
-  );
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(saveTimersRef.current).forEach((timer) =>
-        clearTimeout(timer)
-      );
-    };
+  // Update human eval score (0-100)
+  const updateHumanEval = useCallback((rowId: string, value: number | null) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, humanEval: value } : r))
+    );
   }, []);
 
   // Export filtered results to Excel
@@ -809,28 +710,21 @@ export default function BatchResultsPage({
                 >
                   {visibleColumns.has("studyName") && (
                     <TableCell
-                      className="max-w-[140px] truncate text-xs"
+                      className="max-w-[200px] truncate"
                       title={row.studyName}
                     >
                       {row.studyName}
                     </TableCell>
                   )}
                   {visibleColumns.has("llmSource") && (
-                    <TableCell className="max-w-[100px]">
-                      <Badge
-                        variant="outline"
-                        className="text-xs truncate max-w-[90px]"
-                        title={formatModelName(row.llmSource)}
-                      >
+                    <TableCell>
+                      <Badge variant="outline">
                         {formatModelName(row.llmSource)}
                       </Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("ingestion") && (
-                    <TableCell
-                      className="text-xs text-gray-600 max-w-[80px] truncate"
-                      title={row.ingestion}
-                    >
+                    <TableCell className="text-sm text-gray-600">
                       {row.ingestion}
                     </TableCell>
                   )}
@@ -851,41 +745,34 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("entity") && (
-                    <TableCell className="max-w-[100px]">
-                      <Badge
-                        variant="secondary"
-                        className="text-xs truncate max-w-[90px]"
-                        title={row.entity}
-                      >
-                        {row.entity}
-                      </Badge>
+                    <TableCell>
+                      <Badge variant="secondary">{row.entity}</Badge>
                     </TableCell>
                   )}
                   {visibleColumns.has("actualOutput") && (
-                    <TableCell className="max-w-[120px]">
+                    <TableCell className="max-w-[180px]">
                       <ExpandableTextCell
                         text={row.actualOutput}
                         title={`Actual Output - ${row.entity}`}
-                        maxWidth="100px"
+                        maxWidth="160px"
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("groundTruth") && (
-                    <TableCell className="max-w-[60px]">
+                    <TableCell className="max-w-[180px]">
                       <ExpandableTextCell
                         text={row.groundTruth}
                         title={`Ground Truth - ${row.entity}`}
-                        maxWidth="50px"
+                        maxWidth="160px"
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("judge") && (
-                    <TableCell className="max-w-[90px]">
+                    <TableCell>
                       {row.judge ? (
                         <Badge
                           variant="outline"
-                          className="text-xs text-purple-600 border-purple-300 truncate max-w-[80px]"
-                          title={row.judge}
+                          className="text-purple-600 border-purple-300"
                         >
                           {row.judge}
                         </Badge>
@@ -895,30 +782,27 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("correctness") && (
-                    <TableCell className="text-xs px-1">
+                    <TableCell className="text-center">
                       {renderScoreCell(row.correctness)}
                     </TableCell>
                   )}
                   {visibleColumns.has("completeness") && (
-                    <TableCell className="text-xs px-1">
+                    <TableCell className="text-center">
                       {renderScoreCell(row.completeness)}
                     </TableCell>
                   )}
                   {visibleColumns.has("relevance") && (
-                    <TableCell className="text-xs px-1">
+                    <TableCell className="text-center">
                       {renderScoreCell(row.relevance)}
                     </TableCell>
                   )}
                   {visibleColumns.has("safety") && (
-                    <TableCell className="text-xs px-1">
+                    <TableCell className="text-center">
                       {renderScoreCell(row.safety)}
                     </TableCell>
                   )}
                   {visibleColumns.has("humanEval") && (
-                    <TableCell
-                      onClick={(e) => e.stopPropagation()}
-                      className="px-1"
-                    >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <Input
                         type="number"
                         min={0}
@@ -934,19 +818,13 @@ export default function BatchResultsPage({
                                 );
                           updateHumanEval(row.id, val);
                         }}
-                        placeholder={row.judgeRaw ? "Score" : "N/A"}
-                        disabled={!row.judgeRaw}
-                        title={
-                          !row.judgeRaw
-                            ? "Run evaluation first to enable human scoring"
-                            : "Enter human evaluation score (0-100)"
-                        }
-                        className={`h-7 text-xs w-14 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
+                        placeholder="Score"
+                        className="h-8 text-sm w-20 text-center"
                       />
                     </TableCell>
                   )}
                   {visibleColumns.has("cost") && (
-                    <TableCell className="text-xs text-gray-600 px-1">
+                    <TableCell className="text-right text-sm text-gray-600">
                       {row.cost || "—"}
                     </TableCell>
                   )}

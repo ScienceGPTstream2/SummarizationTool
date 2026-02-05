@@ -1,89 +1,50 @@
-"""File management API endpoints with organized storage and deduplication"""
+"""File management API endpoints"""
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Header, Request
-from fastapi.responses import JSONResponse, Response
-from typing import Optional, List
-from pydantic import BaseModel
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Request
 import hashlib
+from fastapi.responses import JSONResponse, FileResponse
 
-from services.document import get_organized_file_service, get_organized_processor
-from services.auth.supabase_auth_service import SupabaseAuthService
+from core.dependencies import get_current_user
+from services.document.file_service import FileService
 
 router = APIRouter(prefix="/api", tags=["files"])
 
-# Services
-file_service = get_organized_file_service()
-auth_service = SupabaseAuthService()
+# Initialize services
+file_service = FileService()
 
 
-# Response Models
-class FileUploadResponse(BaseModel):
-    success: bool
-    file_hash: str
-    original_filename: str
-    file_size: int
-    is_new: bool
-    deduplicated: bool
-    processed: dict = {}
-
-
-class UserFileInfo(BaseModel):
-    file_hash: str
-    original_filename: str
-    file_size: int
-    mime_type: str
-    created_at: str
-    processed: dict = {}
-
-
-def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
-    """Extract user ID from Authorization header."""
-    if not authorization:
-        return None
-
-    try:
-        token = authorization.replace("Bearer ", "")
-        if auth_service.is_configured:
-            return auth_service.get_user_id(token)
-    except:
-        pass
-    return None
-
-
-@router.post("/upload")
-async def upload_file(
-    request: Request,
-    file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None),
-):
+@router.post("/upload", dependencies=[Depends(get_current_user)])
+async def upload_file(request: Request, file: UploadFile = File(...)):
     """
-    Upload and store a PDF file with deduplication.
-
-    If the same file (by hash) was uploaded before, returns existing file info.
-    Associates the file with the authenticated user if a valid token is provided.
+    Upload and store a PDF file
     """
     print(f"[UPLOAD] Request headers: {request.headers}")
-
-    # Check content-length header
+    # Check content-length header first to fail fast for large files
+    # This helps identify if a proxy/server is blocking the request before it reaches the app
     if "content-length" in request.headers:
         content_length = int(request.headers["content-length"])
+        # The router has a 20MB limit, but we'll check against a slightly larger 25MB buffer
+        # to see if the request even makes it past the proxy.
         if content_length > 25 * 1024 * 1024:  # 25MB
             raise HTTPException(
-                status_code=413,
+                status_code=413,  # Payload Too Large
                 detail=(
-                    f"Request size ({content_length / 1024 / 1024:.2f}MB) exceeds the server's limit."
+                    f"Request size ({content_length / 1024 / 1024:.2f}MB) exceeds the server's limit. "
+                    "This may be due to a proxy or server configuration."
                 ),
             )
 
     try:
+        # Log upload attempt
         print(
             f"[UPLOAD] Received file: {file.filename}, content_type: {file.content_type}"
         )
 
+        # Check if filename exists
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
 
-        # Validate file extension
+        # Validate file extension (case-insensitive) - basic check
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(
                 status_code=400,
@@ -94,7 +55,10 @@ async def upload_file(
         content = await file.read()
         file_size = len(content)
 
-        # Validate PDF magic bytes
+        # SECURITY: Validate it's actually a PDF by checking magic bytes (file signature)
+        # This prevents users from renaming malicious files to .pdf
+        # PDF files MUST start with "%PDF-" (hex: 25 50 44 46 2D)
+        # More flexible check: search for magic bytes within the first 1024 bytes
         if b"%PDF-" not in content[:1024]:
             print(f"[UPLOAD] Invalid PDF signature. First 20 bytes: {content[:20]}")
             raise HTTPException(
@@ -103,42 +67,32 @@ async def upload_file(
             )
 
         # Validate file size (20MB limit)
-        if file_size > 20 * 1024 * 1024:
+
+        # Validate file size (20MB limit)
+        if file_size > 20 * 1024 * 1024:  # 20MB in bytes
             raise HTTPException(status_code=400, detail="File size exceeds 20MB limit")
 
-        # Get user ID if authenticated
-        user_id = get_user_id_from_token(authorization)
+        # Check for duplicate file - REMOVED per user request
+        # We only check for duplicates in the current session (frontend side).
+        # Historical duplicates on the server are allowed (treated as new uploads).
+        file_hash = hashlib.sha256(content).hexdigest()
 
-        # Save with deduplication
-        result = await file_service.save_uploaded_file(
-            filename=file.filename, content=content, user_id=user_id
+        # Save file using file service
+        file_path = await file_service.save_uploaded_file(
+            file.filename, content, file_hash=file_hash
         )
+        file_info = await file_service.get_file_info(file_path)
 
-        # Check processing status
-        processed = {
-            "azure_doc_intelligence": await file_service.is_file_processed(
-                result["file_hash"], "azure_doc_intelligence"
-            ),
-            "docling": await file_service.is_file_processed(
-                result["file_hash"], "docling"
-            ),
-        }
-
-        print(
-            f"[UPLOAD] ✅ PDF saved: {result['file_hash']} (deduplicated: {result['deduplicated']})"
-        )
+        print(f"[UPLOAD] ✅ PDF validated and saved: {file_info['file_id']}")
 
         return JSONResponse(
             status_code=200,
             content={
                 "message": "File uploaded successfully",
-                "file_hash": result["file_hash"],
-                "file_id": result["file_hash"],  # For backward compatibility
-                "filename": result["original_filename"],
-                "file_size": result["file_size"],
-                "is_new": result["is_new"],
-                "deduplicated": result["deduplicated"],
-                "processed": processed,
+                "file_id": file_info["file_id"],
+                "filename": file_info["original_filename"],
+                "file_size": file_info["file_size"],
+                "upload_time": file_info["upload_time"],
             },
         )
 
@@ -148,108 +102,17 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
 
-@router.get("/files/list")
-async def list_user_files(authorization: Optional[str] = Header(None)):
-    """List all files associated with the authenticated user."""
-    user_id = get_user_id_from_token(authorization)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    try:
-        files = await file_service.list_user_files(user_id)
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "files": [
-                    {
-                        "file_hash": f["file_hash"],
-                        "file_id": f["file_hash"],  # For backward compatibility
-                        "original_filename": f.get("original_filename", "unknown"),
-                        "file_size": f.get("file_size", 0),
-                        "mime_type": f.get("mime_type", "application/pdf"),
-                        "created_at": f.get("created_at", ""),
-                        "processed": f.get("processed", {}),
-                    }
-                    for f in files
-                ]
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/files/{file_id}")
-async def download_file(file_id: str, authorization: Optional[str] = Header(None)):
+@router.get("/files/{file_id}/info", dependencies=[Depends(get_current_user)])
+async def get_file_info(file_id: str):
     """
-    Download/serve the uploaded file content.
-    Accepts either file_hash or legacy file_id format.
+    Get information about an uploaded file
     """
     try:
-        # Treat file_id as file_hash in new system
-        file_hash = file_id
-
-        content = await file_service.get_file_content(file_hash)
-        if not content:
+        file_info = await file_service.get_file_by_id(file_id)
+        if not file_info:
             raise HTTPException(status_code=404, detail="File not found")
 
-        metadata = await file_service.get_file_metadata(file_hash)
-        mime_type = (
-            metadata.get("mime_type", "application/pdf")
-            if metadata
-            else "application/pdf"
-        )
-        filename = (
-            metadata.get("original_filename", "document.pdf")
-            if metadata
-            else "document.pdf"
-        )
-
-        return Response(
-            content=content,
-            media_type=mime_type,
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
-
-
-@router.get("/files/{file_id}/info")
-async def get_file_info(file_id: str, authorization: Optional[str] = Header(None)):
-    """
-    Get information about an uploaded file.
-    Accepts either file_hash or legacy file_id format.
-    """
-    try:
-        file_hash = file_id
-
-        metadata = await file_service.get_file_metadata(file_hash)
-        if not metadata:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        processed = {
-            "azure_doc_intelligence": await file_service.is_file_processed(
-                file_hash, "azure_doc_intelligence"
-            ),
-            "docling": await file_service.is_file_processed(file_hash, "docling"),
-        }
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "file_hash": file_hash,
-                "file_id": file_hash,  # For backward compatibility
-                "original_filename": metadata.get("original_filename"),
-                "file_size": metadata.get("file_size"),
-                "mime_type": metadata.get("mime_type", "application/pdf"),
-                "created_at": metadata.get("created_at"),
-                "upload_time": metadata.get("created_at"),  # For backward compatibility
-                "processed": processed,
-            },
-        )
+        return JSONResponse(status_code=200, content=file_info)
 
     except HTTPException:
         raise
@@ -259,19 +122,47 @@ async def get_file_info(file_id: str, authorization: Optional[str] = Header(None
         )
 
 
-@router.delete("/files/{file_id}")
-async def delete_file(file_id: str, authorization: Optional[str] = Header(None)):
+@router.get("/files/{file_id}", dependencies=[Depends(get_current_user)])
+async def download_file(file_id: str):
     """
-    Delete an uploaded file.
-    Note: In the new system, this marks the file as deleted for the user
-    but doesn't delete the global deduplicated copy.
+    Download/serve the uploaded file content
     """
     try:
-        # For now, return success - actual implementation would need
-        # to remove user association in Supabase
+        file_info = await file_service.get_file_by_id(file_id)
+        if not file_info:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        file_path = file_info.get("file_path")
+        if not file_path:
+            raise HTTPException(status_code=404, detail="File path not found")
+
+        return FileResponse(
+            path=file_path,
+            media_type="application/pdf",
+            filename=file_info.get("original_filename", "document.pdf"),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+
+
+@router.delete("/files/{file_id}", dependencies=[Depends(get_current_user)])
+async def delete_file(file_id: str):
+    """
+    Delete an uploaded file
+    """
+    try:
+        success = await file_service.delete_file(file_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="File not found")
+
         return JSONResponse(
             status_code=200, content={"message": "File deleted successfully"}
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")

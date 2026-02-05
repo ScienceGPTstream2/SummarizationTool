@@ -5,7 +5,6 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Code, AlertCircle, Download, Sparkles, FileText } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { getValidToken } from "../utils/authUtils";
 
 interface RawOutputViewerProps {
   conversionId: string | null;
@@ -40,7 +39,7 @@ export function RawOutputViewer({
 
       try {
         setLoading(true);
-        const token = await getValidToken();
+        const token = localStorage.getItem("token");
 
         // Always fetch enhanced content, which includes both base and enhanced versions
         const response = await fetch(

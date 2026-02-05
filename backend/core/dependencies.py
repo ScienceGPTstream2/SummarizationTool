@@ -1,41 +1,28 @@
 """Common dependencies for API endpoints"""
 
-import os
-from typing import Dict
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
-from services.auth.supabase_auth_service import SupabaseAuthService
-
-auth_service = SupabaseAuthService()
-
-if not auth_service.is_configured:
-    print("Supabase authentication is NOT configured. Backend endpoints will fail.")
-else:
-    print("Using Supabase authentication")
+from pathlib import Path
+from services.auth.auth_service import AuthService
 
 security = HTTPBearer()
+
+# Initialize auth service
+auth_service = AuthService(Path(__file__).resolve().parent / "users.toml")
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> Dict:
-    """Validate token and return current user info"""
+):
+    """Validate JWT token and return current user"""
     token = credentials.credentials
-
-    if not auth_service.is_configured:
-        raise HTTPException(
-            status_code=500, detail="Supabase authentication service not configured"
-        )
-
     try:
-        user_info = auth_service.get_user_info(token)
-        return {
-            "id": user_info.get("id"),
-            "email": user_info.get("email"),
-            "role": user_info.get("role"),
-            "metadata": user_info.get("user_metadata", {}),
-        }
-    except ValueError as e:
-        print(f"[AUTH] Supabase token verification failed: {str(e)}")
-        raise HTTPException(status_code=401, detail=str(e))
+        # print(f"[AUTH] Verifying token: {token[:10]}...")
+        payload = auth_service.verify_token(token)
+        # print(f"[AUTH] Token verified for user: {payload.get('sub')}")
+        return payload["sub"]
+    except Exception as e:
+        print(f"[AUTH] Token verification failed: {str(e)}")
+        raise HTTPException(
+            status_code=401, detail=f"Invalid or expired token: {str(e)}"
+        )

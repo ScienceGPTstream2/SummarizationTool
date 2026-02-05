@@ -69,7 +69,6 @@ interface FileConfig {
   studyType: string;
   entities: EntityConfig[];
   summaryPrompt: string;
-  paragraphSystemPrompt?: string;
 }
 
 export function BatchStudySelectionPage({
@@ -79,9 +78,7 @@ export function BatchStudySelectionPage({
 }: BatchStudySelectionPageProps) {
   const [files] = useState(documentData.uploadedFiles || []);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
-  const [selectedModels, setSelectedModels] = useState<string[]>(
-    documentData.selectedModels || []
-  );
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
 
   // Store configuration per file
   const [fileConfigs, setFileConfigs] = useState<Record<string, FileConfig>>(
@@ -104,9 +101,8 @@ export function BatchStudySelectionPage({
       const models = await settingsManager.getAvailableModelsAsync();
       setAvailableModels(models);
 
-      // Auto-select Gemini 2.5 Flash Lite by default only if nothing selected yet
-      // (including from restored session data)
-      if (selectedModels.length === 0 && !documentData.selectedModels?.length) {
+      // Auto-select Gemini 2.5 Flash Lite by default (only if nothing selected yet)
+      if (selectedModels.length === 0) {
         const gemini25FlashLite = models.find(
           (m) =>
             m.id.toLowerCase().includes("gemini") &&
@@ -174,14 +170,6 @@ export function BatchStudySelectionPage({
     });
   }, [files]);
 
-  // Auto-save when selectedModels changes - save models even if no study types selected yet
-  useEffect(() => {
-    if (documentData.sessionId && selectedModels.length > 0) {
-      // Save selected models to session, even if no file configs yet
-      syncSessionConfigs(documentData.sessionId, fileConfigs);
-    }
-  }, [selectedModels]);
-
   const handleStudyTypeChange = (fileId: string, studyType: string) => {
     // Save current config before switching
     const currentConfig = fileConfigs[fileId];
@@ -200,29 +188,21 @@ export function BatchStudySelectionPage({
 
     if (savedConfig) {
       // Restore saved config
-      const newConfigs = {
-        ...fileConfigs,
+      setFileConfigs((prev) => ({
+        ...prev,
         [fileId]: savedConfig,
-      };
-      setFileConfigs(newConfigs);
-      if (documentData.sessionId) {
-        syncSessionConfigs(documentData.sessionId, newConfigs);
-      }
+      }));
     } else {
       // Load from template
       const template = loadStudyTypeTemplate(studyType);
-      const newConfigs = {
-        ...fileConfigs,
+      setFileConfigs((prev) => ({
+        ...prev,
         [fileId]: {
           studyType,
           entities: template.entities,
           summaryPrompt: template.summaryPrompt,
         },
-      };
-      setFileConfigs(newConfigs);
-      if (documentData.sessionId) {
-        syncSessionConfigs(documentData.sessionId, newConfigs);
-      }
+      }));
     }
   };
 
@@ -239,69 +219,16 @@ export function BatchStudySelectionPage({
   const handleSaveConfig = () => {
     if (editingFileId && tempConfig) {
       console.log("Saving config for:", editingFileId, tempConfig);
-      const newConfigs = {
-        ...fileConfigs,
-        [editingFileId]: tempConfig,
-      };
-      setFileConfigs(newConfigs);
+      setFileConfigs((prev) => {
+        const next = {
+          ...prev,
+          [editingFileId]: tempConfig,
+        };
+        console.log("New fileConfigs:", next);
+        return next;
+      });
       setEditingFileId(null);
       setTempConfig(null);
-
-      // Auto-save to database
-      if (documentData.sessionId) {
-        syncSessionConfigs(documentData.sessionId, newConfigs);
-      }
-    }
-  };
-
-  const syncSessionConfigs = async (
-    sessionId: string,
-    configs: Record<string, FileConfig>
-  ) => {
-    try {
-      const token = await import("../utils/authUtils").then((m) =>
-        m.getValidToken()
-      );
-      const user = await import("../utils/authUtils").then((m) =>
-        m.getCurrentUser()
-      );
-      if (!token || !user) return;
-
-      // Map to backend schema
-      const files_config: Record<string, any> = {};
-      Object.entries(configs).forEach(([fileId, config]) => {
-        files_config[fileId] = {
-          study_type: config.studyType,
-          entities: config.entities.map((e) => ({
-            name: e.name,
-            prompt: e.prompt,
-          })),
-          summary_prompt: config.summaryPrompt,
-          paragraph_system_prompt: config.paragraphSystemPrompt,
-        };
-      });
-
-      const response = await fetch(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          user_id: user.id,
-          configuration: {
-            selected_models: selectedModels,
-          },
-          files_config: files_config, // Top-level, not nested in configuration
-        }),
-      });
-      if (!response.ok) {
-        console.error("Failed to save session config:", await response.text());
-      } else {
-        console.log("✅ Session configurations auto-saved");
-      }
-    } catch (error) {
-      console.error("Failed to auto-save session configurations:", error);
     }
   };
 
@@ -911,14 +838,7 @@ export function BatchStudySelectionPage({
                       {file.file.name}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {/* Get file size from: uploadResult.file_size, file.file.size, or show PDF indicator */}
-                      {(() => {
-                        const size =
-                          file.uploadResult?.file_size ?? file.file?.size ?? 0;
-                        return size > 0
-                          ? `${(size / 1024 / 1024).toFixed(2)} MB`
-                          : "PDF Document";
-                      })()}
+                      {(file.file.size / 1024 / 1024).toFixed(2)} MB
                     </span>
                   </div>
                 </div>

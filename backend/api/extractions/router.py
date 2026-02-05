@@ -21,13 +21,9 @@ from services.document.processors.docling.bounding_box_matcher import (
 
 router = APIRouter(prefix="/api", tags=["extractions"])
 
-from services.session.session_service import SessionService, get_session_service
-from schemas.sessions import ExtractionResult
-
 # Initialize services
 document_service = DocumentService()
 llm_service = LLMService()
-session_service = get_session_service()
 
 # Timeout logging setup
 TIMEOUT_LOG_DIR = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
@@ -58,11 +54,7 @@ def log_timeout_event(operation: str, details: str, duration: float = None):
 
 
 @router.post("/extract", dependencies=[Depends(get_current_user)])
-async def extract_entities(
-    request: ExtractRequest,
-    http_request: Request,
-    user_model=Depends(get_current_user),
-):
+async def extract_entities(request: ExtractRequest, http_request: Request):
     """
     Run entity extraction for a list of entities using Azure OpenAI.
     Includes figure content for comprehensive analysis and figure referencing.
@@ -234,79 +226,6 @@ async def extract_entities(
         tasks = [run_extraction(entity) for entity in request.entities]
         extracted_entities = await asyncio.gather(*tasks)
 
-        # Persist results if session_id and user_model are available
-        if request.session_id and user_model:
-            try:
-                user_id = str(
-                    user_model["id"] if isinstance(user_model, dict) else user_model.id
-                )
-                document_id = None
-                session_docs = session_service.db.get_documents_by_session(
-                    request.session_id
-                )
-                for doc in session_docs:
-                    if doc["file_hash"] == request.conversion_id:
-                        document_id = doc["id"]
-                        break
-
-                # If found, save all successful extractions
-                if document_id:
-                    for entity_res in extracted_entities:
-                        # Skip if error string
-                        if isinstance(entity_res.get("extracted"), str) and entity_res[
-                            "extracted"
-                        ].startswith("Error:"):
-                            continue
-
-                        # Extract token and duration info from meta
-                        meta = entity_res.get("meta", {}) or {}
-                        prompt_tokens = meta.get("prompt_tokens")
-                        completion_tokens = meta.get("completion_tokens")
-                        duration = meta.get("duration")
-                        duration_ms = int(duration * 1000) if duration else None
-
-                        # Convert to ExtractionResult schema
-                        result_obj = ExtractionResult(
-                            entity_name=entity_res["name"],
-                            model_id=request.model_id
-                            or request.deployment
-                            or "unknown-model",
-                            extracted_text=entity_res["extracted"],
-                            references=entity_res.get("references"),
-                            status="completed",
-                            extracted_at=None,  # will happen in add_extraction_result
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            duration_ms=duration_ms,
-                        )
-
-                        # Save to DB
-                        session_service.add_extraction_result(
-                            user_id=user_id,
-                            session_id=request.session_id,
-                            result=result_obj,
-                            document_id=document_id,
-                        )
-                        print(
-                            f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
-                        )
-                else:
-                    print(
-                        f"Warning: Could not find document with hash {request.conversion_id} in session {request.session_id}"
-                    )
-
-            except Exception as e:
-                import traceback
-
-                print(f"Error persisting extractions for session {request.session_id}:")
-                print(f"  conversion_id: {request.conversion_id}")
-                print(
-                    f"  document_id: {document_id if 'document_id' in dir() else 'not assigned'}"
-                )
-                print(f"  Error: {e}")
-                traceback.print_exc()
-                # Don't fail the request if persistence fails, just log it
-
         return JSONResponse(
             status_code=200,
             content={
@@ -314,7 +233,6 @@ async def extract_entities(
                 "extracted_entities": extracted_entities,
             },
         )
-
     except HTTPException:
         raise
     except Exception as e:

@@ -30,8 +30,8 @@ class MarkdownReference(BaseModel):
 class ExtractionResult(BaseModel):
     """Structured result containing both the extracted answer and its references"""
 
-    answer: Union[str, Dict[str, Any], List[Any]] = Field(
-        description="The extracted information or answer based on the prompt (string, structured data, or list)"
+    answer: Union[str, Dict[str, Any]] = Field(
+        description="The extracted information or answer based on the prompt (string or structured data)"
     )
     references: List[MarkdownReference] = Field(
         description="List of specific text excerpts from the markdown that were used to generate this answer"
@@ -517,56 +517,28 @@ Return JSON only:"""
             service_account_path_override=service_account_path_override,
         )
 
-        # Check if API call was successful
-        if not response.get("success"):
-            return {
-                "success": False,
-                "error": response.get("error", "Unknown error from Llama API"),
-                "content": f"Error: {response.get('error', 'Unknown error')}",
-                "answer": f"Error: {response.get('error', 'Unknown error')}",
-                "references": [],
-                "raw": response.get("raw"),
-                "meta": response.get("meta", {}),
-            }
-
         # Parse and validate JSON response
-        content = response.get("content", "")
-        if not content:
-            return {
-                "success": False,
-                "error": "Empty content from Llama API",
-                "content": "Error: Empty response",
-                "answer": "Error: Empty response",
-                "references": [],
-                "raw": response.get("raw"),
-                "meta": response.get("meta", {}),
-            }
-
+        content = response["content"]
         try:
             parsed_json = json.loads(content.strip())
             result = ExtractionResult.model_validate(parsed_json)
 
-            # Convert answer to string if it's a list or dict for consistency
-            answer = result.answer
-            if isinstance(answer, (list, dict)):
-                answer_str = json.dumps(answer, indent=2, ensure_ascii=False)
-            else:
-                answer_str = str(answer)
-
-            raw = response.get("raw", {})
-            meta = response.get("meta", {})
             return {
                 "success": True,
-                "content": answer_str,
-                "answer": result.answer,  # Keep original for structured access
+                "content": result.answer,
+                "answer": result.answer,
                 "references": [{"text": ref.text} for ref in result.references],
-                "raw": raw,
+                "raw": response["raw"],
                 "meta": {
-                    "timestamp": meta.get("timestamp"),
+                    "timestamp": response["meta"]["timestamp"],
                     "model": model_name,
-                    "duration": meta.get("duration"),
-                    "prompt_tokens": raw.get("usage", {}).get("prompt_tokens"),
-                    "completion_tokens": raw.get("usage", {}).get("completion_tokens"),
+                    "duration": response["meta"]["duration"],
+                    "prompt_tokens": response["raw"]
+                    .get("usage", {})
+                    .get("prompt_tokens"),
+                    "completion_tokens": response["raw"]
+                    .get("usage", {})
+                    .get("completion_tokens"),
                     "strategy": "primary_optimized",
                 },
             }
@@ -632,52 +604,22 @@ Text: {essential_markdown}"""
             service_account_path_override=service_account_path_override,
         )
 
-        # Check if API call was successful
-        if not response.get("success"):
-            return {
-                "success": False,
-                "error": response.get("error", "Unknown error from Llama API"),
-                "content": f"Error: {response.get('error', 'Unknown error')}",
-                "answer": f"Error: {response.get('error', 'Unknown error')}",
-                "references": [],
-                "raw": response.get("raw"),
-                "meta": response.get("meta", {}),
-            }
-
         # Parse and validate
-        content = response.get("content", "")
-        if not content:
-            return {
-                "success": False,
-                "error": "Empty content from Llama API",
-                "content": "Error: Empty response",
-                "answer": "Error: Empty response",
-                "references": [],
-                "raw": response.get("raw"),
-                "meta": response.get("meta", {}),
-            }
-
+        content = response["content"]
         try:
             parsed_json = json.loads(content.strip())
             result = ExtractionResult.model_validate(parsed_json)
 
-            # Convert answer to string if it's a list or dict for consistency
-            answer = result.answer
-            if isinstance(answer, (list, dict)):
-                answer_str = json.dumps(answer, indent=2, ensure_ascii=False)
-            else:
-                answer_str = str(answer)
-
             return {
                 "success": True,
-                "content": answer_str,
-                "answer": result.answer,  # Keep original for structured access
+                "content": result.answer,
+                "answer": result.answer,
                 "references": [{"text": ref.text} for ref in result.references],
-                "raw": response.get("raw"),
+                "raw": response["raw"],
                 "meta": {
-                    "timestamp": response.get("meta", {}).get("timestamp"),
+                    "timestamp": response["meta"]["timestamp"],
                     "model": model_name,
-                    "duration": response.get("meta", {}).get("duration"),
+                    "duration": response["meta"]["duration"],
                     "strategy": "fallback_minimal",
                 },
             }
@@ -713,10 +655,10 @@ Text: {essential_markdown}"""
             "error_type": type(error).__name__,
             "error_message": str(error),
             "model": model_name,
-            "content_length": len(content) if content else 0,
-            "content_preview": content[:500] if content else "",
-            "full_content": content or "",
-            "api_response": response.get("raw") if isinstance(response, dict) else None,
+            "content_length": len(content),
+            "content_preview": content[:500],
+            "full_content": content,
+            "api_response": response["raw"],
         }
 
         error_file = error_log_path / f"llama_error_{timestamp}_{strategy}.json"
@@ -756,18 +698,17 @@ Text: {essential_markdown}"""
                 else:
                     fallback_answer = f"Error: Llama returned malformed response ({len(content)} chars)"
 
-        meta = response.get("meta", {}) if isinstance(response, dict) else {}
         return {
             "success": False,
             "error": f"Llama {strategy} parsing failed: {str(error)}",
             "content": fallback_answer,
             "answer": fallback_answer,
             "references": fallback_references,
-            "raw": response.get("raw") if isinstance(response, dict) else None,
+            "raw": response["raw"],
             "meta": {
-                **meta,
+                **response["meta"],
                 "parsing_error": str(error),
-                "content_length": len(content) if content else 0,
+                "content_length": len(content),
                 "error_logged": str(error_file),
                 "strategy": strategy,
             },

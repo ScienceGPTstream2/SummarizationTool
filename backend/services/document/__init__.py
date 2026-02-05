@@ -6,16 +6,10 @@ from .processors.docling import DoclingService
 from .processors.azure_doc_intelligence.azure_doc_intelligence_service import (
     AzureDocIntelligenceService,
 )
-from .organized_file_service import OrganizedFileService, get_organized_file_service
-from .organized_processor import OrganizedDocumentProcessor, get_organized_processor
 
 __all__ = [
     "FileService",
     "DocumentService",
     "DoclingService",
     "AzureDocIntelligenceService",
-    "OrganizedFileService",
-    "get_organized_file_service",
-    "OrganizedDocumentProcessor",
-    "get_organized_processor",
 ]

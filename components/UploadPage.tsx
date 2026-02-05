@@ -316,14 +316,11 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
             const result = await response.json();
 
             // Store processing result with camelCase mapping
-            // Use file_hash as the primary identifier for document API calls (not UUID conversion_id)
             setProcessedFiles((prev) => ({
               ...prev,
               [file.name]: {
                 ...result,
-                // Use file_hash as conversionId for document API calls
-                conversionId: result.file_hash || result.conversion_id,
-                fileHash: result.file_hash,
+                conversionId: result.conversion_id,
                 markdownPath: result.markdown_path,
                 processorUsed: result.processor_used,
                 figuresCount: result.figures_found,
