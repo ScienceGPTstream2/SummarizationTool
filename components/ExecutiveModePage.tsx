@@ -690,16 +690,16 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                               View
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-                            <DialogHeader>
+                          <DialogContent className="!w-[95vw] !max-w-[1800px] h-[90vh] flex flex-col">
+                            <DialogHeader className="flex-shrink-0">
                               <DialogTitle className="text-xl">
                                 Summary: {file.file.name}
                               </DialogTitle>
                             </DialogHeader>
-                            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
-                              <div className="space-y-6 h-full">
-                                <div className="p-4 bg-muted rounded-lg h-[60vh] overflow-y-auto">
-                                  <h4 className="font-bold mb-2 text-sm text-muted-foreground uppercase tracking-wider">
+                            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
+                              <div className="flex flex-col min-h-0">
+                                <div className="p-4 bg-muted rounded-lg flex-1 overflow-y-auto">
+                                  <h4 className="font-bold mb-3 text-sm text-muted-foreground uppercase tracking-wider">
                                     Generated Paragraph
                                   </h4>
                                   <p className="whitespace-pre-wrap leading-relaxed text-base">
@@ -708,16 +708,16 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                                   </p>
                                 </div>
                               </div>
-                              <div className="space-y-6 h-full">
-                                <div className="border rounded-lg h-[60vh] overflow-y-auto">
-                                  <h4 className="font-bold p-4 pb-2 text-sm text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10">
+                              <div className="flex flex-col min-h-0">
+                                <div className="border rounded-lg flex-1 overflow-y-auto flex flex-col">
+                                  <h4 className="font-bold p-4 pb-2 text-sm text-muted-foreground uppercase tracking-wider sticky top-0 bg-background z-10 flex-shrink-0">
                                     Extracted Entities
                                   </h4>
-                                  <div className="p-4 pt-0">
+                                  <div className="p-4 pt-0 flex-1 overflow-y-auto">
                                     <Table>
                                       <TableHeader>
                                         <TableRow>
-                                          <TableHead className="w-[150px] text-sm font-bold">
+                                          <TableHead className="w-[180px] text-sm font-bold">
                                             Entity
                                           </TableHead>
                                           <TableHead className="text-sm font-bold">
@@ -729,10 +729,10 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
                                         {file.extractedData?.entities?.map(
                                           (entity: any, idx: number) => (
                                             <TableRow key={idx}>
-                                              <TableCell className="font-medium align-top text-sm py-2">
+                                              <TableCell className="font-medium align-top text-sm py-3">
                                                 {entity.name}
                                               </TableCell>
-                                              <TableCell className="align-top whitespace-pre-wrap text-sm py-2">
+                                              <TableCell className="align-top whitespace-pre-wrap text-sm py-3">
                                                 {entity.answer ||
                                                   entity.extracted ||
                                                   "-"}

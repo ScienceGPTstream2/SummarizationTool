@@ -1,87 +1,240 @@
-# Self-Hosted Supabase with Docker
+# Self-Hosted Supabase for Summarization Tool
 
-This is the official Docker Compose setup for self-hosted Supabase. It provides a complete stack with all Supabase services running locally or on your infrastructure.
+This directory contains the Docker Compose setup for self-hosted Supabase, providing authentication, database, and REST API services for the Summarization Tool.
 
-## Getting Started
+## Quick Start
 
-Follow the detailed setup guide in our documentation: [Self-Hosting with Docker](https://supabase.com/docs/guides/self-hosting/docker)
+### 1. First-Time Setup
 
-The guide covers:
-- Prerequisites (Git and Docker)
-- Initial setup and configuration
-- Securing your installation
-- Accessing services
-- Updating your instance
+```bash
+# Navigate to this directory
+cd supabase-docker
 
-## What's Included
+# Copy the example environment file (if not already done)
+cp .env.example .env
 
-This Docker Compose configuration includes the following services:
+# Start all Supabase services
+docker compose up -d
+```
 
-- **[Studio](https://github.com/supabase/supabase/tree/master/apps/studio)** - A dashboard for managing your self-hosted Supabase project
-- **[Kong](https://github.com/Kong/kong)** - Kong API gateway
-- **[Auth](https://github.com/supabase/auth)** - JWT-based authentication API for user sign-ups, logins, and session management
-- **[PostgREST](https://github.com/PostgREST/postgrest)** - Web server that turns your PostgreSQL database directly into a RESTful API
-- **[Realtime](https://github.com/supabase/realtime)** - Elixir server that listens to PostgreSQL database changes and broadcasts them over websockets
-- **[Storage](https://github.com/supabase/storage)** - RESTful API for managing files in S3, with Postgres handling permissions
-- **[imgproxy](https://github.com/imgproxy/imgproxy)** - Fast and secure image processing server
-- **[postgres-meta](https://github.com/supabase/postgres-meta)** - RESTful API for managing Postgres (fetch tables, add roles, run queries)
-- **[PostgreSQL](https://github.com/supabase/postgres)** - Object-relational database with over 30 years of active development
-- **[Edge Runtime](https://github.com/supabase/edge-runtime)** - Web server based on Deno runtime for running JavaScript, TypeScript, and WASM services
-- **[Logflare](https://github.com/Logflare/logflare)** - Log management and event analytics platform
-- **[Vector](https://github.com/vectordotdev/vector)** - High-performance observability data pipeline for logs
-- **[Supavisor](https://github.com/supabase/supavisor)** - Supabase's Postgres connection pooler
+### 2. Verify Services Are Running
 
-## Documentation
+```bash
+docker compose ps
+```
 
-- **[Documentation](https://supabase.com/docs/guides/self-hosting/docker)** - Setup and configuration guides
-- **[CHANGELOG.md](./CHANGELOG.md)** - Track recent updates and changes to services
-- **[versions.md](./versions.md)** - Complete history of Docker image versions for rollback reference
+All services should show as "running" or "healthy".
 
-## Updates
+### 3. Access Supabase
 
-To update your self-hosted Supabase instance:
+| Service | URL | Description |
+|---------|-----|-------------|
+| Kong API Gateway | http://localhost:8000 | Main API endpoint (REST, Auth) |
+| Supabase Studio | http://localhost:8000/project/default | Database management UI |
+
+---
+
+## Service Architecture
+
+```
+Port 8000 (Kong Gateway)
+├── /rest/v1/*     → PostgREST (Database REST API)
+├── /auth/v1/*     → GoTrue (Authentication)
+├── /storage/v1/*  → Storage API
+├── /realtime/v1/* → Realtime subscriptions
+└── /project/*     → Supabase Studio UI
+```
+
+**Key Services:**
+
+| Service | Purpose |
+|---------|---------|
+| **Kong** | API gateway, routes all requests on port 8000 |
+| **Auth (GoTrue)** | JWT authentication, OAuth providers (GitHub) |
+| **PostgREST** | Automatic REST API from PostgreSQL schema |
+| **PostgreSQL** | Main database for users, sessions, documents |
+| **Studio** | Web UI for database management |
+
+---
+
+## Common Commands
+
+```bash
+# Start services (detached mode)
+docker compose up -d
+
+# Stop services
+docker compose down
+
+# View logs (all services)
+docker compose logs -f
+
+# View logs (specific service)
+docker compose logs -f db        # PostgreSQL
+docker compose logs -f auth      # Authentication
+docker compose logs -f rest      # PostgREST
+
+# Restart a specific service
+docker compose restart auth
+
+# Pull latest images
+docker compose pull
+
+# Reset everything (WARNING: deletes all data)
+./reset.sh
+```
+
+---
+
+## Auto-Start on VM Boot
+
+For VMs with scheduled shutdowns (e.g., Azure auto-shutdown), set up a systemd service:
+
+```bash
+# Run the setup script
+sudo ./setup-autostart.sh
+
+# Check status
+sudo systemctl status supabase.service
+
+# Useful commands
+sudo systemctl start supabase.service    # Start
+sudo systemctl stop supabase.service     # Stop
+sudo systemctl restart supabase.service  # Restart
+sudo journalctl -u supabase.service      # View logs
+```
+
+---
+
+## Database Schema
+
+The application uses the following tables (defined in `volumes/db/init/data.sql`):
+
+```sql
+-- Users (managed by Supabase Auth)
+auth.users
+
+-- Application tables (public schema)
+public.sessions        -- User sessions with extraction configs
+public.documents       -- Uploaded documents linked to sessions
+public.extraction_results  -- LLM extraction results per document
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+Key variables in `.env`:
+
+```bash
+# API Configuration
+KONG_HTTP_PORT=8000              # Main API port
+API_EXTERNAL_URL=http://localhost:8000
+
+# Database
+POSTGRES_PASSWORD=your-super-secret-and-long-postgres-password
+
+# JWT Secrets (generate with: openssl rand -base64 32)
+JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters
+ANON_KEY=eyJ...                  # Public anon key
+SERVICE_ROLE_KEY=eyJ...          # Service role key (keep secret!)
+
+# OAuth (GitHub)
+GOTRUE_EXTERNAL_GITHUB_ENABLED=true
+GOTRUE_EXTERNAL_GITHUB_CLIENT_ID=your-github-client-id
+GOTRUE_EXTERNAL_GITHUB_SECRET=your-github-client-secret
+```
+
+### Backend Integration
+
+The FastAPI backend connects to Supabase via environment variables in `backend/core/secrets.toml`:
+
+```toml
+[supabase]
+url = "http://localhost:8000"
+jwt_secret = "your-super-secret-jwt-token..."
+service_role_key = "eyJ..."
+```
+
+---
+
+## Updating Supabase
 
 1. Review [CHANGELOG.md](./CHANGELOG.md) for breaking changes
 2. Check [versions.md](./versions.md) for new image versions
-3. Update `docker-compose.yml` if there are configuration changes
-4. Pull the latest images: `docker compose pull`
-5. Stop services: `docker compose down`
-6. Start services with new configuration: `docker compose up -d`
+3. Backup your database:
+   ```bash
+   docker compose exec db pg_dump -U postgres > backup.sql
+   ```
+4. Pull and restart:
+   ```bash
+   docker compose pull
+   docker compose down
+   docker compose up -d
+   ```
 
-**Note:** Consider to always backup your database before updating.
+---
 
-## Community & Support
+## Troubleshooting
 
-For troubleshooting common issues, see:
-- [GitHub Discussions](https://github.com/orgs/supabase/discussions?discussions_q=is%3Aopen+label%3Aself-hosted) - Questions, feature requests, and workarounds
-- [GitHub Issues](https://github.com/supabase/supabase/issues?q=is%3Aissue%20state%3Aopen%20label%3Aself-hosted) - Known issues
-- [Documentation](https://supabase.com/docs/guides/self-hosting) - Setup and configuration guides
+### Services won't start
 
-Self-hosted Supabase is community-supported. Get help and connect with other users:
+```bash
+# Check Docker is running
+docker info
 
-- [Discord](https://discord.supabase.com) - Real-time chat and community support
-- [Reddit](https://www.reddit.com/r/Supabase/) - Official Supabase subreddit
+# Check for port conflicts
+sudo lsof -i :8000
 
-Share your self-hosting experience:
+# View detailed logs
+docker compose logs -f
+```
 
-- [GitHub Discussions](https://github.com/orgs/supabase/discussions/39820) - "Self-hosting: What's working (and what's not)?"
+### Database connection issues
 
-## Important Notes
+```bash
+# Check PostgreSQL is healthy
+docker compose exec db pg_isready
 
-### Security
+# Connect to database directly
+docker compose exec db psql -U postgres
+```
 
-⚠️ **The default configuration is not secure for production use.**
+### Auth not working
 
-Before deploying to production, you must:
-- Update all default passwords and secrets in the `.env` file
-- Generate new JWT secrets
-- Review and update CORS settings
-- Consider setting up a secure proxy in front of self-hosted Supabase
-- Review and adjust network security configuration (ACLs, etc.)
-- Set up proper backup procedures
+1. Verify JWT secrets match between `.env` and `backend/core/secrets.toml`
+2. Check GoTrue logs: `docker compose logs -f auth`
+3. Ensure `API_EXTERNAL_URL` matches your actual URL
 
-See the [security section](https://supabase.com/docs/guides/self-hosting/docker#configuring-and-securing-supabase) in the documentation.
+### Reset everything
+
+```bash
+# WARNING: This deletes all data!
+./reset.sh
+```
+
+---
+
+## Security Notes
+
+⚠️ **Before deploying to production:**
+
+- Generate new secrets: `./utils/generate-keys.sh`
+- Change default passwords in `.env`
+- Use HTTPS in production (configure reverse proxy)
+- Restrict network access (firewall rules)
+- Set up regular database backups
+
+---
+
+## More Resources
+
+- [Supabase Self-Hosting Docs](https://supabase.com/docs/guides/self-hosting/docker)
+- [Supabase GitHub Discussions](https://github.com/orgs/supabase/discussions)
+- [Kong Gateway Docs](https://docs.konghq.com/)
 
 ## License
 
-This repository is licensed under the Apache 2.0 License. See the main [Supabase repository](https://github.com/supabase/supabase) for details.
+Apache 2.0 License. See the main [Supabase repository](https://github.com/supabase/supabase) for details.

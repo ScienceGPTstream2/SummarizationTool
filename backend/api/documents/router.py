@@ -109,7 +109,7 @@ async def process_uploaded_file(
                 status_code=200,
                 content={
                     "message": "Document already processed (cached)",
-                    "conversion_id": cached_metadata.get("conversion_id", file_hash),
+                    "conversion_id": file_hash,  # Always use file_hash, not legacy UUID
                     "file_hash": file_hash,
                     "markdown_path": str(markdown_path),
                     "content_length": markdown_content_length,
@@ -166,8 +166,8 @@ async def process_uploaded_file(
         # Build response with available metadata
         response_content = {
             "message": "Document processed successfully",
-            "conversion_id": result["conversion_id"],
-            "file_hash": file_hash,  # Include file_hash for frontend
+            "conversion_id": file_hash,  # Always use file_hash, not processor's UUID
+            "file_hash": file_hash,
             "markdown_path": result["markdown_path"],
             "content_length": result["metadata"]["content_length"],
             "conversion_time": result["metadata"]["conversion_time"],
