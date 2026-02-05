@@ -9,10 +9,8 @@ import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from supabase import create_client, Client
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Environment variables are loaded from secrets.toml via core/config.py
 
 
 class SupabaseDBService:
