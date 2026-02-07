@@ -1,4 +1,4 @@
-name: Deploy to VM
+name: Deploy to A100 VM
 
 on:
   push:
@@ -7,15 +7,26 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
-      - name: SSH deploy
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.A100_VM_IP }}
-          username: azureuser
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/SummarizationTool
-            ./deploy.sh
+      - name: Pull latest repo
+        run: |
+          cd ~/SummarizationTool
+          git pull
+
+      - name: Install backend deps
+        run: |
+          cd ~/SummarizationTool/backend
+          source ../venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Install frontend deps
+        run: |
+          cd ~/SummarizationTool/frontend
+          npm install
+
+      - name: Restart services
+        run: |
+          sudo systemctl restart summarization-backend
+          sudo systemctl restart summarization-frontend
