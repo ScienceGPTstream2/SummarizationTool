@@ -1,4 +1,4 @@
-# 🎨 AI Document Summarization Tool 🚀
+# AI Document Summarization Tool 🚀
 
 Full-stack React + FastAPI application for AI-powered document summarization and entity extraction, with Supabase for authentication and data persistence.
 
