@@ -160,7 +160,7 @@ See [Supabase README](supabase-docker/README.md) for details.
 
 ---
 
-## 🙏 Thank You
+## 🙏 Thank You :)
 
 Special thanks to:
 
