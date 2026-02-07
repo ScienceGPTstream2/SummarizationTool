@@ -23,7 +23,7 @@ jobs:
 
       - name: Install frontend deps
         run: |
-          cd ~/SummarizationTool/frontend
+          cd ~/SummarizationTool
           npm install
 
       - name: Restart services
