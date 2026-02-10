@@ -75,6 +75,7 @@ import { DocumentData } from "../App";
 import { authenticatedFetch, getValidToken } from "../utils/authUtils";
 import { toast } from "sonner";
 import BatchResultsPage from "./BatchResultsPage";
+import { MarkdownViewer } from "./MarkdownViewer";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -2967,43 +2968,52 @@ export function EvaluationPage({
                                       : ""}
                                   </Label>
                                   <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                    <p className="text-sm whitespace-pre-wrap">
-                                      {(() => {
-                                        // Logic to resolve display text
-                                        if (
-                                          singleModeSourceModel &&
-                                          entity.extractionsByModel?.[
-                                            singleModeSourceModel
-                                          ]?.extracted
-                                        ) {
-                                          return entity.extractionsByModel[
+                                    {(() => {
+                                      // Logic to resolve display text
+                                      let extractedText: string | null = null;
+                                      if (
+                                        singleModeSourceModel &&
+                                        entity.extractionsByModel?.[
+                                          singleModeSourceModel
+                                        ]?.extracted
+                                      ) {
+                                        extractedText =
+                                          entity.extractionsByModel[
                                             singleModeSourceModel
                                           ].extracted;
-                                        }
-                                        // Check if there's any model with extraction for this entity
-                                        if (
-                                          singleModeSourceModel &&
-                                          entity.extractionsByModel &&
-                                          !entity.extractionsByModel[
-                                            singleModeSourceModel
-                                          ]
-                                        ) {
-                                          return (
-                                            <span className="text-muted-foreground italic">
-                                              No extraction available for this
-                                              model. Select a different model.
-                                            </span>
-                                          );
-                                        }
+                                      } else if (
+                                        singleModeSourceModel &&
+                                        entity.extractionsByModel &&
+                                        !entity.extractionsByModel[
+                                          singleModeSourceModel
+                                        ]
+                                      ) {
                                         return (
-                                          entity.extracted || (
-                                            <span className="text-muted-foreground italic">
-                                              No extraction available
-                                            </span>
-                                          )
+                                          <p className="text-sm text-muted-foreground italic">
+                                            No extraction available for this
+                                            model. Select a different model.
+                                          </p>
                                         );
-                                      })()}
-                                    </p>
+                                      } else {
+                                        extractedText =
+                                          entity.extracted || null;
+                                      }
+
+                                      if (!extractedText) {
+                                        return (
+                                          <p className="text-sm text-muted-foreground italic">
+                                            No extraction available
+                                          </p>
+                                        );
+                                      }
+
+                                      return (
+                                        <MarkdownViewer
+                                          content={extractedText}
+                                          className="text-sm"
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                   {entity.duration && (
                                     <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
