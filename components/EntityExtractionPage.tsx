@@ -62,9 +62,8 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { DocumentData } from "../App";
+import { MarkdownViewer } from "./MarkdownViewer";
 import {
   generateWordDocument,
   generateMarkdownDocument,
@@ -2528,10 +2527,10 @@ export function EntityExtractionPage({
                                     Markdown supported
                                   </span>
                                 </div>
-                                <div className="bg-gradient-to-br from-gray-50 to-blue-50 p-3 rounded-lg border border-gray-100 prose prose-sm max-w-none mt-3">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {entity.answer || entity.extracted}
-                                  </ReactMarkdown>
+                                <div className="bg-gradient-to-br from-gray-50 to-blue-50 p-3 rounded-lg border border-gray-100 mt-3">
+                                  <MarkdownViewer
+                                    content={entity.answer || entity.extracted || ""}
+                                  />
                                 </div>
                               </div>
 
@@ -2960,13 +2959,11 @@ export function EntityExtractionPage({
                                                   <Bot className="h-4 w-4" />
                                                   {modelName}
                                                 </h4>
-                                                <div className="prose prose-sm max-w-none text-gray-800 p-4 rounded border border-gray-200 bg-white">
-                                                  <ReactMarkdown
-                                                    remarkPlugins={[remarkGfm]}
-                                                  >
-                                                    {result.answer ||
-                                                      result.extracted}
-                                                  </ReactMarkdown>
+                                                <div className="text-gray-800 p-4 rounded border border-gray-200 bg-white">
+                                                  <MarkdownViewer
+                                                    content={result.answer ||
+                                                      result.extracted || ""}
+                                                  />
                                                 </div>
 
                                                 {/* References */}
@@ -3001,13 +2998,11 @@ export function EntityExtractionPage({
                                       ) : (
                                         /* Fallback for single model (legacy) */
                                         <div className="space-y-3">
-                                          <div className="prose prose-sm max-w-none text-gray-800 p-4 rounded border border-gray-200 bg-white">
-                                            <ReactMarkdown
-                                              remarkPlugins={[remarkGfm]}
-                                            >
-                                              {entity.answer ||
-                                                entity.extracted}
-                                            </ReactMarkdown>
+                                          <div className="text-gray-800 p-4 rounded border border-gray-200 bg-white">
+                                            <MarkdownViewer
+                                              content={entity.answer ||
+                                                entity.extracted || ""}
+                                            />
                                           </div>
                                         </div>
                                       )}
@@ -3048,11 +3043,9 @@ export function EntityExtractionPage({
                   <CardContent>
                     <ScrollArea className="h-96">
                       {currentFile.finalSummary ? (
-                        <div className="prose prose-sm max-w-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {currentFile.finalSummary}
-                          </ReactMarkdown>
-                        </div>
+                        <MarkdownViewer
+                          content={currentFile.finalSummary || ""}
+                        />
                       ) : isGeneratingParagraph ||
                         fileProcessingStatus[selectedFileId]?.status ===
                           "generating_summary" ? (
