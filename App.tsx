@@ -940,7 +940,11 @@ export default function App() {
           ],
           selectedProviders: evalConfig.selected_providers || [],
           selectedSourceModels: evalConfig.selected_source_models || [],
-          customEvaluationSteps: evalConfig.custom_evaluation_steps || {},
+          customEvaluationSteps:
+            evalConfig.custom_evaluation_steps &&
+            Object.keys(evalConfig.custom_evaluation_steps).length > 0
+              ? evalConfig.custom_evaluation_steps
+              : undefined, // Let EvaluationPage merge with its own defaults
         },
         entities: configEntities.map((e: any) => {
           const result = sessionData.extraction_results?.find(

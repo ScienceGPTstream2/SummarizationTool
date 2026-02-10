@@ -387,10 +387,15 @@ export function EvaluationPage({
   // Custom evaluation steps - restore from documentData or use defaults
   const [customEvaluationSteps, setCustomEvaluationSteps] = useState<
     Record<string, string[]>
-  >(
-    documentData.evaluationConfig?.customEvaluationSteps ||
-      DEFAULT_EVALUATION_STEPS
-  );
+  >(() => {
+    const restored =
+      documentData.evaluationConfig?.customEvaluationSteps;
+    if (restored && Object.keys(restored).length > 0) {
+      // Merge: defaults first, then restored overrides (preserves user edits)
+      return { ...DEFAULT_EVALUATION_STEPS, ...restored };
+    }
+    return { ...DEFAULT_EVALUATION_STEPS };
+  });
 
   // Dialog state for viewing/editing evaluation prompts
   const [editingMetric, setEditingMetric] = useState<string | null>(null);
@@ -586,7 +591,7 @@ export function EvaluationPage({
       } catch (error) {
         console.error("Failed to auto-save eval config:", error);
       }
-    }, 300); // 300ms debounce - fast save while preventing rapid-fire requests
+    }, 1500); // 1.5s debounce - avoids flooding backend while user is typing
 
     return () => {
       if (evalConfigSaveTimerRef.current) {
@@ -1052,7 +1057,7 @@ export function EvaluationPage({
   ) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: prev[metricId].map((step, idx) =>
+      [metricId]: (prev[metricId] || []).map((step, idx) =>
         idx === stepIndex ? newValue : step
       ),
     }));
@@ -1061,14 +1066,16 @@ export function EvaluationPage({
   const addEvaluationStep = (metricId: string) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: [...prev[metricId], ""],
+      [metricId]: [...(prev[metricId] || []), ""],
     }));
   };
 
   const removeEvaluationStep = (metricId: string, stepIndex: number) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: prev[metricId].filter((_, idx) => idx !== stepIndex),
+      [metricId]: (prev[metricId] || []).filter(
+        (_, idx) => idx !== stepIndex
+      ),
     }));
   };
 
@@ -2784,7 +2791,8 @@ export function EvaluationPage({
                                 removeEvaluationStep(editingMetric, idx)
                               }
                               disabled={
-                                customEvaluationSteps[editingMetric].length <= 1
+                                (customEvaluationSteps[editingMetric]?.length ??
+                                  0) <= 1
                               }
                               className="mt-2"
                             >

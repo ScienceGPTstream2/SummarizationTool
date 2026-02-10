@@ -170,16 +170,17 @@ class SessionService:
             updates["configuration"] = request.configuration.model_dump()
         if request.last_step is not None:
             updates["last_step"] = request.last_step
-        # Fetch existing session once if we need to merge configs
-        existing_session = None
+
+        # Fetch LIGHTWEIGHT session (no joins) if we need to merge configs
+        existing_session_basic = None
         if request.evaluation_config is not None or request.files_config is not None:
-            existing_session = self.db.get_session(session_id, user_id)
+            existing_session_basic = self.db.get_session_basic(session_id, user_id)
 
         if request.evaluation_config is not None:
             # Merge evaluation_config with existing instead of replacing
             existing_eval_config = (
-                existing_session.get("evaluation_config", {})
-                if existing_session
+                existing_session_basic.get("evaluation_config", {})
+                if existing_session_basic
                 else {}
             )
             merged_eval_config = {**existing_eval_config, **request.evaluation_config}
@@ -188,7 +189,9 @@ class SessionService:
             # Merge files_config with existing instead of replacing
             # This preserves ground_truths and other per-file configs when updating one file
             existing_files_config = (
-                existing_session.get("files_config", {}) if existing_session else {}
+                existing_session_basic.get("files_config", {})
+                if existing_session_basic
+                else {}
             )
 
             # Deep merge: for each file, merge its config
@@ -205,6 +208,13 @@ class SessionService:
             updates["files_config"] = merged_files_config
         if updates:
             self.db.update_session(session_id, user_id, updates)
+
+        # Check if this is a config-only update (no documents/extractions/evaluations)
+        has_heavy_updates = (
+            request.documents is not None
+            or request.extraction_results is not None
+            or request.evaluation_results is not None
+        )
 
         # Handle document updates
         if request.documents is not None:
@@ -268,7 +278,35 @@ class SessionService:
                             ground_truth=eval_result.ground_truth,
                         )
 
-        # Return updated session
+        # For config-only updates, return a lightweight session to avoid
+        # expensive joins (documents, extractions, evaluations).
+        # The frontend only checks response.ok for these PATCH calls.
+        if not has_heavy_updates:
+            basic = self.db.get_session_basic(session_id, user_id)
+            if basic is None:
+                return None
+            config_data = basic.get("configuration", {})
+            return Session(
+                session_id=basic["id"],
+                user_id=basic["user_id"],
+                name=basic["name"],
+                status=basic["status"],
+                last_step=basic.get("last_step", "upload"),
+                evaluation_config=basic.get("evaluation_config", {}),
+                files_config=basic.get("files_config", {}),
+                created_at=self._parse_timestamp(basic.get("created_at")),
+                updated_at=self._parse_timestamp(basic.get("updated_at")),
+                configuration=(
+                    SessionConfiguration(**config_data)
+                    if config_data
+                    else SessionConfiguration()
+                ),
+                documents=[],
+                extraction_results=[],
+                evaluation_results=[],
+            )
+
+        # Return full session for heavy updates
         return self.get_session(user_id, session_id)
 
     def delete_session(self, user_id: str, session_id: str) -> bool:
