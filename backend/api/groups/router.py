@@ -7,7 +7,7 @@ from typing import Optional, List
 from core.dependencies import get_current_user
 from services.groups.group_service import get_group_service
 
-router = APIRouter(prefix="/groups", tags=["groups"])
+router = APIRouter(prefix="/api/groups", tags=["groups"])
 
 
 # ==========================================
@@ -49,6 +49,9 @@ class MemberResponse(BaseModel):
     user_id: str
     role: str
     joined_at: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class GroupDetailResponse(GroupResponse):
@@ -259,3 +262,84 @@ async def remove_member(
             status_code=403,
             detail="Not authorized to remove this member",
         )
+
+
+# ==========================================
+# User Search (for Add Member)
+# ==========================================
+
+
+class UserSearchResult(BaseModel):
+    user_id: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+@router.get("/users/search", response_model=List[UserSearchResult])
+async def search_users(
+    q: str,
+    group_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Search users by name, email, or user ID for adding to groups."""
+    if not q or len(q) < 2:
+        return []
+
+    service = get_group_service()
+    query_lower = q.lower().strip()
+
+    # Get existing group members to exclude them
+    existing_member_ids: set = set()
+    if group_id:
+        try:
+            members = service.db.client.table("user_groups") \
+                .select("user_id") \
+                .eq("group_id", group_id) \
+                .execute()
+            existing_member_ids = {m["user_id"] for m in (members.data or [])}
+        except Exception:
+            pass
+
+    results: List[UserSearchResult] = []
+
+    # 1. Try exact/partial UUID match first
+    try:
+        # If query looks like a UUID prefix, search for users starting with it
+        users_resp = service.db.client.auth.admin.list_users()
+        if users_resp:
+            for user in users_resp:
+                if user.id in existing_member_ids:
+                    continue
+
+                meta = user.user_metadata or {}
+                display_name = (
+                    meta.get("full_name")
+                    or meta.get("name")
+                    or meta.get("preferred_username")
+                    or meta.get("user_name")
+                )
+                email = user.email or ""
+                avatar_url = meta.get("avatar_url")
+
+                # Match against user_id, display_name, or email
+                if (
+                    query_lower in (user.id or "").lower()
+                    or query_lower in (display_name or "").lower()
+                    or query_lower in email.lower()
+                ):
+                    results.append(
+                        UserSearchResult(
+                            user_id=user.id,
+                            display_name=display_name,
+                            email=email,
+                            avatar_url=avatar_url,
+                        )
+                    )
+
+                if len(results) >= 10:
+                    break
+    except Exception:
+        pass
+
+    return results

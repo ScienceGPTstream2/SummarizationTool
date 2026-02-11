@@ -138,6 +138,7 @@ class TemplateService:
 
         # Add permission info
         template["can_edit"] = self._can_edit(template, user_id)
+        template["is_owner"] = self._is_owner(template, user_id)
 
         return template
 
@@ -196,6 +197,7 @@ class TemplateService:
         for template in templates:
             if self._can_read(template, user_id, group_ids):
                 template["can_edit"] = self._can_edit(template, user_id, group_ids)
+                template["is_owner"] = self._is_owner(template, user_id, group_ids)
                 accessible.append(template)
 
         # Apply tags filter (post-query for array overlap)
@@ -648,6 +650,20 @@ class TemplateService:
             return role in ("member", "admin", "owner")
 
         # Global scope: not editable (only via service role)
+        return False
+
+    def _is_owner(
+        self,
+        template: Dict[str, Any],
+        user_id: str,
+        user_group_ids: Optional[List[str]] = None,
+    ) -> bool:
+        """Check if user is the owner/admin of a template (can manage lock/delete)"""
+        if template["scope"] == "user":
+            return template["owner_user_id"] == user_id
+        if template["scope"] == "group":
+            role = self.group_service._get_role(template["owner_group_id"], user_id)
+            return role in ("admin", "owner")
         return False
 
 

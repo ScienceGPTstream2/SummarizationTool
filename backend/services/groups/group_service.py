@@ -122,7 +122,7 @@ class GroupService:
             .eq("group_id", group_id)
             .execute()
         )
-        group["members"] = members_result.data or []
+        group["members"] = self._enrich_members_with_profiles(members_result.data or [])
 
         return group
 
@@ -276,7 +276,7 @@ class GroupService:
             .execute()
         )
 
-        return result.data or []
+        return self._enrich_members_with_profiles(result.data or [])
 
     def add_member(
         self,
@@ -489,6 +489,35 @@ class GroupService:
             .execute()
         )
         return len(owners.data) == 1 and owners.data[0]["user_id"] == user_id
+
+    def _enrich_members_with_profiles(
+        self, members: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enrich member records with user profile info (name, email) from Supabase auth."""
+        if not members:
+            return members
+
+        for member in members:
+            try:
+                user_resp = self.db.client.auth.admin.get_user_by_id(member["user_id"])
+                if user_resp and user_resp.user:
+                    user = user_resp.user
+                    # Try to get a display name from user_metadata (OAuth providers set this)
+                    meta = user.user_metadata or {}
+                    member["display_name"] = (
+                        meta.get("full_name")
+                        or meta.get("name")
+                        or meta.get("preferred_username")
+                        or meta.get("user_name")
+                        or None
+                    )
+                    member["email"] = user.email
+                    member["avatar_url"] = meta.get("avatar_url")
+            except Exception:
+                # If lookup fails, leave the fields empty
+                pass
+
+        return members
 
 
 # Singleton instance

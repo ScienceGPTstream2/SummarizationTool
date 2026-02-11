@@ -8,10 +8,12 @@ import { BatchStudySelectionPage } from "./components/BatchStudySelectionPage";
 import { EvaluationPage } from "./components/EvaluationPage";
 import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SessionHistoryPage } from "./components/SessionHistoryPage";
+import { TemplateWorkspacePage } from "./components/TemplateWorkspace/TemplateWorkspacePage";
+import { GroupManagementPage } from "./components/GroupManagement/GroupManagementPage";
 
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
-import { Briefcase, LogOut, Clock } from "lucide-react";
+import { Briefcase, LogOut, Clock, FileText, Users } from "lucide-react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
@@ -28,7 +30,9 @@ export type Step =
   | "extraction"
   | "evaluation"
   | "executive"
-  | "history";
+  | "history"
+  | "templates"
+  | "groups";
 
 export interface DocumentData {
   file: File | null;
@@ -791,9 +795,9 @@ export default function App() {
                   const avgScore =
                     evalResult.metrics.length > 0
                       ? evalResult.metrics.reduce(
-                          (sum: number, m: any) => sum + m.score,
-                          0
-                        ) / evalResult.metrics.length
+                        (sum: number, m: any) => sum + m.score,
+                        0
+                      ) / evalResult.metrics.length
                       : 0;
                   return {
                     ...evalResult,
@@ -885,9 +889,9 @@ export default function App() {
                       const avgScore =
                         evalResult.metrics.length > 0
                           ? evalResult.metrics.reduce(
-                              (sum: number, m: any) => sum + (m.score || 0),
-                              0
-                            ) / evalResult.metrics.length
+                            (sum: number, m: any) => sum + (m.score || 0),
+                            0
+                          ) / evalResult.metrics.length
                           : 0;
                       return {
                         ...evalResult,
@@ -960,7 +964,7 @@ export default function App() {
           // Get ground truth from files_config first, fallback to evaluation results
           const groundTruth =
             filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
-              e.name
+            e.name
             ] ||
             entityEvaluations.find((ev: any) => ev.ground_truth)
               ?.ground_truth ||
@@ -1041,9 +1045,9 @@ export default function App() {
               const avgScore =
                 evalResult.metrics.length > 0
                   ? evalResult.metrics.reduce(
-                      (sum: number, m: any) => sum + m.score,
-                      0
-                    ) / evalResult.metrics.length
+                    (sum: number, m: any) => sum + m.score,
+                    0
+                  ) / evalResult.metrics.length
                   : 0;
               return {
                 ...evalResult,
@@ -1122,9 +1126,9 @@ export default function App() {
                     const avgScore =
                       evalResult.metrics.length > 0
                         ? evalResult.metrics.reduce(
-                            (sum: number, m: any) => sum + (m.score || 0),
-                            0
-                          ) / evalResult.metrics.length
+                          (sum: number, m: any) => sum + (m.score || 0),
+                          0
+                        ) / evalResult.metrics.length
                         : 0;
                     return {
                       ...evalResult,
@@ -1247,6 +1251,10 @@ export default function App() {
             onBack={handleBack}
           />
         );
+      case "templates":
+        return <TemplateWorkspacePage onBack={handleBack} />;
+      case "groups":
+        return <GroupManagementPage onBack={handleBack} />;
       case "executive":
         return <ExecutiveModePage onBack={handleBack} />;
       case "upload":
@@ -1341,6 +1349,28 @@ export default function App() {
                     <Briefcase className="h-4 w-4 mr-2" />
                     Executive Mode
                   </RainbowButton>
+                )}
+
+                {currentStep !== "templates" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentStep("templates")}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Templates
+                  </Button>
+                )}
+
+                {currentStep !== "groups" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentStep("groups")}
+                  >
+                    <Users className="h-4 w-4 mr-2" />
+                    Groups
+                  </Button>
                 )}
 
                 {currentStep !== "history" && (

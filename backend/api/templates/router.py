@@ -7,7 +7,7 @@ from typing import Optional, List, Any
 from core.dependencies import get_current_user
 from services.templates.template_service import get_template_service
 
-router = APIRouter(prefix="/templates", tags=["templates"])
+router = APIRouter(prefix="/api/templates", tags=["templates"])
 
 
 # ==========================================
@@ -86,6 +86,7 @@ class TemplateResponse(BaseModel):
     created_at: str
     updated_at: str
     can_edit: Optional[bool] = None
+    is_owner: Optional[bool] = None
 
 
 class VersionResponse(BaseModel):
@@ -167,6 +168,7 @@ async def create_template(
             is_immutable=request.is_immutable,
         )
         template["can_edit"] = True
+        template["is_owner"] = True
         return template
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -264,6 +266,7 @@ async def fork_template(
         )
 
     template["can_edit"] = True
+    template["is_owner"] = True
     return template
 
 
