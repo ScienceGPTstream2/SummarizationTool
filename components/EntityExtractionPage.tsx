@@ -18,6 +18,7 @@ import {
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
+import { Slider } from "./ui/slider";
 import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
 import {
@@ -224,6 +225,9 @@ export function EntityExtractionPage({
       : currentFile?.selectedModel || "";
   });
 
+  // Temperature for paragraph generation (only used when model supports it)
+  const [temperature, setTemperature] = useState<number>(0.5);
+
   const [entities, setEntities] = useState<Entity[]>(
     currentFile?.entities || []
   );
@@ -300,7 +304,7 @@ export function EntityExtractionPage({
               system_prompt: e.systemPrompt,
             })),
             summary_prompt: summaryPrompt,
-            temperature: 0.0,
+            temperature: temperature,
           },
           documents: [
             {
@@ -700,6 +704,10 @@ export function EntityExtractionPage({
           model_id: primaryModelObj?.id,
           deployment: primaryModelObj?.deployment,
           api_version: primaryModelObj?.api_version,
+          temperature:
+            primaryModelObj?.supports_temperature !== false
+              ? temperature
+              : undefined,
           session_id: sessionIdRef.current, // Pass session ID for backend persistence
           file_hash: file.fileId, // CRITICAL: Include file_hash for multi-document sessions
         }),
@@ -790,6 +798,16 @@ export function EntityExtractionPage({
     };
     loadModels();
   }, []);
+
+  // Reset temperature to the model's default when selected model changes
+  useEffect(() => {
+    if (selectedModel && availableModels.length > 0) {
+      const modelObj = availableModels.find((m) => m.id === selectedModel);
+      if (modelObj) {
+        setTemperature(modelObj.default_temperature ?? 0.5);
+      }
+    }
+  }, [selectedModel, availableModels]);
 
   // Auto-start batch if coming from selection page with pending items
   useEffect(() => {
@@ -951,7 +969,7 @@ export function EntityExtractionPage({
               currentParagraphSystemPrompt !== undefined
                 ? currentParagraphSystemPrompt
                 : paragraphSystemPrompt,
-            temperature: 0.0,
+            temperature: temperature,
             // Keep per-file config in sync
             files_config: {
               ...(documentData.uploadedFiles || []).reduce(
@@ -1558,6 +1576,8 @@ export function EntityExtractionPage({
           model_id: modelObj?.id,
           deployment: modelObj?.deployment,
           api_version: modelObj?.api_version,
+          temperature:
+            modelObj?.supports_temperature !== false ? temperature : undefined,
           session_id: sessionIdRef.current, // Pass session ID for backend persistence
           file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
           status: "completed", // Set session as completed when summary is done
@@ -1810,6 +1830,10 @@ export function EntityExtractionPage({
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Generate the paragraph summary after all entities are extracted
+      // Determine if the current model supports temperature
+      const currentModelObj = availableModels.find(
+        (m) => m.id === selectedModel
+      );
       const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
         method: "POST",
         headers: {
@@ -1824,6 +1848,10 @@ export function EntityExtractionPage({
           model_id: modelIdToUse,
           deployment: deploymentToUse,
           api_version: apiVersionToUse,
+          temperature:
+            currentModelObj?.supports_temperature !== false
+              ? temperature
+              : undefined,
           session_id: sessionIdRef.current, // Pass session ID for backend persistence
           file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
         }),
@@ -2529,7 +2557,9 @@ export function EntityExtractionPage({
                                 </div>
                                 <div className="bg-gradient-to-br from-gray-50 to-blue-50 p-3 rounded-lg border border-gray-100 mt-3">
                                   <MarkdownViewer
-                                    content={entity.answer || entity.extracted || ""}
+                                    content={
+                                      entity.answer || entity.extracted || ""
+                                    }
                                   />
                                 </div>
                               </div>
@@ -2799,6 +2829,80 @@ export function EntityExtractionPage({
                         className="resize-none flex-1 min-h-[250px]"
                       />
                     </div>
+
+                    {/* Temperature control */}
+                    {(() => {
+                      const modelObj = availableModels.find(
+                        (m) => m.id === selectedModel
+                      );
+                      const supportsTemp =
+                        modelObj?.supports_temperature ?? true;
+                      const defaultTemp = modelObj?.default_temperature ?? 0.5;
+                      return (
+                        <div
+                          className={`space-y-3 rounded-lg border p-3 ${supportsTemp ? "border-gray-200 bg-gray-50" : "border-amber-200 bg-amber-50/50"}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Label className="text-sm font-medium">
+                                Temperature
+                              </Label>
+                              <div className="relative group">
+                                <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none w-56">
+                                  <p className="font-medium mb-1">
+                                    What is Temperature?
+                                  </p>
+                                  <p>
+                                    Controls the randomness of the AI output.
+                                    Lower values (closer to 0) produce more
+                                    focused, deterministic text. Higher values
+                                    (closer to 1) produce more creative, varied
+                                    text.
+                                  </p>
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                                </div>
+                              </div>
+                            </div>
+                            <span className="text-sm font-mono tabular-nums text-muted-foreground">
+                              {supportsTemp
+                                ? temperature.toFixed(2)
+                                : defaultTemp.toFixed(2)}
+                            </span>
+                          </div>
+                          {supportsTemp ? (
+                            <>
+                              <Slider
+                                value={[temperature]}
+                                onValueChange={([v]) => setTemperature(v)}
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                className="w-full"
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground -mt-1">
+                                <span>Precise</span>
+                                <span>Creative</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex items-start gap-2 rounded-md bg-amber-100/60 border border-amber-200 px-3 py-2">
+                              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                              <p className="text-xs text-amber-800">
+                                The selected model (
+                                <span className="font-medium">
+                                  {modelObj?.name}
+                                </span>
+                                ) does not support temperature adjustment. It
+                                uses a fixed temperature of{" "}
+                                {defaultTemp.toFixed(2)}.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     <p className="text-xs text-muted-foreground">
                       💡 Tip: The extracted entities will be automatically
                       included below your instructions.
@@ -2961,8 +3065,11 @@ export function EntityExtractionPage({
                                                 </h4>
                                                 <div className="text-gray-800 p-4 rounded border border-gray-200 bg-white">
                                                   <MarkdownViewer
-                                                    content={result.answer ||
-                                                      result.extracted || ""}
+                                                    content={
+                                                      result.answer ||
+                                                      result.extracted ||
+                                                      ""
+                                                    }
                                                   />
                                                 </div>
 
@@ -3000,8 +3107,11 @@ export function EntityExtractionPage({
                                         <div className="space-y-3">
                                           <div className="text-gray-800 p-4 rounded border border-gray-200 bg-white">
                                             <MarkdownViewer
-                                              content={entity.answer ||
-                                                entity.extracted || ""}
+                                              content={
+                                                entity.answer ||
+                                                entity.extracted ||
+                                                ""
+                                              }
                                             />
                                           </div>
                                         </div>

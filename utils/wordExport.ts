@@ -77,10 +77,7 @@ const createSubsectionHeading = (text: string): Paragraph => {
 };
 
 // Helper to create a styled table header cell
-const createHeaderCell = (
-  text: string,
-  widthPercent?: number
-): TableCell => {
+const createHeaderCell = (text: string, widthPercent?: number): TableCell => {
   const cell = new TableCell({
     children: [
       new Paragraph({
@@ -232,7 +229,8 @@ const htmlTablesToMarkdown = (text: string): string => {
       rowMatches.forEach((rowHtml) => {
         const cells: string[] = [];
         // Match th or td cells
-        const cellRegex = /<(th|td)[^>]*(?:colspan="(\d+)")?[^>]*>([\s\S]*?)<\/\1>/gi;
+        const cellRegex =
+          /<(th|td)[^>]*(?:colspan="(\d+)")?[^>]*>([\s\S]*?)<\/\1>/gi;
         let cellMatch;
 
         while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
@@ -292,9 +290,7 @@ const htmlTablesToMarkdown = (text: string): string => {
  * Supports: tables (markdown & HTML), bold, italic, lists, code blocks, headings, links, etc.
  * Falls back to a plain text paragraph if input is empty.
  */
-const markdownToDocxElements = async (
-  text: string
-): Promise<FileChild[]> => {
+const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
   if (!text) return [new Paragraph({ text: "" })];
 
   try {
@@ -601,8 +597,12 @@ export async function downloadEvaluationReport(
   // Build data rows
   for (const row of allRows) {
     // Convert markdown content to docx elements (async)
-    const groundTruthElements = await markdownToDocxElements(row.groundTruth) as (Paragraph | Table)[];
-    const actualOutputElements = await markdownToDocxElements(row.actualOutput) as (Paragraph | Table)[];
+    const groundTruthElements = (await markdownToDocxElements(
+      row.groundTruth
+    )) as (Paragraph | Table)[];
+    const actualOutputElements = (await markdownToDocxElements(
+      row.actualOutput
+    )) as (Paragraph | Table)[];
 
     const rowCells = [
       new TableCell({
@@ -771,8 +771,7 @@ export async function downloadEvaluationReport(
     summaryHeaderCells.push(createHeaderCell("Avg Correctness"));
   if (hasCompleteness)
     summaryHeaderCells.push(createHeaderCell("Avg Completeness"));
-  if (hasRelevance)
-    summaryHeaderCells.push(createHeaderCell("Avg Relevance"));
+  if (hasRelevance) summaryHeaderCells.push(createHeaderCell("Avg Relevance"));
   if (hasSafety) summaryHeaderCells.push(createHeaderCell("Avg Safety"));
 
   const summaryRows: TableRow[] = [
@@ -895,7 +894,9 @@ export async function downloadEvaluationReport(
   for (const [key, rows] of entityModelGroups) {
     const [studyName, entity, llmSource] = key.split("|");
 
-    sections.push(createSubsectionHeading(`${entity} — ${llmSource} (${studyName})`));
+    sections.push(
+      createSubsectionHeading(`${entity} — ${llmSource} (${studyName})`)
+    );
 
     // Show each judge's reasoning
     for (const row of rows) {
@@ -925,17 +926,35 @@ export async function downloadEvaluationReport(
 
       // Show all non-empty reasons with their metric names
       const reasonEntries: { metric: string; reason: string }[] = [];
-      if (row.reasons.correctness) reasonEntries.push({ metric: "Correctness", reason: row.reasons.correctness });
-      if (row.reasons.completeness) reasonEntries.push({ metric: "Completeness", reason: row.reasons.completeness });
-      if (row.reasons.relevance) reasonEntries.push({ metric: "Relevance", reason: row.reasons.relevance });
-      if (row.reasons.safety) reasonEntries.push({ metric: "Safety", reason: row.reasons.safety });
+      if (row.reasons.correctness)
+        reasonEntries.push({
+          metric: "Correctness",
+          reason: row.reasons.correctness,
+        });
+      if (row.reasons.completeness)
+        reasonEntries.push({
+          metric: "Completeness",
+          reason: row.reasons.completeness,
+        });
+      if (row.reasons.relevance)
+        reasonEntries.push({
+          metric: "Relevance",
+          reason: row.reasons.relevance,
+        });
+      if (row.reasons.safety)
+        reasonEntries.push({ metric: "Safety", reason: row.reasons.safety });
 
       for (const { metric, reason } of reasonEntries) {
         // Metric label
         sections.push(
           new Paragraph({
             children: [
-              new TextRun({ text: `${metric}:`, bold: true, size: 18, font: "Calibri" }),
+              new TextRun({
+                text: `${metric}:`,
+                bold: true,
+                size: 18,
+                font: "Calibri",
+              }),
             ],
             spacing: { before: 60, after: 20 },
             indent: { left: 360 },

@@ -29,7 +29,7 @@ class ParagraphGenerationRequest(BaseModel):
     gemini_project_id: Optional[str] = None  # Gemini project ID
     gemini_location: Optional[str] = None  # Gemini location
     max_tokens: int = 8048
-    temperature: float = 0.0  # Added temperature
+    temperature: float = 0.0  # Default temperature for paragraph generation
 
 
 @router.post("/generate_paragraph", dependencies=[Depends(get_current_user)])

@@ -194,6 +194,7 @@ class AzureLLMClient:
         payload = {
             "messages": messages,
             "max_completion_tokens": max_tokens,
+            "temperature": temperature,
             "n": 1,
             "stop": None,
         }
@@ -449,8 +450,9 @@ Prompt:
                     start_time = time.time()
 
                     # Use structured outputs with parse method
-                    # Note: GPT-5 Mini doesn't support temperature parameter, only default (1)
-                    # So we don't pass temperature for structured outputs
+                    # Note: Structured outputs do not support custom temperature on many
+                    # Azure models (gpt-5, gpt-5-mini, o3, etc.), so we omit it here.
+                    # Temperature adjustment is only applied to paragraph generation.
                     completion = await asyncio.to_thread(
                         lambda: client.beta.chat.completions.parse(
                             model=used_deployment,
@@ -460,7 +462,6 @@ Prompt:
                             ],
                             response_format=ExtractionResult,
                             max_completion_tokens=max_tokens,
-                            # temperature parameter not supported for GPT-5 Mini structured outputs
                         )
                     )
 
@@ -552,6 +553,8 @@ Prompt:
 
             url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
 
+            # Omit temperature for extraction fallback path — structured output
+            # models generally reject custom temperature values.
             payload = {
                 "messages": messages,
                 "max_completion_tokens": max_tokens,

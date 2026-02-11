@@ -389,8 +389,7 @@ export function EvaluationPage({
   const [customEvaluationSteps, setCustomEvaluationSteps] = useState<
     Record<string, string[]>
   >(() => {
-    const restored =
-      documentData.evaluationConfig?.customEvaluationSteps;
+    const restored = documentData.evaluationConfig?.customEvaluationSteps;
     if (restored && Object.keys(restored).length > 0) {
       // Merge: defaults first, then restored overrides (preserves user edits)
       return { ...DEFAULT_EVALUATION_STEPS, ...restored };
@@ -1074,9 +1073,7 @@ export function EvaluationPage({
   const removeEvaluationStep = (metricId: string, stepIndex: number) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: (prev[metricId] || []).filter(
-        (_, idx) => idx !== stepIndex
-      ),
+      [metricId]: (prev[metricId] || []).filter((_, idx) => idx !== stepIndex),
     }));
   };
 
