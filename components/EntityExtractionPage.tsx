@@ -694,12 +694,18 @@ export function EntityExtractionPage({
           );
         }
 
-        // Update files state incrementally to show progress
+        // Update files state AND documentData incrementally to show progress
         setFiles((prev) =>
           prev.map((f) =>
             f.fileId === file.fileId ? { ...f, entities: updatedEntities } : f
           )
         );
+        setDocumentData((prev) => ({
+          ...prev,
+          uploadedFiles: prev.uploadedFiles?.map((f) =>
+            f.fileId === file.fileId ? { ...f, entities: updatedEntities } : f
+          ),
+        }));
       } catch (err) {
         console.error(`Error processing entity for file ${file.fileId}:`, err);
       }
@@ -2198,7 +2204,10 @@ export function EntityExtractionPage({
                   const isGeneratingSummary =
                     status?.status === "generating_summary";
                   const isCompleted =
-                    !!file.finalSummary || status?.status === "completed";
+                    status?.status === "completed" ||
+                    (!!file.finalSummary &&
+                      !isProcessing &&
+                      !isGeneratingSummary);
                   const isError = status?.status === "error";
 
                   return (
@@ -2233,23 +2242,24 @@ export function EntityExtractionPage({
             </SelectTrigger>
             <SelectContent>
               {files.map((file) => {
-                const isProcessing =
-                  fileProcessingStatus[file.fileId]?.status === "processing";
-                const isCompleted = !!file.finalSummary;
+                const fileStatus = fileProcessingStatus[file.fileId]?.status;
+                const isProcessing = fileStatus === "processing";
+                const isGenerating = fileStatus === "generating_summary";
+                const isCompleted =
+                  fileStatus === "completed" ||
+                  (!!file.finalSummary && !isProcessing && !isGenerating);
 
                 return (
                   <SelectItem key={file.fileId} value={file.fileId}>
                     <div className="flex items-center gap-2">
-                      {isCompleted ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      ) : isProcessing ? (
+                      {isProcessing ? (
                         <Loader2 className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
-                      ) : fileProcessingStatus[file.fileId]?.status ===
-                        "error" ? (
-                        <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                      ) : fileProcessingStatus[file.fileId]?.status ===
-                        "generating_summary" ? (
+                      ) : isGenerating ? (
                         <Sparkles className="h-4 w-4 text-purple-500 animate-spin flex-shrink-0" />
+                      ) : isCompleted ? (
+                        <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                      ) : fileStatus === "error" ? (
+                        <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
                       ) : (
                         <Clock className="h-4 w-4 text-gray-300 flex-shrink-0" />
                       )}
@@ -2267,18 +2277,16 @@ export function EntityExtractionPage({
                               0}
                             ...
                           </span>
+                        ) : isGenerating ? (
+                          <span className="text-xs text-purple-600 animate-pulse">
+                            Generating Summary...
+                          </span>
                         ) : isCompleted ? (
                           <span className="text-xs text-green-600">
                             Completed
                           </span>
-                        ) : fileProcessingStatus[file.fileId]?.status ===
-                          "error" ? (
+                        ) : fileStatus === "error" ? (
                           <span className="text-xs text-red-600">Error</span>
-                        ) : fileProcessingStatus[file.fileId]?.status ===
-                          "generating_summary" ? (
-                          <span className="text-xs text-purple-600 animate-pulse">
-                            Generating Summary...
-                          </span>
                         ) : (
                           <span className="text-xs text-gray-400">Queued</span>
                         )}
@@ -3383,6 +3391,7 @@ export function EntityExtractionPage({
                     onClick={() =>
                       onComplete?.({
                         ...documentData,
+                        uploadedFiles: files,
                         studyType: selectedStudyType,
                         selectedModel: selectedModel,
                         entities: entities,
@@ -3391,7 +3400,27 @@ export function EntityExtractionPage({
                     }
                     variant="default"
                     size="lg"
-                    className="w-full bg-green-600 hover:bg-green-700 h-14 text-lg shadow-lg"
+                    disabled={(() => {
+                      // All files must be fully completed (entities extracted + all summaries generated)
+                      const anyStillProcessing = files.some((f) => {
+                        const fStatus = fileProcessingStatus[f.fileId]?.status;
+                        return (
+                          fStatus === "processing" ||
+                          fStatus === "generating_summary" ||
+                          fStatus === "queued"
+                        );
+                      });
+                      // Also check that every file with entities has at least one summary
+                      const allHaveSummaries = files.every(
+                        (f) =>
+                          !f.entities?.length ||
+                          f.finalSummary ||
+                          (f.summariesByModel &&
+                            Object.keys(f.summariesByModel).length > 0)
+                      );
+                      return anyStillProcessing || !allHaveSummaries;
+                    })()}
+                    className="w-full bg-green-600 hover:bg-green-700 h-14 text-lg shadow-lg disabled:opacity-50"
                   >
                     Continue to Evaluation
                     <ArrowRight className="h-5 w-5 ml-2" />
