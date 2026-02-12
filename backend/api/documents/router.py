@@ -11,6 +11,7 @@ from services.document import get_organized_file_service
 from services.document.document_service import DocumentService
 from services.document.bbox_normalizer import normalize_bbox_format
 from services.llm.llm_service import LLMService
+from services.telemetry.cost_tracker import cost_tracker
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -105,6 +106,20 @@ async def process_uploaded_file(
                 async with aiofiles.open(markdown_path, "r") as f:
                     markdown_content_length = len(await f.read())
 
+            # Estimate parse cost from cached metadata (if available)
+            parse_cost = 0.0
+            try:
+                parse_cost = cost_tracker.estimate_call_cost(
+                    provider="azure",
+                    model=processor_name,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    page_count=cached_metadata.get("page_count") or 0,
+                    duration=cached_metadata.get("conversion_time") or 0,
+                )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to estimate cached parse cost: {e}")
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -119,6 +134,7 @@ async def process_uploaded_file(
                     "figures_found": cached_metadata.get("figures_found", 0),
                     "figures": cached_metadata.get("figures", []),
                     "tables_found": cached_metadata.get("tables_found", 0),
+                    "parse_cost": parse_cost,
                 },
             )
 
@@ -135,6 +151,21 @@ async def process_uploaded_file(
             output_dir=output_dir,  # Direct output to organized structure
         )
         conversion_duration = time.perf_counter() - conversion_start
+
+        # Estimate parse cost (per-page or per-minute depending on processor)
+        parse_cost = 0.0
+        try:
+            metadata = result.get("metadata", {})
+            parse_cost = cost_tracker.estimate_call_cost(
+                provider="azure",
+                model=result.get("processor_used", processor_name),
+                prompt_tokens=0,
+                completion_tokens=0,
+                page_count=metadata.get("page_count") or 0,
+                duration=conversion_duration,
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to estimate parse cost: {e}")
 
         try:
             from services.telemetry.cost_tracker import cost_tracker
@@ -175,6 +206,7 @@ async def process_uploaded_file(
             "processor_fallback": result.get("processor_fallback", False),
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
+            "parse_cost": parse_cost,
         }
 
         # Include figures information if available
