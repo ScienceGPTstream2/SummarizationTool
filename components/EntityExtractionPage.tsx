@@ -19,7 +19,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Slider } from "./ui/slider";
-import { ScrollArea } from "./ui/scroll-area";
 import { Alert, AlertDescription } from "./ui/alert";
 import {
   AlertDialog,
@@ -3301,7 +3300,7 @@ export function EntityExtractionPage({
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ScrollArea className="max-h-96">
+                    <div className="max-h-[60vh] overflow-y-auto pr-2">
                       {(() => {
                         // Show per-model summary if available, fallback to global finalSummary
                         const perModelSummary =
@@ -3376,7 +3375,7 @@ export function EntityExtractionPage({
                           );
                         }
                       })()}
-                    </ScrollArea>
+                    </div>
                   </CardContent>
                 </Card>
               </div>

@@ -200,89 +200,118 @@ const getMetricReason = (result: any, metricName: string): string => {
 };
 
 /**
+ * Decode common HTML entities in text.
+ */
+const decodeHtmlEntities = (text: string): string => {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+};
+
+/**
+ * Parse a single HTML table string into markdown.
+ */
+const convertOneHtmlTable = (tableHtml: string): string => {
+  const rows: string[][] = [];
+  let caption = "";
+
+  const captionMatch = tableHtml.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i);
+  if (captionMatch) {
+    caption = decodeHtmlEntities(
+      captionMatch[1].replace(/<[^>]+>/g, "").trim()
+    );
+  }
+
+  // Match <tr> blocks — support both closed and unclosed rows
+  const rowMatches = tableHtml.match(
+    /<tr[^>]*>[\s\S]*?(?:<\/tr>|(?=<tr[^>]*>)|$)/gi
+  );
+  if (!rowMatches) return tableHtml;
+
+  let hasHeader = false;
+
+  rowMatches.forEach((rowHtml) => {
+    const cells: string[] = [];
+    // Match cells: support colspan, rowspan, and both closed & unclosed cells
+    const cellRegex =
+      /<(th|td)\b([^>]*)>([\s\S]*?)(?:<\/\1>|(?=<(?:th|td|tr)\b)|$)/gi;
+    let cellMatch;
+
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      const tag = cellMatch[1].toLowerCase();
+      const attrs = cellMatch[2] || "";
+      const colspanMatch = attrs.match(/colspan\s*=\s*"?(\d+)"?/i);
+      const colspan = colspanMatch ? parseInt(colspanMatch[1], 10) : 1;
+      const cellText = decodeHtmlEntities(
+        cellMatch[3].replace(/<[^>]+>/g, "").trim()
+      );
+
+      if (tag === "th") hasHeader = true;
+
+      cells.push(cellText);
+      for (let i = 1; i < colspan; i++) {
+        cells.push("");
+      }
+    }
+
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  });
+
+  if (rows.length === 0) return tableHtml;
+
+  // Normalize column count
+  const maxCols = Math.max(...rows.map((r) => r.length));
+  rows.forEach((row) => {
+    while (row.length < maxCols) row.push("");
+  });
+
+  // Build markdown table
+  let md = "";
+  if (caption) md += `**${caption}**\n\n`;
+
+  if (hasHeader && rows.length > 0) {
+    md += "| " + rows[0].join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.slice(1).forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  } else {
+    md += "| " + rows[0].map((_, i) => `Col ${i + 1}`).join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  }
+
+  return md;
+};
+
+/**
  * Convert HTML tables to markdown tables so markdown-docx can render them.
- * Handles <table>, <tr>, <th>, <td>, <caption>, colspan, etc.
+ * Handles both complete (<table>...</table>) and truncated tables.
  */
 const htmlTablesToMarkdown = (text: string): string => {
   if (!text.includes("<table")) return text;
 
-  return text.replace(
-    /<table[^>]*>([\s\S]*?)<\/table>/gi,
-    (_match, tableContent: string) => {
-      const rows: string[][] = [];
-      let caption = "";
-
-      // Extract caption
-      const captionMatch = tableContent.match(
-        /<caption[^>]*>([\s\S]*?)<\/caption>/i
-      );
-      if (captionMatch) {
-        caption = captionMatch[1].replace(/<[^>]+>/g, "").trim();
-      }
-
-      // Extract rows
-      const rowMatches = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
-      if (!rowMatches) return _match;
-
-      let hasHeader = false;
-
-      rowMatches.forEach((rowHtml) => {
-        const cells: string[] = [];
-        // Match th or td cells
-        const cellRegex =
-          /<(th|td)[^>]*(?:colspan="(\d+)")?[^>]*>([\s\S]*?)<\/\1>/gi;
-        let cellMatch;
-
-        while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
-          const tag = cellMatch[1].toLowerCase();
-          const colspan = parseInt(cellMatch[2] || "1", 10);
-          const cellText = cellMatch[3].replace(/<[^>]+>/g, "").trim();
-
-          if (tag === "th") hasHeader = true;
-
-          cells.push(cellText);
-          // Handle colspan by adding empty cells
-          for (let i = 1; i < colspan; i++) {
-            cells.push("");
-          }
-        }
-
-        if (cells.length > 0) {
-          rows.push(cells);
-        }
-      });
-
-      if (rows.length === 0) return _match;
-
-      // Normalize column count
-      const maxCols = Math.max(...rows.map((r) => r.length));
-      rows.forEach((row) => {
-        while (row.length < maxCols) row.push("");
-      });
-
-      // Build markdown table
-      let md = "";
-      if (caption) md += `**${caption}**\n\n`;
-
-      if (hasHeader && rows.length > 0) {
-        // First row is header
-        md += "| " + rows[0].join(" | ") + " |\n";
-        md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
-        rows.slice(1).forEach((row) => {
-          md += "| " + row.join(" | ") + " |\n";
-        });
-      } else {
-        // No header row — create an empty header
-        md += "| " + rows[0].map((_, i) => `Col ${i + 1}`).join(" | ") + " |\n";
-        md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
-        rows.forEach((row) => {
-          md += "| " + row.join(" | ") + " |\n";
-        });
-      }
-
-      return md;
-    }
+  // First pass: replace complete tables (<table>...</table>)
+  let result = text.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (match) =>
+    convertOneHtmlTable(match)
   );
+
+  // Second pass: handle any remaining truncated/unclosed tables
+  if (result.includes("<table")) {
+    result = result.replace(/<table[^>]*>[\s\S]*$/gi, (match) =>
+      convertOneHtmlTable(match)
+    );
+  }
+
+  return result;
 };
 
 /**
