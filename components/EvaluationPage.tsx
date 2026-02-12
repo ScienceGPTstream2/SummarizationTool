@@ -1599,6 +1599,29 @@ export function EvaluationPage({
       if (!controller.signal.aborted) {
         // Show success message only if not aborted
         setEvaluationComplete(true);
+
+        // Mark session as completed in the database
+        try {
+          const token = await getValidToken();
+          const { getCurrentUser } = await import("../utils/authUtils");
+          const user = await getCurrentUser();
+          if (token && user && documentData.sessionId) {
+            await fetch(`/api/sessions/${documentData.sessionId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                user_id: user.id,
+                status: "completed",
+              }),
+            });
+            console.log("✅ Session status set to completed");
+          }
+        } catch (err) {
+          console.error("Failed to update session status:", err);
+        }
       }
     } catch (error: any) {
       if (error.name !== "AbortError") {
@@ -2001,6 +2024,29 @@ export function EvaluationPage({
       toast.success("Batch Evaluation Complete", {
         description: `Successfully processed ${completedCount} evaluations.`,
       });
+
+      // Mark session as completed in the database
+      try {
+        const token = await getValidToken();
+        const { getCurrentUser } = await import("../utils/authUtils");
+        const user = await getCurrentUser();
+        if (token && user && documentData.sessionId) {
+          await fetch(`/api/sessions/${documentData.sessionId}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              user_id: user.id,
+              status: "completed",
+            }),
+          });
+          console.log("✅ Session status set to completed (batch eval)");
+        }
+      } catch (err) {
+        console.error("Failed to update session status:", err);
+      }
     } catch (error: any) {
       if (error.name === "AbortError") {
         toast("Evaluation Stopped", {

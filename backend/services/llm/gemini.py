@@ -469,11 +469,12 @@ Prompt:
         service_account_path_override: Optional[Path] = None,
         system_instruction: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # Supported models
+        # Supported models for paragraph generation
         gemini_models = [
             "publishers/google/models/gemini-2.5-pro",
             "publishers/google/models/gemini-2.5-flash-lite",
             "publishers/google/models/gemini-2.5-flash",
+            "publishers/google/models/gemini-3-pro-preview",
         ]
 
         # Handle model ID mapping for simple names (frontend sends full IDs, but support short names too)
@@ -487,10 +488,19 @@ Prompt:
             }
             model_id = model_mapping.get(model_id, model_id)
 
-        used_model_id = (
-            model_id
-            if model_id and model_id in gemini_models
-            else "publishers/google/models/gemini-2.5-flash"  # Default to flash
+        # Use the requested model if it starts with the Vertex AI prefix (trust frontend),
+        # otherwise fall back to the allowlist check, then default
+        if model_id and model_id.startswith("publishers/google/models/"):
+            used_model_id = model_id
+        elif model_id and model_id in gemini_models:
+            used_model_id = model_id
+        else:
+            used_model_id = (
+                "publishers/google/models/gemini-2.5-flash"  # Default to flash
+            )
+
+        print(
+            f"[Gemini Paragraph] Requested model_id: {model_id}, Using: {used_model_id}"
         )
 
         # Use provided system instruction or default for paragraph generation

@@ -225,8 +225,30 @@ export function EntityExtractionPage({
       : currentFile?.selectedModel || "";
   });
 
-  // Temperature for paragraph generation (only used when model supports it)
-  const [temperature, setTemperature] = useState<number>(0.5);
+  // Per-file, per-model temperature map for paragraph generation
+  // Structure: { fileId: { modelId: temperature } }
+  const [fileModelTemperatures, setFileModelTemperatures] = useState<
+    Record<string, Record<string, number>>
+  >(() => {
+    // Initialize from uploaded files' model_temperatures (restored from files_config)
+    const initial: Record<string, Record<string, number>> = {};
+    documentData.uploadedFiles?.forEach((f: any) => {
+      if (f.modelTemperatures && Object.keys(f.modelTemperatures).length > 0) {
+        initial[f.fileId] = f.modelTemperatures;
+      }
+    });
+    // Fallback: if global modelTemperatures exists (legacy), apply to all files
+    if (
+      Object.keys(initial).length === 0 &&
+      documentData.modelTemperatures &&
+      Object.keys(documentData.modelTemperatures).length > 0
+    ) {
+      documentData.uploadedFiles?.forEach((f: any) => {
+        initial[f.fileId] = { ...documentData.modelTemperatures! };
+      });
+    }
+    return initial;
+  });
 
   const [entities, setEntities] = useState<Entity[]>(
     currentFile?.entities || []
@@ -305,6 +327,7 @@ export function EntityExtractionPage({
             })),
             summary_prompt: summaryPrompt,
             temperature: temperature,
+            model_temperatures: modelTemperatures,
           },
           documents: [
             {
@@ -418,24 +441,38 @@ export function EntityExtractionPage({
     }
   };
 
-  // Sync state when selected file changes
+  // Sync model selection ONLY when the file selection changes (not when files data updates)
+  const prevSelectedFileIdRef = useRef<string>(selectedFileId);
+  useEffect(() => {
+    if (selectedFileId !== prevSelectedFileIdRef.current) {
+      prevSelectedFileIdRef.current = selectedFileId;
+      const file = files.find((f) => f.fileId === selectedFileId);
+      if (file) {
+        const preSelectedModels =
+          file.selectedModels || documentData.selectedModels || [];
+        if (preSelectedModels.length > 0) {
+          setSelectedModel(preSelectedModels[0]);
+        } else {
+          setSelectedModel(file.selectedModel || "");
+        }
+      }
+    }
+  }, [selectedFileId]);
+
+  // Sync other state when file selection or file data changes
   useEffect(() => {
     const file = files.find((f) => f.fileId === selectedFileId);
     if (file) {
       setSelectedStudyType(file.studyType || "");
-
-      // Initialize with first pre-selected model
-      const preSelectedModels =
-        file.selectedModels || documentData.selectedModels || [];
-      if (preSelectedModels.length > 0) {
-        setSelectedModel(preSelectedModels[0]);
-      } else {
-        setSelectedModel(file.selectedModel || "");
-      }
-
       setEntities(file.entities || []);
       setSummaryPrompt(file.summaryPrompt || "");
-      setShowResults(!!file.finalSummary);
+      setShowResults(
+        !!file.finalSummary ||
+          !!(
+            file.summariesByModel &&
+            Object.keys(file.summariesByModel).length > 0
+          )
+      );
       // Reset extraction progress for view
       setExtractingEntities(new Set());
       setCompletedEntities(new Set());
@@ -598,9 +635,6 @@ export function EntityExtractionPage({
     const primaryModelId = modelsToUse.includes(selectedModel)
       ? selectedModel
       : modelsToUse[0];
-    const primaryModelObj = availableModels.find(
-      (m) => m.id === primaryModelId
-    );
 
     const updatedEntities = [...(file.entities || [])];
 
@@ -681,71 +715,62 @@ export function EntityExtractionPage({
     }));
 
     try {
-      // Determine model type for summary
-      let modelTypeToUse = "azure";
-      const provider = primaryModelObj?.provider?.toLowerCase() || "";
-      if (provider.includes("google") || provider.includes("gemini")) {
-        modelTypeToUse = "gemini";
-      } else if (provider.includes("anthropic")) {
-        modelTypeToUse = "anthropic";
-      } else if (provider.includes("meta") || provider.includes("llama")) {
-        modelTypeToUse = "llama";
-      }
+      // Generate paragraph summaries for ALL selected models — show each as it arrives
+      const fileId = file.fileId;
+      let completedCount = 0;
 
-      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entities: updatedEntities,
-          summary_prompt: file.summaryPrompt,
-          model_type: modelTypeToUse,
-          model_id: primaryModelObj?.id,
-          deployment: primaryModelObj?.deployment,
-          api_version: primaryModelObj?.api_version,
-          temperature:
-            primaryModelObj?.supports_temperature !== false
-              ? temperature
-              : undefined,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: file.fileId, // CRITICAL: Include file_hash for multi-document sessions
-        }),
+      const summaryPromises = modelsToUse.map(async (mId: string) => {
+        const mObj = availableModels.find((m) => m.id === mId);
+        if (!mObj) return;
+
+        const mType = getModelType(mObj.provider || "");
+
+        // Use per-model entity results if available
+        const modelEntities = updatedEntities.map((e: any) => {
+          if (e.extractionsByModel?.[mId]) {
+            return { ...e, extracted: e.extractionsByModel[mId].extracted };
+          }
+          return e;
+        });
+
+        try {
+          const resp = await authenticatedFetch("/api/generate_paragraph", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              entities: modelEntities,
+              summary_prompt: file.summaryPrompt,
+              model_type: mType,
+              model_id: mObj.id,
+              deployment: mObj.deployment,
+              api_version: mObj.api_version,
+              temperature:
+                mObj.supports_temperature !== false
+                  ? getModelTemperature(mId, fileId)
+                  : undefined,
+              session_id: sessionIdRef.current,
+              file_hash: fileId,
+            }),
+          });
+
+          if (resp.ok) {
+            const data = await resp.json();
+            // Immediately show this model's result
+            updateParagraphForModel(fileId, mId, data.summary);
+            completedCount++;
+          }
+        } catch {
+          // silently skip failed models
+        }
       });
 
-      if (summaryResp.ok) {
-        const summaryData = await summaryResp.json();
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.fileId === file.fileId
-              ? {
-                  ...f,
-                  entities: updatedEntities,
-                  finalSummary: summaryData.summary,
-                }
-              : f
-          )
-        );
+      await Promise.all(summaryPromises);
 
-        // Update parent data
-        setDocumentData((prev) => ({
-          ...prev,
-          uploadedFiles: prev.uploadedFiles?.map((f) =>
-            f.fileId === file.fileId
-              ? {
-                  ...f,
-                  entities: updatedEntities,
-                  finalSummary: summaryData.summary,
-                }
-              : f
-          ),
-        }));
-
-        // Mark as completed immediately
+      if (completedCount > 0) {
         setFileProcessingStatus((prev) => ({
           ...prev,
-          [file.fileId]: {
-            ...prev[file.fileId],
+          [fileId]: {
+            ...prev[fileId],
             status: "completed",
           },
         }));
@@ -799,15 +824,33 @@ export function EntityExtractionPage({
     loadModels();
   }, []);
 
-  // Reset temperature to the model's default when selected model changes
-  useEffect(() => {
-    if (selectedModel && availableModels.length > 0) {
-      const modelObj = availableModels.find((m) => m.id === selectedModel);
-      if (modelObj) {
-        setTemperature(modelObj.default_temperature ?? 0.5);
-      }
+  // Helper: get the temperature for a specific model on a specific file
+  const getModelTemperature = (modelId: string, fileId?: string): number => {
+    const fId = fileId || selectedFileId;
+    const fileTemps = fileModelTemperatures[fId];
+    if (fileTemps?.[modelId] !== undefined) {
+      return fileTemps[modelId];
     }
-  }, [selectedModel, availableModels]);
+    const modelObj = availableModels.find((m) => m.id === modelId);
+    return modelObj?.default_temperature ?? 0.5;
+  };
+
+  // Derived: current temperature for the selected model on the current file
+  const temperature = getModelTemperature(selectedModel, selectedFileId);
+
+  // Convenience: get the per-model temperature map for the current file (for session save)
+  const modelTemperatures = fileModelTemperatures[selectedFileId] || {};
+
+  // Setter: update temperature for the currently selected model on the current file
+  const setTemperature = (value: number) => {
+    setFileModelTemperatures((prev) => ({
+      ...prev,
+      [selectedFileId]: {
+        ...(prev[selectedFileId] || {}),
+        [selectedModel]: value,
+      },
+    }));
+  };
 
   // Auto-start batch if coming from selection page with pending items
   useEffect(() => {
@@ -826,6 +869,56 @@ export function EntityExtractionPage({
       startBatchProcessing();
     }
   }, [availableModels]);
+
+  // Auto-generate missing paragraphs for restored sessions
+  // When all entities are extracted but some models are missing paragraphs,
+  // automatically generate them so the user sees per-model results immediately.
+  const autoGenTriggeredRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (
+      !currentFile?.fileId ||
+      !availableModels.length ||
+      isGeneratingParagraph ||
+      isExtracting ||
+      isBatchRunning
+    )
+      return;
+
+    // Skip if already triggered for this file
+    if (autoGenTriggeredRef.current.has(currentFile.fileId)) return;
+
+    const fileEntities = currentFile.entities || [];
+    const allExtracted =
+      fileEntities.length > 0 &&
+      fileEntities.every(
+        (e: any) => e.extracted && !e.extracted.startsWith("Error:")
+      );
+    if (!allExtracted) return;
+
+    const preSelectedModels =
+      currentFile.selectedModels || documentData.selectedModels || [];
+    const allModelIds =
+      preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+    const existingSummaries = currentFile.summariesByModel || {};
+    const missingModels = allModelIds.filter(
+      (id: string) => !existingSummaries[id]
+    );
+
+    if (missingModels.length > 0 && Object.keys(existingSummaries).length > 0) {
+      // There's at least one existing summary but some models are missing
+      console.log(
+        `[Auto-Gen] Restored session missing paragraphs for ${missingModels.length} models, auto-generating...`
+      );
+      autoGenTriggeredRef.current.add(currentFile.fileId);
+      generateParagraphsForAllModels();
+    }
+  }, [
+    currentFile?.fileId,
+    availableModels.length,
+    isGeneratingParagraph,
+    isExtracting,
+    isBatchRunning,
+  ]);
 
   // Fetch figures for PDF viewer
   useEffect(() => {
@@ -894,7 +987,7 @@ export function EntityExtractionPage({
     }
   }, [selectedStudyType, entities.length, currentFile]);
 
-  // Auto-save prompts and entities when they change (debounced)
+  // Auto-save prompts, entities, and model temperatures when they change (debounced)
   useEffect(() => {
     const timer = setTimeout(() => {
       if (sessionIdRef.current) {
@@ -909,7 +1002,7 @@ export function EntityExtractionPage({
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [summaryPrompt, paragraphSystemPrompt, entities]);
+  }, [summaryPrompt, paragraphSystemPrompt, entities, fileModelTemperatures]);
 
   const updateSessionConfiguration = async (
     sessionId: string,
@@ -970,6 +1063,7 @@ export function EntityExtractionPage({
                 ? currentParagraphSystemPrompt
                 : paragraphSystemPrompt,
             temperature: temperature,
+            model_temperatures: modelTemperatures,
             // Keep per-file config in sync
             files_config: {
               ...(documentData.uploadedFiles || []).reduce(
@@ -990,6 +1084,7 @@ export function EntityExtractionPage({
                         currentParagraphSystemPrompt !== undefined
                           ? currentParagraphSystemPrompt
                           : paragraphSystemPrompt,
+                      model_temperatures: fileModelTemperatures[f.fileId] || {},
                     };
                   } else if (f.entities) {
                     // Preserve existing if available
@@ -1002,6 +1097,7 @@ export function EntityExtractionPage({
                       })),
                       summary_prompt: f.summaryPrompt,
                       paragraph_system_prompt: f.paragraphSystemPrompt,
+                      model_temperatures: fileModelTemperatures[f.fileId] || {},
                     };
                   }
                   return acc;
@@ -1359,79 +1455,6 @@ export function EntityExtractionPage({
     }
   };
 
-  // LEGACY: Old single entity extraction function - replaced by extractEntityWithAllModels
-  /*
-  const extractSingleEntity = async (
-    entity: Entity,
-    index: number,
-    signal: AbortSignal,
-    conversionId: string,
-    modelConfig: {
-      modelType: string;
-      modelId?: string;
-      deployment?: string;
-      apiVersion?: string;
-    }
-  ) => {
-    try {
-      // Mark entity as extracting
-      setExtractingEntities((prev) => new Set(prev).add(entity.name));
-
-      const updatedEntity = await extractEntityFromApi(
-        entity,
-        conversionId,
-        modelConfig,
-        currentFile.processingResult?.processorUsed ||
-        documentData.processorUsed,
-        signal
-      );
-
-      // Update UI immediately with this entity's result
-      setEntities((prev) => {
-        const newEntities = [...prev];
-        newEntities[index] = updatedEntity;
-        return newEntities;
-      });
-
-      // Mark entity as completed
-      setExtractingEntities((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(entity.name);
-        return newSet;
-      });
-      setCompletedEntities((prev) => new Set(prev).add(entity.name));
-
-      return updatedEntity;
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        console.log(`Extraction aborted for ${entity.name}`);
-        throw err;
-      }
-      console.error(`Error extracting ${entity.name}:`, err);
-      const errorEntity = {
-        ...entity,
-        extracted: `Error: ${err.message}`,
-      };
-
-      // Update UI with error
-      setEntities((prev) => {
-        const newEntities = [...prev];
-        newEntities[index] = errorEntity;
-        return newEntities;
-      });
-
-      // Mark as completed (with error)
-      setExtractingEntities((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(entity.name);
-        return newSet;
-      });
-      setCompletedEntities((prev) => new Set(prev).add(entity.name));
-      return errorEntity;
-    }
-  };
-  */
-
   const handleRunSingleEntity = async (index: number) => {
     if (isExtracting) return;
 
@@ -1543,72 +1566,196 @@ export function EntityExtractionPage({
     }
   };
 
-  // NEW: Generate summary only (without extraction)
-  const generateSummaryOnly = async () => {
-    setIsGeneratingParagraph(true);
+  // Helper: determine model_type from provider string
+  const getModelType = (providerStr: string): string => {
+    const p = providerStr.toLowerCase();
+    if (p.includes("google") || p.includes("gemini")) return "gemini";
+    if (p.includes("anthropic")) return "anthropic";
+    if (p.includes("meta") || p.includes("llama")) return "llama";
+    if (p.includes("macbook")) return "macbook";
+    return "azure";
+  };
 
+  // Generate paragraph for a SINGLE model (used for Regenerate when user changes temp/prompt)
+  const generateSummaryForModel = async (modelId: string) => {
+    const modelObj = availableModels.find((m) => m.id === modelId);
+    if (!modelObj) throw new Error(`Model ${modelId} not found`);
+
+    const modelTypeToUse = getModelType(modelObj.provider || "");
+
+    // Use per-model entity results if available
+    const modelEntities = entities.map((e) => {
+      if (e.extractionsByModel?.[modelId]) {
+        return { ...e, extracted: e.extractionsByModel[modelId].extracted };
+      }
+      return e;
+    });
+
+    console.log(
+      `[Paragraph Generation] Model: ${modelObj.name} (${modelId}), type: ${modelTypeToUse}`
+    );
+
+    const resp = await authenticatedFetch("/api/generate_paragraph", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entities: modelEntities,
+        summary_prompt: summaryPrompt.includes("{{entities}}")
+          ? summaryPrompt
+          : `${summaryPrompt}\n\n{{entities}}`,
+        system_prompt: paragraphSystemPrompt || undefined,
+        model_type: modelTypeToUse,
+        model_id: modelObj.id,
+        deployment: modelObj.deployment,
+        api_version: modelObj.api_version,
+        temperature:
+          modelObj.supports_temperature !== false
+            ? getModelTemperature(modelId)
+            : undefined,
+        session_id: sessionIdRef.current,
+        file_hash: currentFile?.fileId,
+      }),
+    });
+
+    if (!resp.ok) throw new Error("Summary generation failed");
+    const data = await resp.json();
+    return data.summary as string;
+  };
+
+  // Generate paragraphs for ALL selected models that don't have one yet
+  // Helper: update files & documentData with a single model's paragraph result
+  const updateParagraphForModel = (
+    fileId: string,
+    modelId: string,
+    summary: string
+  ) => {
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.fileId === fileId
+          ? {
+              ...f,
+              finalSummary: f.finalSummary || summary,
+              summariesByModel: {
+                ...(f.summariesByModel || {}),
+                [modelId]: summary,
+              },
+            }
+          : f
+      )
+    );
+    setDocumentData((prev) => ({
+      ...prev,
+      uploadedFiles: prev.uploadedFiles?.map((f) =>
+        f.fileId === fileId
+          ? {
+              ...f,
+              finalSummary: f.finalSummary || summary,
+              summariesByModel: {
+                ...(f.summariesByModel || {}),
+                [modelId]: summary,
+              },
+            }
+          : f
+      ),
+    }));
+  };
+
+  // Generate paragraphs for all models — each result shows immediately as it arrives
+  // If forceModelIds is provided, regenerate only those (even if they already have a summary)
+  const generateParagraphsForAllModels = async (forceModelIds?: string[]) => {
+    setIsGeneratingParagraph(true);
     try {
-      const modelObj = availableModels.find((m) => m.id === selectedModel);
-      let modelTypeToUse = "azure";
-      const provider = modelObj?.provider?.toLowerCase() || "";
-      if (provider.includes("google") || provider.includes("gemini")) {
-        modelTypeToUse = "gemini";
-      } else if (provider.includes("anthropic")) {
-        modelTypeToUse = "anthropic";
-      } else if (provider.includes("meta") || provider.includes("llama")) {
-        modelTypeToUse = "llama";
-      } else if (provider.includes("macbook")) {
-        modelTypeToUse = "macbook";
+      const preSelectedModels =
+        currentFile?.selectedModels || documentData.selectedModels || [];
+      const allModelIds =
+        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+      // Determine which models need paragraphs
+      const existingSummaries = currentFile?.summariesByModel || {};
+      const modelsToGenerate = forceModelIds
+        ? forceModelIds
+        : allModelIds.filter((id: string) => !existingSummaries[id]);
+
+      if (modelsToGenerate.length === 0) {
+        console.log(
+          "[Paragraph Generation] All models already have paragraphs"
+        );
+        return;
       }
 
-      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entities: entities,
-          summary_prompt: summaryPrompt.includes("{{entities}}")
-            ? summaryPrompt
-            : `${summaryPrompt}\n\n{{entities}}`,
-          system_prompt: paragraphSystemPrompt || undefined,
-          model_type: modelTypeToUse,
-          model_id: modelObj?.id,
-          deployment: modelObj?.deployment,
-          api_version: modelObj?.api_version,
-          temperature:
-            modelObj?.supports_temperature !== false ? temperature : undefined,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
-          status: "completed", // Set session as completed when summary is done
-        }),
+      console.log(
+        `[Paragraph Generation] Generating for ${modelsToGenerate.length} models: ${modelsToGenerate.join(", ")}`
+      );
+
+      const fileId = selectedFileId;
+
+      // Fire all requests concurrently, but update UI as each one completes
+      const promises = modelsToGenerate.map(async (modelId: string) => {
+        try {
+          const summary = await generateSummaryForModel(modelId);
+          console.log(
+            `✅ Paragraph generated for ${availableModels.find((m) => m.id === modelId)?.name || modelId}`
+          );
+          // Immediately show this model's result in the UI
+          updateParagraphForModel(fileId, modelId, summary);
+          return { modelId, success: true };
+        } catch (err) {
+          console.error(`Failed to generate paragraph for ${modelId}:`, err);
+          return { modelId, success: false };
+        }
       });
 
-      if (!summaryResp.ok) {
-        throw new Error("Summary generation failed");
-      }
+      // Wait for all to settle (UI already updated incrementally)
+      await Promise.all(promises);
 
-      const summaryData = await summaryResp.json();
-      const finalSummary = summaryData.summary;
-
-      // Persistence: Save specific CONFIGURATION (prompts) to DB
-      // The summary text itself is now saved by the backend during generation
+      // Persist config once at the end
       if (sessionIdRef.current) {
         await updateSessionConfiguration(
           sessionIdRef.current,
           entities,
           undefined,
           summaryPrompt,
-          paragraphSystemPrompt,
-          "completed" // Set status to completed
+          paragraphSystemPrompt
+        );
+      }
+    } catch (err) {
+      console.error("Paragraph generation error:", err);
+    } finally {
+      setIsGeneratingParagraph(false);
+    }
+  };
+
+  // Regenerate paragraph for the currently selected model only (user changed temp/prompt)
+  const regenerateSummaryForCurrentModel = async () => {
+    setIsGeneratingParagraph(true);
+    try {
+      const summary = await generateSummaryForModel(selectedModel);
+      const summaryModelId = selectedModel;
+
+      if (sessionIdRef.current) {
+        await updateSessionConfiguration(
+          sessionIdRef.current,
+          entities,
+          undefined,
+          summaryPrompt,
+          paragraphSystemPrompt
+          // Do NOT pass "completed" - status only changes after evaluation
         );
       }
 
-      // Update state
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? {
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+                summariesByModel: {
+                  ...(f.summariesByModel || {}),
+                  [summaryModelId]: summary,
+                },
+              }
             : f
         )
       );
@@ -1616,13 +1763,22 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? {
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+                summariesByModel: {
+                  ...(f.summariesByModel || {}),
+                  [summaryModelId]: summary,
+                },
+              }
             : f
         ),
       }));
     } catch (err) {
-      console.error("Summary generation error:", err);
-      alert("Failed to generate summary");
+      console.error("Summary regeneration error:", err);
+      alert("Failed to regenerate summary");
     } finally {
       setIsGeneratingParagraph(false);
     }
@@ -1635,8 +1791,16 @@ export function EntityExtractionPage({
     );
 
     if (allExtracted) {
-      // Just generate summary
-      generateSummaryOnly();
+      // Check if the current model already has a paragraph
+      const hasCurrentModelSummary =
+        currentFile?.summariesByModel?.[selectedModel];
+      if (hasCurrentModelSummary) {
+        // User explicitly wants to regenerate (changed temp/prompt)
+        regenerateSummaryForCurrentModel();
+      } else {
+        // Generate paragraphs for all models that are missing
+        generateParagraphsForAllModels();
+      }
     } else {
       // Run only missing entities (or all if none extracted)
       handleRunSummarization(false);
@@ -1678,23 +1842,6 @@ export function EntityExtractionPage({
         );
       }
 
-      const modelObj = availableModels.find((m) => m.id === selectedModel);
-      // Determine model_type based on provider
-      let modelTypeToUse = "azure"; // default
-      const provider = modelObj?.provider?.toLowerCase() || "";
-      if (provider.includes("google") || provider.includes("gemini")) {
-        modelTypeToUse = "gemini";
-      } else if (provider.includes("anthropic")) {
-        modelTypeToUse = "anthropic";
-      } else if (provider.includes("meta") || provider.includes("llama")) {
-        modelTypeToUse = "llama";
-      } else if (provider.includes("macbook")) {
-        modelTypeToUse = "macbook";
-      }
-      const modelIdToUse = modelObj?.id; // For Gemini and Anthropic models
-      const deploymentToUse = modelObj?.deployment; // For Azure models
-      const apiVersionToUse = modelObj?.api_version; // For Azure models
-
       // Create session if not exists
       if (!sessionIdRef.current) {
         await createSession();
@@ -1717,44 +1864,6 @@ export function EntityExtractionPage({
           err
         );
       }
-
-      // Set initial batch state immediately
-      // This part of the code seems to be for a batch file processing scenario,
-      // but handleRunSummarization is currently designed for entities within a single file.
-      // Applying the change as requested, assuming `setIsBatchRunning` and `processFile`
-      // are defined elsewhere or this function is being refactored for batch file processing.
-      // Note: `files` and `processFile` are not defined in the provided context of handleRunSummarization.
-      // This might lead to runtime errors if not accompanied by other changes.
-      // setIsBatchRunning(true); // Uncomment if setIsBatchRunning is defined and needed here
-      // setIsExtracting(true); // Already set above
-
-      // Initialize processing state for all files
-      // const initialFilesState = files.map(f => ({
-      //   ...f,
-      //   // If it's the first file, mark as processing immediately
-      //   status: f.fileId === files[0].fileId ? "processing" : "pending"
-      // }));
-      // Note: In a real app we'd update the parent state here, but for now we rely on local state updates
-      // during the process loop.
-
-      // for (let i = 0; i < files.length; i++) {
-      //   if (abortControllerRef.current?.signal.aborted) break;
-
-      //   const file = files[i];
-
-      //   // Update selection to show current file being processed
-      //   setSelectedFileId(file.fileId);
-
-      //   // Small delay to allow UI to update
-      //   await new Promise(resolve => setTimeout(resolve, 100));
-
-      //   try {
-      //     await processFile(file, i, files.length);
-      //   } catch (error) {
-      //     console.error(`Error processing file ${ file.fileId }: `, error);
-      //     // Continue to next file even if one fails
-      //   }
-      // }
 
       // Process entities with concurrency limit
       const CONCURRENCY_LIMIT = 5;
@@ -1820,7 +1929,7 @@ export function EntityExtractionPage({
       if (signal.aborted) return;
 
       console.log(
-        "\n✅ All entities extracted! Generating paragraph summary...\n"
+        "\n✅ All entities extracted! Generating paragraph summaries for all models...\n"
       );
 
       // Set state to show we're generating the paragraph and allow UI to update
@@ -1829,69 +1938,93 @@ export function EntityExtractionPage({
       // Small delay to ensure UI updates before the API call
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Generate the paragraph summary after all entities are extracted
-      // Determine if the current model supports temperature
-      const currentModelObj = availableModels.find(
-        (m) => m.id === selectedModel
-      );
-      const summaryResp = await authenticatedFetch("/api/generate_paragraph", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entities: updatedEntities,
-          summary_prompt: summaryPrompt.includes("{{entities}}")
-            ? summaryPrompt
-            : `${summaryPrompt}\n\n{{entities}}`,
-          model_type: modelTypeToUse,
-          model_id: modelIdToUse,
-          deployment: deploymentToUse,
-          api_version: apiVersionToUse,
-          temperature:
-            currentModelObj?.supports_temperature !== false
-              ? temperature
-              : undefined,
-          session_id: sessionIdRef.current, // Pass session ID for backend persistence
-          file_hash: currentFile?.fileId, // CRITICAL: Include file_hash for multi-document sessions
-        }),
-        signal,
-      });
+      // Generate paragraph summaries for ALL selected models — show each as it arrives
+      const preSelectedModels =
+        currentFile?.selectedModels || documentData.selectedModels || [];
+      const allModelsToSummarize =
+        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
 
-      if (!summaryResp.ok) {
-        const errBody = await summaryResp.json().catch(() => ({}));
-        const detail =
-          errBody.detail || errBody.error || "Summary generation failed";
-        throw new Error(detail);
-      }
+      const formattedPrompt = summaryPrompt.includes("{{entities}}")
+        ? summaryPrompt
+        : `${summaryPrompt}\n\n{{entities}}`;
 
-      const summaryData = await summaryResp.json();
-      const finalSummary = summaryData.summary;
+      const fileId = selectedFileId;
 
-      console.log("✅ Summary generated successfully!\n");
-
+      // First update entities state
       setEntities(updatedEntities);
 
-      // Update files state
-      const updatedFiles = files.map((f) =>
-        f.fileId === selectedFileId
+      // Update files with entities immediately (before paragraph generation)
+      const updatedFilesWithEntities = files.map((f) =>
+        f.fileId === fileId
           ? {
               ...f,
               studyType: selectedStudyType,
               selectedModel: selectedModel,
               entities: updatedEntities,
               summaryPrompt: summaryPrompt,
-              finalSummary,
             }
           : f
       );
-      setFiles(updatedFiles);
-
-      // Update parent
+      setFiles(updatedFilesWithEntities);
       setDocumentData({
         ...documentData,
-        uploadedFiles: updatedFiles,
+        uploadedFiles: updatedFilesWithEntities,
       });
+
+      // Fire all paragraph requests concurrently, update UI as each completes
+      const summaryPromises = allModelsToSummarize.map(
+        async (modelId: string) => {
+          const mObj = availableModels.find((m) => m.id === modelId);
+          if (!mObj) return;
+
+          const mType = getModelType(mObj.provider || "");
+
+          // Use per-model entity results if available
+          const modelEntities = updatedEntities.map((e) => {
+            if (e.extractionsByModel?.[modelId]) {
+              return {
+                ...e,
+                extracted: e.extractionsByModel[modelId].extracted,
+              };
+            }
+            return e;
+          });
+
+          try {
+            const resp = await authenticatedFetch("/api/generate_paragraph", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                entities: modelEntities,
+                summary_prompt: formattedPrompt,
+                model_type: mType,
+                model_id: mObj.id,
+                deployment: mObj.deployment,
+                api_version: mObj.api_version,
+                temperature:
+                  mObj.supports_temperature !== false
+                    ? getModelTemperature(modelId)
+                    : undefined,
+                session_id: sessionIdRef.current,
+                file_hash: currentFile?.fileId,
+              }),
+              signal,
+            });
+
+            if (resp.ok) {
+              const data = await resp.json();
+              console.log(`✅ Paragraph generated for ${mObj.name}`);
+              // Immediately show this model's result
+              updateParagraphForModel(fileId, modelId, data.summary);
+            }
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            console.error(`Error generating paragraph for ${mObj.name}:`, err);
+          }
+        }
+      );
+
+      await Promise.all(summaryPromises);
     } catch (err: any) {
       if (err.name === "AbortError") {
         console.log("Summarization aborted");
@@ -2957,13 +3090,22 @@ export function EntityExtractionPage({
                           <>
                             <PlayCircle className="h-5 w-5 mr-2" />
                             <span className="font-medium">
-                              {entities.every(
-                                (e) =>
-                                  e.extracted &&
-                                  !e.extracted.startsWith("Error:")
-                              )
-                                ? "Regenerate Paragraph"
-                                : "Run Entity Extraction & Generate Paragraph"}
+                              {(() => {
+                                const allExtracted = entities.every(
+                                  (e) =>
+                                    e.extracted &&
+                                    !e.extracted.startsWith("Error:")
+                                );
+                                if (!allExtracted)
+                                  return "Run Entity Extraction & Generate Paragraph";
+                                const hasCurrentSummary =
+                                  currentFile?.summariesByModel?.[
+                                    selectedModel
+                                  ];
+                                if (hasCurrentSummary)
+                                  return `Regenerate Paragraph with ${availableModels.find((m) => m.id === selectedModel)?.name || selectedModel}`;
+                                return "Generate Paragraphs for All Models";
+                              })()}
                             </span>
                           </>
                         )}
@@ -3151,29 +3293,81 @@ export function EntityExtractionPage({
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ScrollArea className="h-96">
-                      {currentFile.finalSummary ? (
-                        <MarkdownViewer
-                          content={currentFile.finalSummary || ""}
-                        />
-                      ) : isGeneratingParagraph ||
-                        fileProcessingStatus[selectedFileId]?.status ===
-                          "generating_summary" ? (
-                        <div className="flex flex-col items-center justify-center h-full text-purple-600 animate-pulse">
-                          <Sparkles className="h-8 w-8 mb-2 animate-spin" />
-                          <p className="font-medium">Generating Summary...</p>
-                          <p className="text-xs text-purple-400 mt-1">
-                            Synthesizing extracted entities...
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-muted-foreground">
-                          <p>
-                            Paragraph summary will appear here after
-                            generation...
-                          </p>
-                        </div>
-                      )}
+                    <ScrollArea className="max-h-96">
+                      {(() => {
+                        // Show per-model summary if available, fallback to global finalSummary
+                        const perModelSummary =
+                          currentFile.summariesByModel?.[selectedModel];
+                        const displaySummary =
+                          perModelSummary || currentFile.finalSummary;
+                        const modelName =
+                          availableModels.find((m) => m.id === selectedModel)
+                            ?.name || selectedModel;
+
+                        if (displaySummary) {
+                          return (
+                            <div>
+                              {currentFile.summariesByModel &&
+                                Object.keys(currentFile.summariesByModel)
+                                  .length > 0 && (
+                                  <div className="mb-3 flex items-center gap-2">
+                                    <span className="text-xs font-medium text-muted-foreground">
+                                      Generated by:
+                                    </span>
+                                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                      {perModelSummary
+                                        ? modelName
+                                        : availableModels.find(
+                                            (m) =>
+                                              m.id ===
+                                              Object.keys(
+                                                currentFile.summariesByModel
+                                              )[0]
+                                          )?.name ||
+                                          Object.keys(
+                                            currentFile.summariesByModel
+                                          )[0] ||
+                                          "Unknown"}
+                                    </span>
+                                    {!perModelSummary &&
+                                      currentFile.finalSummary && (
+                                        <span className="text-xs text-amber-600 italic">
+                                          (No summary for {modelName} yet —
+                                          showing last generated)
+                                        </span>
+                                      )}
+                                  </div>
+                                )}
+                              <MarkdownViewer content={displaySummary} />
+                            </div>
+                          );
+                        } else if (
+                          isGeneratingParagraph ||
+                          fileProcessingStatus[selectedFileId]?.status ===
+                            "generating_summary"
+                        ) {
+                          return (
+                            <div className="flex flex-col items-center justify-center h-full text-purple-600 animate-pulse">
+                              <Sparkles className="h-8 w-8 mb-2 animate-spin" />
+                              <p className="font-medium">
+                                Generating Summary...
+                              </p>
+                              <p className="text-xs text-purple-400 mt-1">
+                                Synthesizing extracted entities...
+                              </p>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div className="flex items-center justify-center h-full text-muted-foreground">
+                              <p>
+                                Paragraph summary will appear here after
+                                generation...
+                              </p>
+                            </div>
+                          );
+                        }
+                      })()}
                     </ScrollArea>
                   </CardContent>
                 </Card>

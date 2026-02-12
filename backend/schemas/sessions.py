@@ -23,6 +23,9 @@ class SessionConfiguration(BaseModel):
     summary_prompt: Optional[str] = None
     paragraph_system_prompt: Optional[str] = None
     temperature: float = 0.0
+    model_temperatures: Optional[Dict[str, float]] = Field(
+        default_factory=dict
+    )  # Per-model temperature overrides (model_id -> temperature)
     files_config: Optional[Dict[str, Any]] = Field(
         default_factory=dict
     )  # Per-file configurations

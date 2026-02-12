@@ -29,7 +29,9 @@ class ParagraphGenerationRequest(BaseModel):
     gemini_project_id: Optional[str] = None  # Gemini project ID
     gemini_location: Optional[str] = None  # Gemini location
     max_tokens: int = 8048
-    temperature: float = 0.0  # Default temperature for paragraph generation
+    temperature: Optional[float] = (
+        None  # Temperature for paragraph generation (None = use model default)
+    )
 
 
 @router.post("/generate_paragraph", dependencies=[Depends(get_current_user)])
@@ -61,6 +63,9 @@ async def generate_paragraph(
         print(f"[Summarize] Final user prompt:\n{user_prompt}")
 
         # Call the LLM service to generate the summary
+        print(
+            f"[Summarize] model_type={request.model_type}, model_id={request.model_id}, deployment={request.deployment}, temperature={request.temperature}"
+        )
         session_id = http_request.headers.get("X-Session-Id")
         result = await llm_service.generate_paragraph(
             user_prompt=user_prompt,

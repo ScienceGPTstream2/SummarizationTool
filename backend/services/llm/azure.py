@@ -146,7 +146,7 @@ class AzureLLMClient:
         endpoint_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
         max_tokens: int = 2048,
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         system_message: Optional[str] = None,
     ) -> Dict[str, Any]:
         used_deployment = (
@@ -194,10 +194,12 @@ class AzureLLMClient:
         payload = {
             "messages": messages,
             "max_completion_tokens": max_tokens,
-            "temperature": temperature,
             "n": 1,
             "stop": None,
         }
+        # Only include temperature if explicitly provided (some models like GPT-5 don't support it)
+        if temperature is not None:
+            payload["temperature"] = temperature
 
         headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
@@ -297,6 +299,22 @@ class AzureLLMClient:
                 # Non-retryable error or success
                 if not resp.ok:
                     err = raw.get("error") if isinstance(raw, dict) else resp.text
+
+                    # Handle models that don't support custom temperature (e.g., GPT-5)
+                    # Retry once without temperature parameter
+                    if (
+                        resp.status_code == 400
+                        and isinstance(raw, dict)
+                        and "temperature"
+                        in raw.get("error", {}).get("message", "").lower()
+                        and "temperature" in payload
+                    ):
+                        print(
+                            f"[LLMService] Model does not support custom temperature, retrying without temperature..."
+                        )
+                        payload.pop("temperature", None)
+                        continue  # Retry without temperature
+
                     error_msg = f"Azure API error (status {resp.status_code}): {err}"
                     if resp.status_code == 404:
                         error_msg += f"\n⚠️  Deployment '{used_deployment}' with API version '{used_api_version}' not found. "
