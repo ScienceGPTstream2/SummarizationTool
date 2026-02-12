@@ -349,7 +349,8 @@ export async function downloadExcelReport(documentData: DocumentData) {
 
   // 3. Generate File
   const buffer = await workbook.xlsx.writeBuffer();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
 
   saveAs(new Blob([buffer]), `Evaluation_Report_${timestamp}.xlsx`);
 }

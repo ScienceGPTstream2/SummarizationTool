@@ -1018,6 +1018,7 @@ export async function downloadEvaluationReport(
   });
 
   const blob = await Packer.toBlob(doc);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
   saveAs(blob, `Evaluation_Report_${timestamp}.docx`);
 }
