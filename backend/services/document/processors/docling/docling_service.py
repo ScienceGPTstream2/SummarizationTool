@@ -9,14 +9,9 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-from docling.datamodel.pipeline_options import (
-    ThreadedPdfPipelineOptions,
-)
-from docling.pipeline.threaded_standard_pdf_pipeline import ThreadedStandardPdfPipeline
+from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
-acc_options = AcceleratorOptions(device=AcceleratorDevice.CUDA, num_threads=8)
 
 class DoclingService:
     """
@@ -49,26 +44,15 @@ class DoclingService:
         self.output_base_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure PDF pipeline options for image extraction
-        pipeline_options = ThreadedPdfPipelineOptions(
-            accelerator_options=AcceleratorOptions(
-                device=AcceleratorDevice.CUDA,
-            ),
-            ocr_batch_size=64,
-            layout_batch_size=64,
-            table_batch_size=4,
-        )
+        pipeline_options = PdfPipelineOptions()
         pipeline_options.images_scale = image_resolution_scale
         pipeline_options.generate_page_images = True
         pipeline_options.generate_picture_images = True
-        pipeline_options.accelerator_options = acc_options
 
         # Initialize docling converter with image extraction enabled
         self.converter = DocumentConverter(
             format_options={
-                InputFormat.PDF: PdfFormatOption(
-                    pipeline_cls=ThreadedStandardPdfPipeline,
-                    pipeline_options=pipeline_options
-                )
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
             }
         )
 
