@@ -131,6 +131,7 @@ type FileStatus = {
   currentEntityIndex: number;
   totalEntities: number;
   currentEntityName?: string;
+  statusMessage?: string; // Extra message like "Retrying..." or "Succeeded after N retries"
 };
 
 interface EntityExtractionPageProps {
@@ -650,11 +651,24 @@ export function EntityExtractionPage({
             currentEntityIndex: i + 1,
             totalEntities: updatedEntities.length,
             currentEntityName: entity.name,
+            statusMessage: undefined,
           },
         }));
 
         if (entity.extracted && !entity.extracted.startsWith("Error:"))
           continue;
+
+        // Start a timer to show "taking longer / retrying" message after 20s
+        const retryMsgTimer = setTimeout(() => {
+          setFileProcessingStatus((prev) => ({
+            ...prev,
+            [file.fileId]: {
+              ...prev[file.fileId],
+              statusMessage:
+                "Taking longer than expected, system is retrying automatically...",
+            },
+          }));
+        }, 20000);
 
         // Use the shared internal extraction logic
         const { results, extractionsByModel } =
@@ -666,6 +680,35 @@ export function EntityExtractionPage({
             undefined, // signal
             sessionIdRef.current || undefined
           );
+
+        // Clear the retry message timer
+        clearTimeout(retryMsgTimer);
+
+        // Check if any model response included retry info and show briefly
+        const anyRetries = results.some(
+          (r: any) =>
+            r.result?.retriesAttempted && r.result.retriesAttempted > 0
+        );
+        if (anyRetries) {
+          const retryCount = Math.max(
+            ...results.map((r: any) => r.result?.retriesAttempted || 0)
+          );
+          setFileProcessingStatus((prev) => ({
+            ...prev,
+            [file.fileId]: {
+              ...prev[file.fileId],
+              statusMessage: `Succeeded after ${retryCount} ${retryCount === 1 ? "retry" : "retries"}`,
+            },
+          }));
+        } else {
+          setFileProcessingStatus((prev) => ({
+            ...prev,
+            [file.fileId]: {
+              ...prev[file.fileId],
+              statusMessage: undefined,
+            },
+          }));
+        }
 
         // Determine primary result for display/storage
         const primaryResult =
@@ -716,8 +759,21 @@ export function EntityExtractionPage({
       [file.fileId]: {
         ...prev[file.fileId],
         status: "generating_summary",
+        statusMessage: undefined,
       },
     }));
+
+    // Start a timer to show "taking longer / retrying" message for summary generation
+    const summaryRetryMsgTimer = setTimeout(() => {
+      setFileProcessingStatus((prev) => ({
+        ...prev,
+        [file.fileId]: {
+          ...prev[file.fileId],
+          statusMessage:
+            "Taking longer than expected, system is retrying automatically...",
+        },
+      }));
+    }, 25000);
 
     try {
       // Generate paragraph summaries for ALL selected models — show each as it arrives
@@ -770,6 +826,7 @@ export function EntityExtractionPage({
       });
 
       await Promise.all(summaryPromises);
+      clearTimeout(summaryRetryMsgTimer);
 
       if (completedCount > 0) {
         setFileProcessingStatus((prev) => ({
@@ -781,12 +838,14 @@ export function EntityExtractionPage({
         }));
       }
     } catch (err) {
+      clearTimeout(summaryRetryMsgTimer);
       console.error(`Error generating summary for file ${file.fileId}:`, err);
       setFileProcessingStatus((prev) => ({
         ...prev,
         [file.fileId]: {
           ...prev[file.fileId],
           status: "error",
+          statusMessage: undefined,
         },
       }));
     } finally {
@@ -1274,6 +1333,8 @@ export function EntityExtractionPage({
         duration: meta.duration,
         promptTokens: meta.prompt_tokens,
         completionTokens: meta.completion_tokens,
+        retriesAttempted: meta.retries_attempted || 0,
+        retryReasons: meta.retry_reasons || [],
       };
     }
 
@@ -2215,14 +2276,32 @@ export function EntityExtractionPage({
                         {file.file.name}
                       </span>
                       {isProcessing ? (
-                        <span className="text-xs text-blue-500 animate-pulse">
-                          Processing Entity {status?.currentEntityIndex || 0}/
-                          {status?.totalEntities || 0}...
-                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-blue-500 animate-pulse">
+                            Processing Entity {status?.currentEntityIndex || 0}/
+                            {status?.totalEntities || 0}
+                            {status?.currentEntityName
+                              ? ` — ${status.currentEntityName}`
+                              : ""}
+                            ...
+                          </span>
+                          {status?.statusMessage && (
+                            <span className="text-xs text-amber-500 animate-pulse">
+                              {status.statusMessage}
+                            </span>
+                          )}
+                        </div>
                       ) : isGeneratingSummary ? (
-                        <span className="text-xs text-purple-600 animate-pulse">
-                          Generating Summary...
-                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-purple-600 animate-pulse">
+                            Generating Summary...
+                          </span>
+                          {status?.statusMessage && (
+                            <span className="text-xs text-amber-500 animate-pulse">
+                              {status.statusMessage}
+                            </span>
+                          )}
+                        </div>
                       ) : isCompleted ? (
                         <span className="text-xs text-green-600">
                           Completed
@@ -2267,19 +2346,41 @@ export function EntityExtractionPage({
                           {file.file?.name || "Document"}
                         </span>
                         {isProcessing ? (
-                          <span className="text-xs text-blue-600">
-                            Processing Entity{" "}
+                          <div className="flex flex-col">
+                            <span className="text-xs text-blue-600">
+                              Processing Entity{" "}
+                              {fileProcessingStatus[file.fileId]
+                                ?.currentEntityIndex || 0}
+                              /
+                              {fileProcessingStatus[file.fileId]
+                                ?.totalEntities || 0}
+                              ...
+                            </span>
                             {fileProcessingStatus[file.fileId]
-                              ?.currentEntityIndex || 0}
-                            /
-                            {fileProcessingStatus[file.fileId]?.totalEntities ||
-                              0}
-                            ...
-                          </span>
+                              ?.statusMessage && (
+                              <span className="text-xs text-amber-500">
+                                {
+                                  fileProcessingStatus[file.fileId]
+                                    ?.statusMessage
+                                }
+                              </span>
+                            )}
+                          </div>
                         ) : isGenerating ? (
-                          <span className="text-xs text-purple-600 animate-pulse">
-                            Generating Summary...
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-xs text-purple-600 animate-pulse">
+                              Generating Summary...
+                            </span>
+                            {fileProcessingStatus[file.fileId]
+                              ?.statusMessage && (
+                              <span className="text-xs text-amber-500">
+                                {
+                                  fileProcessingStatus[file.fileId]
+                                    ?.statusMessage
+                                }
+                              </span>
+                            )}
+                          </div>
                         ) : isCompleted ? (
                           <span className="text-xs text-green-600">
                             Completed
@@ -2509,7 +2610,10 @@ export function EntityExtractionPage({
                           {isExtracting && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                               <Sparkles className="h-3.5 w-3.5 animate-spin" />
-                              Extracting
+                              {fileProcessingStatus[selectedFileId]
+                                ?.statusMessage
+                                ? "Retrying..."
+                                : "Extracting"}
                             </span>
                           )}
                           {isCompleted && !isExtracting && (

@@ -157,12 +157,27 @@ class GeminiLLMClient:
         else:
             simple_model_id = model_id
 
-        url = (
-            f"https://{used_location}-aiplatform.googleapis.com/v1/"
-            f"projects/{used_project_id}/locations/{used_location}/publishers/google/models/{simple_model_id}:generateContent"
-        )
+        # Gemini 3 Pro Preview is only available via the global endpoint
+        # Global endpoint uses a different URL format: no location prefix in host
+        global_only_models = [
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-3-pro-image-preview",
+        ]
+        if simple_model_id in global_only_models:
+            api_location = "global"
+            url = (
+                f"https://aiplatform.googleapis.com/v1/"
+                f"projects/{used_project_id}/locations/global/publishers/google/models/{simple_model_id}:generateContent"
+            )
+        else:
+            api_location = used_location
+            url = (
+                f"https://{used_location}-aiplatform.googleapis.com/v1/"
+                f"projects/{used_project_id}/locations/{used_location}/publishers/google/models/{simple_model_id}:generateContent"
+            )
         print(
-            f"[LLMService] Using aiplatform endpoint with model '{simple_model_id}': {url}"
+            f"[LLMService] Using aiplatform endpoint with model '{simple_model_id}' (location: {api_location}): {url}"
         )
 
         payload = {
@@ -195,20 +210,26 @@ class GeminiLLMClient:
         max_delay = 30.0  # Cap at 30 seconds
         retryable_status_codes = [429, 500, 503, 504]  # Rate limit and server errors
 
+        import random
+
         last_error = None
         raw = None
         duration = None
         resp = None
+        content = None
+        references = []
+        retries_attempted = 0
+        retry_reasons = []
 
         for attempt in range(max_retries):
             try:
                 start_time = time.time()
                 if attempt > 0:
+                    retries_attempted += 1
+                    if last_error:
+                        retry_reasons.append(last_error)
                     # Calculate exponential backoff with jitter
                     delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                    # Add random jitter (0-1 second) to avoid thundering herd
-                    import random
-
                     jitter = random.uniform(0, 1)
                     total_delay = delay + jitter
                     print(
@@ -235,6 +256,12 @@ class GeminiLLMClient:
 
                 # Check if response is empty or not JSON
                 if not resp.content:
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Gemini returned empty response, will retry..."
+                        )
+                        last_error = "Empty response from Gemini API"
+                        continue
                     print(f"[LLMService] Gemini returned empty response")
                     return {"success": False, "error": "Empty response from Gemini API"}
 
@@ -248,6 +275,12 @@ class GeminiLLMClient:
                         f"[LLMService] Parsed JSON response: {json.dumps(raw, indent=2)}"
                     )
                 except json.JSONDecodeError as je:
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Gemini JSON decode error: {je}, will retry..."
+                        )
+                        last_error = f"Invalid JSON response: {resp.text[:200]}"
+                        continue
                     print(
                         f"[LLMService] Gemini JSON decode error: {je}, Response: {resp.text}"
                     )
@@ -293,7 +326,101 @@ class GeminiLLMClient:
                     print(f"[LLMService] Gemini Error response: {raw}")
                     return {"success": False, "error": err, "raw": raw}
 
-                # Success - break out of retry loop
+                # === Extract and validate content inside the retry loop ===
+                # Check finishReason - if MAX_TOKENS, output was truncated
+                finish_reason = None
+                try:
+                    finish_reason = raw.get("candidates", [])[0].get("finishReason", "")
+                except (IndexError, KeyError):
+                    pass
+
+                if finish_reason == "MAX_TOKENS":
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Output truncated (finishReason=MAX_TOKENS), will retry with more tokens..."
+                        )
+                        # Increase maxOutputTokens for next attempt to avoid truncation
+                        current_max = payload["generationConfig"].get(
+                            "maxOutputTokens", max_tokens
+                        )
+                        new_max = min(current_max * 2, 65536)  # Double it, cap at 65536
+                        payload["generationConfig"]["maxOutputTokens"] = new_max
+                        print(
+                            f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max}"
+                        )
+                        last_error = "Output truncated (MAX_TOKENS)"
+                        continue
+                    else:
+                        print(f"[LLMService] Output still truncated after max retries")
+
+                try:
+                    response_text = (
+                        raw.get("candidates", [])[0]
+                        .get("content", {})
+                        .get("parts", [])[0]
+                        .get("text", "")
+                    )
+                except (IndexError, KeyError) as e:
+                    if attempt < max_retries - 1:
+                        print(
+                            f"[LLMService] Content extraction error: {e}, will retry..."
+                        )
+                        last_error = f"Unexpected response format: {e}"
+                        continue
+                    print(
+                        f"[LLMService] Gemini content extraction error: {e}, Raw: {raw}"
+                    )
+                    return {
+                        "success": False,
+                        "error": f"Unexpected response format: {raw}",
+                    }
+
+                # If structured output was requested, parse the JSON
+                if response_json_schema:
+                    try:
+                        parsed_json = json.loads(response_text)
+                        result = ExtractionResult.model_validate(parsed_json)
+                        content = result.answer
+                        references = [{"text": ref.text} for ref in result.references]
+                        print(
+                            f"[LLMService] Extracted structured content length: {len(content)}"
+                        )
+                        print(f"[LLMService] References count: {len(references)}")
+                    except (json.JSONDecodeError, Exception) as e:
+                        if attempt < max_retries - 1:
+                            print(
+                                f"[LLMService] Failed to parse structured output (attempt {attempt + 1}): {e}"
+                            )
+                            print(
+                                f"[LLMService] Response text: {response_text[:500]}..."
+                            )
+                            # Increase maxOutputTokens in case truncation caused the parse failure
+                            current_max = payload["generationConfig"].get(
+                                "maxOutputTokens", max_tokens
+                            )
+                            new_max = min(current_max * 2, 65536)
+                            payload["generationConfig"]["maxOutputTokens"] = new_max
+                            print(
+                                f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max} for retry"
+                            )
+                            last_error = f"Failed to parse structured output: {str(e)}"
+                            continue  # Retry the entire request
+                        print(
+                            f"[LLMService] Failed to parse structured output after all retries: {e}"
+                        )
+                        print(f"[LLMService] Response text: {response_text[:500]}...")
+                        return {
+                            "success": False,
+                            "error": f"Failed to parse structured output: {str(e)}",
+                            "raw": raw,
+                        }
+                else:
+                    content = response_text
+                    references = []
+                    print(f"[LLMService] Extracted content length: {len(content)}")
+                    print(f"[LLMService] Content preview: {content[:200]}...")
+
+                # Everything succeeded - break out of retry loop
                 break
 
             except requests.exceptions.Timeout as e:
@@ -322,48 +449,12 @@ class GeminiLLMClient:
                         "error": f"Request failed after {max_retries} attempts: {str(e)}",
                     }
 
-        # Extract content safely (we should have a successful response at this point)
-        if not resp or not raw:
+        # Verify we got valid content after the retry loop
+        if not resp or not raw or content is None:
             return {
                 "success": False,
-                "error": "Failed to get valid response after retries",
+                "error": f"Failed to get valid response after retries. Last error: {last_error}",
             }
-
-        try:
-            response_text = (
-                raw.get("candidates", [])[0]
-                .get("content", {})
-                .get("parts", [])[0]
-                .get("text", "")
-            )
-
-            # If structured output was requested, parse the JSON
-            if response_json_schema:
-                try:
-                    parsed_json = json.loads(response_text)
-                    result = ExtractionResult.model_validate(parsed_json)
-                    content = result.answer
-                    references = [{"text": ref.text} for ref in result.references]
-                    print(
-                        f"[LLMService] Extracted structured content length: {len(content)}"
-                    )
-                    print(f"[LLMService] References count: {len(references)}")
-                except (json.JSONDecodeError, Exception) as e:
-                    print(f"[LLMService] Failed to parse structured output: {e}")
-                    print(f"[LLMService] Response text: {response_text[:500]}...")
-                    return {
-                        "success": False,
-                        "error": f"Failed to parse structured output: {str(e)}",
-                        "raw": raw,
-                    }
-            else:
-                content = response_text
-                references = []
-                print(f"[LLMService] Extracted content length: {len(content)}")
-                print(f"[LLMService] Content preview: {content[:200]}...")
-        except (IndexError, KeyError) as e:
-            print(f"[LLMService] Gemini content extraction error: {e}, Raw: {raw}")
-            return {"success": False, "error": f"Unexpected response format: {raw}"}
 
         usage = raw.get("usageMetadata", {}) if isinstance(raw, dict) else {}
         prompt_tokens = usage.get("promptTokenCount")
@@ -379,6 +470,8 @@ class GeminiLLMClient:
                 "duration": duration,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "retries_attempted": retries_attempted,
+                "retry_reasons": retry_reasons if retries_attempted > 0 else [],
             },
         }
 
