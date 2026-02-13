@@ -170,6 +170,7 @@ class TemplateService:
         # Get user's groups
         user_groups = self.group_service.list_user_groups(user_id)
         group_ids = [g["id"] for g in user_groups]
+        group_name_map = {g["id"]: g["name"] for g in user_groups}
 
         # Build query
         query = self.db.client.table("prompt_templates").select("*")
@@ -198,6 +199,20 @@ class TemplateService:
             if self._can_read(template, user_id, group_ids):
                 template["can_edit"] = self._can_edit(template, user_id, group_ids)
                 template["is_owner"] = self._is_owner(template, user_id, group_ids)
+                # Enrich group-scoped templates with group name
+                if template["scope"] == "group" and template.get("owner_group_id"):
+                    gid = template["owner_group_id"]
+                    if gid in group_name_map:
+                        template["group_name"] = group_name_map[gid]
+                    else:
+                        # Fallback: look up the group name
+                        try:
+                            grp = self.group_service.get_group(gid)
+                            if grp:
+                                template["group_name"] = grp.get("name")
+                                group_name_map[gid] = grp.get("name", "")
+                        except Exception:
+                            template["group_name"] = None
                 accessible.append(template)
 
         # Apply tags filter (post-query for array overlap)
@@ -278,8 +293,10 @@ class TemplateService:
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             if role not in ("admin", "owner"):
                 return False
-        else:  # global
-            return False  # Only via service role
+        elif template["scope"] == "global":
+            # Global templates can be deleted by their creator
+            if template.get("created_by") != user_id:
+                return False
 
         self.db.client.table("prompt_templates").delete().eq("id", template_id).execute()
         return True
@@ -403,6 +420,98 @@ class TemplateService:
             tags=source.get("tags"),
             is_immutable=False,
         )
+
+    # ==========================================
+    # Scope Change Operations
+    # ==========================================
+
+    def change_scope(
+        self,
+        template_id: str,
+        user_id: str,
+        new_scope: str,
+        owner_group_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Change the scope of a template (publish/unpublish).
+
+        Permission rules:
+        - user -> group: user must be member/admin/owner of target group
+        - user -> global: only the template creator
+        - group -> user: group admin/owner can unpublish back to personal
+        - group -> global: group admin/owner
+        - global -> user/group: only the original creator
+
+        Args:
+            template_id: Template ID
+            user_id: Requesting user ID
+            new_scope: Target scope ('user', 'group', 'global')
+            owner_group_id: Required when new_scope='group'
+
+        Returns:
+            Updated template or None if not authorized
+        """
+        if new_scope not in ("user", "group", "global"):
+            raise ValueError("Invalid scope. Must be: user, group, or global")
+
+        if new_scope == "group" and not owner_group_id:
+            raise ValueError("owner_group_id required when changing to group scope")
+
+        template = self.get_template(template_id, user_id)
+        if not template:
+            return None
+
+        old_scope = template["scope"]
+
+        if old_scope == new_scope:
+            return template  # No change
+
+        # Permission checks based on transition
+        if old_scope == "user":
+            # Only the owner can change scope of their personal template
+            if template["owner_user_id"] != user_id:
+                return None
+            if new_scope == "group":
+                role = self.group_service._get_role(owner_group_id, user_id)
+                if role not in ("member", "admin", "owner"):
+                    return None
+
+        elif old_scope == "group":
+            # Group admin/owner can change scope
+            role = self.group_service._get_role(template["owner_group_id"], user_id)
+            if role not in ("admin", "owner"):
+                return None
+            if new_scope == "group" and owner_group_id != template["owner_group_id"]:
+                # Moving to a different group: check membership in target group
+                target_role = self.group_service._get_role(owner_group_id, user_id)
+                if target_role not in ("member", "admin", "owner"):
+                    return None
+
+        elif old_scope == "global":
+            # Only the original creator can change scope of global templates
+            if template.get("created_by") != user_id:
+                return None
+
+        # Build update data based on new scope
+        update_data: Dict[str, Any] = {"scope": new_scope}
+        if new_scope == "user":
+            update_data["owner_user_id"] = user_id
+            update_data["owner_group_id"] = None
+        elif new_scope == "group":
+            update_data["owner_user_id"] = None
+            update_data["owner_group_id"] = owner_group_id
+        elif new_scope == "global":
+            update_data["owner_user_id"] = None
+            update_data["owner_group_id"] = None
+
+        result = (
+            self.db.client.table("prompt_templates")
+            .update(update_data)
+            .eq("id", template_id)
+            .execute()
+        )
+
+        return result.data[0] if result.data else None
 
     # ==========================================
     # Permission Operations
@@ -664,6 +773,9 @@ class TemplateService:
         if template["scope"] == "group":
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             return role in ("admin", "owner")
+        if template["scope"] == "global":
+            # Global templates: the creator is the owner
+            return template.get("created_by") == user_id
         return False
 
 

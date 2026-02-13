@@ -67,6 +67,11 @@ class ForkTemplateRequest(BaseModel):
     new_name: Optional[str] = None
 
 
+class ChangeScopeRequest(BaseModel):
+    new_scope: str  # 'user', 'group', or 'global'
+    owner_group_id: Optional[str] = None  # Required when new_scope='group'
+
+
 class TemplateResponse(BaseModel):
     id: str
     name: str
@@ -87,6 +92,7 @@ class TemplateResponse(BaseModel):
     updated_at: str
     can_edit: Optional[bool] = None
     is_owner: Optional[bool] = None
+    group_name: Optional[str] = None
 
 
 class VersionResponse(BaseModel):
@@ -267,6 +273,33 @@ async def fork_template(
 
     template["can_edit"] = True
     template["is_owner"] = True
+    return template
+
+
+@router.put("/{template_id}/scope", response_model=TemplateResponse)
+async def change_scope(
+    template_id: str,
+    request: ChangeScopeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Change the scope of a template (publish/unpublish)"""
+    service = get_template_service()
+    try:
+        template = service.change_scope(
+            template_id=template_id,
+            user_id=current_user["id"],
+            new_scope=request.new_scope,
+            owner_group_id=request.owner_group_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not template:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to change template scope",
+        )
+
     return template
 
 

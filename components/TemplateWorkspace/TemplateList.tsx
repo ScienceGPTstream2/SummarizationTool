@@ -35,6 +35,7 @@ import {
     Globe,
     User,
     FileText,
+    Share2,
 } from "lucide-react";
 import { Template } from "../../hooks/useTemplates";
 import { getAvailableStudyTypes } from "../TemplateLoader";
@@ -48,6 +49,7 @@ interface TemplateListProps {
     onFork: (template: Template) => void;
     onToggleImmutable: (template: Template) => void;
     onViewHistory: (template: Template) => void;
+    onChangeScope?: (template: Template) => void;
     onCreate: () => void;
     onUseBuiltIn: (studyTypeId: string) => void;
     activeTab: string;
@@ -102,6 +104,7 @@ export function TemplateList({
     onFork,
     onToggleImmutable,
     onViewHistory,
+    onChangeScope,
     onCreate,
     onUseBuiltIn,
     activeTab,
@@ -282,6 +285,17 @@ export function TemplateList({
                                                 <Clock className="h-4 w-4 mr-2" />
                                                 History
                                             </DropdownMenuItem>
+                                            {template.is_owner && onChangeScope && (
+                                                <DropdownMenuItem
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onChangeScope(template);
+                                                    }}
+                                                >
+                                                    <Share2 className="h-4 w-4 mr-2" />
+                                                    Publish to…
+                                                </DropdownMenuItem>
+                                            )}
                                             {template.is_owner && (
                                                 <>
                                                     <DropdownMenuItem
@@ -333,6 +347,12 @@ export function TemplateList({
                                         {scopeIcon(template.scope)}
                                         <span className="ml-1">{template.scope}</span>
                                     </Badge>
+                                    {template.scope === "group" && template.group_name && (
+                                        <Badge variant="outline" className="text-xs">
+                                            <Users className="h-3 w-3 mr-1" />
+                                            {template.group_name}
+                                        </Badge>
+                                    )}
                                     {template.study_type && (
                                         <Badge variant="outline" className="text-xs">
                                             {template.study_type}

@@ -8,7 +8,7 @@
  *   - Add/remove members, change roles (admin/owner only)
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -70,6 +70,7 @@ import {
     ChevronDown,
     ChevronRight,
     Search,
+    X,
 } from "lucide-react";
 import {
     useGroups,
@@ -154,21 +155,22 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
     const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
     const [deleting, setDeleting] = useState(false);
 
-    // Expanded group (show members)
-    const [expandedGroupId, setExpandedGroupId] = useState<string | null>(
-        null
-    );
-    const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
-    const [loadingDetail, setLoadingDetail] = useState(false);
+    // Expanded groups (multi-expand)
+    const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+    const [groupDetails, setGroupDetails] = useState<Map<string, GroupDetail>>(new Map());
+    const [loadingDetailIds, setLoadingDetailIds] = useState<Set<string>>(new Set());
 
-    // Add member
-    const [addMemberOpen, setAddMemberOpen] = useState(false);
+    // Group search
+    const [groupSearchQuery, setGroupSearchQuery] = useState("");
+
+    // Add member (tracks which group)
+    const [addMemberGroupId, setAddMemberGroupId] = useState<string | null>(null);
     const [newMemberUserId, setNewMemberUserId] = useState("");
     const [newMemberRole, setNewMemberRole] = useState("member");
     const [addingMember, setAddingMember] = useState(false);
 
-    // User search
-    const [searchQuery, setSearchQuery] = useState("");
+    // User search (for add member dialog)
+    const [userSearchQuery, setUserSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
     const [searching, setSearching] = useState(false);
     const [selectedUser, setSelectedUser] = useState<UserSearchResult | null>(null);
@@ -177,27 +179,46 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
     // Remove member
     const [removeMemberTarget, setRemoveMemberTarget] =
         useState<GroupMember | null>(null);
+    const [removeMemberGroupId, setRemoveMemberGroupId] = useState<string | null>(null);
 
     // Action error
     const [actionError, setActionError] = useState<string | null>(null);
 
-    // Load group detail when expanded
-    useEffect(() => {
-        if (expandedGroupId) {
-            loadGroupDetail(expandedGroupId);
-        }
-    }, [expandedGroupId]);
+    // Filter groups by search query
+    const filteredGroups = useMemo(() => {
+        if (!groupSearchQuery.trim()) return groups;
+        const q = groupSearchQuery.toLowerCase().trim();
+        return groups.filter((group) => {
+            // Match group name
+            if (group.name.toLowerCase().includes(q)) return true;
+            if (group.description?.toLowerCase().includes(q)) return true;
+            // Match member display names in cached details
+            const detail = groupDetails.get(group.id);
+            if (detail) {
+                return detail.members.some(
+                    (m) =>
+                        m.display_name?.toLowerCase().includes(q) ||
+                        m.email?.toLowerCase().includes(q)
+                );
+            }
+            return false;
+        });
+    }, [groups, groupSearchQuery, groupDetails]);
 
     const loadGroupDetail = async (groupId: string) => {
-        setLoadingDetail(true);
+        setLoadingDetailIds((prev) => new Set(prev).add(groupId));
         setActionError(null);
         try {
             const detail = await getGroupDetail(groupId);
-            setGroupDetail(detail);
+            setGroupDetails((prev) => new Map(prev).set(groupId, detail));
         } catch (err: any) {
             setActionError(err.message);
         } finally {
-            setLoadingDetail(false);
+            setLoadingDetailIds((prev) => {
+                const next = new Set(prev);
+                next.delete(groupId);
+                return next;
+            });
         }
     };
 
@@ -231,7 +252,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
             });
             setEditOpen(false);
             setEditGroup(null);
-            if (expandedGroupId === editGroup.id) {
+            if (expandedGroupIds.has(editGroup.id)) {
                 loadGroupDetail(editGroup.id);
             }
         } catch (err: any) {
@@ -247,10 +268,16 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
         setActionError(null);
         try {
             await deleteGroup(deleteTarget.id);
-            if (expandedGroupId === deleteTarget.id) {
-                setExpandedGroupId(null);
-                setGroupDetail(null);
-            }
+            setExpandedGroupIds((prev) => {
+                const next = new Set(prev);
+                next.delete(deleteTarget.id);
+                return next;
+            });
+            setGroupDetails((prev) => {
+                const next = new Map(prev);
+                next.delete(deleteTarget.id);
+                return next;
+            });
             setDeleteTarget(null);
         } catch (err: any) {
             setActionError(err.message);
@@ -261,14 +288,15 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
 
     const handleAddMember = async () => {
         const userId = selectedUser?.user_id || newMemberUserId.trim();
-        if (!expandedGroupId || !userId) return;
+        if (!addMemberGroupId || !userId) return;
         setAddingMember(true);
         setActionError(null);
         try {
-            await addMember(expandedGroupId, userId, newMemberRole);
-            setAddMemberOpen(false);
+            await addMember(addMemberGroupId, userId, newMemberRole);
+            const gid = addMemberGroupId;
+            setAddMemberGroupId(null);
             resetAddMemberState();
-            loadGroupDetail(expandedGroupId);
+            loadGroupDetail(gid);
         } catch (err: any) {
             setActionError(err.message);
         } finally {
@@ -279,13 +307,13 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
     const resetAddMemberState = () => {
         setNewMemberUserId("");
         setNewMemberRole("member");
-        setSearchQuery("");
+        setUserSearchQuery("");
         setSearchResults([]);
         setSelectedUser(null);
     };
 
     const handleSearchInput = (value: string) => {
-        setSearchQuery(value);
+        setUserSearchQuery(value);
         setSelectedUser(null);
         setNewMemberUserId("");
 
@@ -303,7 +331,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
         setSearching(true);
         searchTimerRef.current = setTimeout(async () => {
             try {
-                const results = await searchUsers(value.trim(), expandedGroupId || undefined);
+                const results = await searchUsers(value.trim(), addMemberGroupId || undefined);
                 setSearchResults(results);
             } catch {
                 setSearchResults([]);
@@ -316,28 +344,28 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
     const handleSelectUser = (user: UserSearchResult) => {
         setSelectedUser(user);
         setNewMemberUserId(user.user_id);
-        setSearchQuery(user.display_name || user.email || user.user_id);
+        setUserSearchQuery(user.display_name || user.email || user.user_id);
         setSearchResults([]);
     };
 
-    const handleUpdateRole = async (userId: string, newRole: string) => {
-        if (!expandedGroupId) return;
+    const handleUpdateRole = async (groupId: string, userId: string, newRole: string) => {
         setActionError(null);
         try {
-            await updateMemberRole(expandedGroupId, userId, newRole);
-            loadGroupDetail(expandedGroupId);
+            await updateMemberRole(groupId, userId, newRole);
+            loadGroupDetail(groupId);
         } catch (err: any) {
             setActionError(err.message);
         }
     };
 
     const handleRemoveMember = async () => {
-        if (!expandedGroupId || !removeMemberTarget) return;
+        if (!removeMemberGroupId || !removeMemberTarget) return;
         setActionError(null);
         try {
-            await removeMember(expandedGroupId, removeMemberTarget.user_id);
+            await removeMember(removeMemberGroupId, removeMemberTarget.user_id);
             setRemoveMemberTarget(null);
-            loadGroupDetail(expandedGroupId);
+            setRemoveMemberGroupId(null);
+            loadGroupDetail(removeMemberGroupId);
         } catch (err: any) {
             setActionError(err.message);
         }
@@ -351,12 +379,19 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
     };
 
     const toggleExpand = (groupId: string) => {
-        if (expandedGroupId === groupId) {
-            setExpandedGroupId(null);
-            setGroupDetail(null);
-        } else {
-            setExpandedGroupId(groupId);
-        }
+        setExpandedGroupIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(groupId)) {
+                next.delete(groupId);
+            } else {
+                next.add(groupId);
+                // Load detail if not cached
+                if (!groupDetails.has(groupId)) {
+                    loadGroupDetail(groupId);
+                }
+            }
+            return next;
+        });
     };
 
     const canManageGroup = (group: Group) => {
@@ -444,10 +479,35 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
             {/* Group list */}
             {!loading && groups.length > 0 && (
                 <div className="space-y-3">
-                    {groups.map((group) => (
+                    {/* Group search */}
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            value={groupSearchQuery}
+                            onChange={(e) => setGroupSearchQuery(e.target.value)}
+                            placeholder="Search groups by name or member..."
+                            className="pl-9 pr-9"
+                        />
+                        {groupSearchQuery && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute right-1 top-1 h-7 w-7"
+                                onClick={() => setGroupSearchQuery("")}
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+                    </div>
+                    {filteredGroups.length === 0 && groupSearchQuery.trim() && (
+                        <p className="text-sm text-muted-foreground text-center py-6">
+                            No groups match &ldquo;{groupSearchQuery}&rdquo;
+                        </p>
+                    )}
+                    {filteredGroups.map((group) => (
                         <Card
                             key={group.id}
-                            className={`transition-colors ${expandedGroupId === group.id ? "border-primary/30" : ""}`}
+                            className={`transition-colors ${expandedGroupIds.has(group.id) ? "border-primary/30" : ""}`}
                         >
                             {/* Group header row */}
                             <CardHeader className="pb-2">
@@ -458,7 +518,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                                             toggleExpand(group.id)
                                         }
                                     >
-                                        {expandedGroupId === group.id ? (
+                                        {expandedGroupIds.has(group.id) ? (
                                             <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                                         ) : (
                                             <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -543,148 +603,154 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                             </CardHeader>
 
                             {/* Expanded: members list */}
-                            {expandedGroupId === group.id && (
-                                <CardContent className="pt-2 border-t">
-                                    {loadingDetail ? (
-                                        <div className="flex items-center justify-center py-6">
-                                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                        </div>
-                                    ) : groupDetail ? (
-                                        <div className="space-y-3">
-                                            {/* Members header */}
-                                            <div className="flex items-center justify-between">
-                                                <h4 className="text-sm font-medium text-muted-foreground">
-                                                    Members
-                                                </h4>
-                                                {canManageGroup(
-                                                    group
-                                                ) && (
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="h-7 text-xs"
-                                                            onClick={() =>
-                                                                setAddMemberOpen(
-                                                                    true
-                                                                )
-                                                            }
-                                                        >
-                                                            <UserPlus className="h-3 w-3 mr-1" />
-                                                            Add Member
-                                                        </Button>
-                                                    )}
+                            {expandedGroupIds.has(group.id) && (() => {
+                                const detail = groupDetails.get(group.id);
+                                const isLoading = loadingDetailIds.has(group.id);
+                                return (
+                                    <CardContent className="pt-2 border-t">
+                                        {isLoading ? (
+                                            <div className="flex items-center justify-center py-6">
+                                                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                                             </div>
-
-                                            {/* Members table */}
-                                            <div className="rounded-md border">
-                                                <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-2 bg-muted/50 text-xs font-medium text-muted-foreground border-b">
-                                                    <span>Member</span>
-                                                    <span>Role</span>
-                                                    <span className="w-8" />
+                                        ) : detail ? (
+                                            <div className="space-y-3">
+                                                {/* Members header */}
+                                                <div className="flex items-center justify-between">
+                                                    <h4 className="text-sm font-medium text-muted-foreground">
+                                                        Members
+                                                    </h4>
+                                                    {canManageGroup(
+                                                        group
+                                                    ) && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-7 text-xs"
+                                                                onClick={() =>
+                                                                    setAddMemberGroupId(
+                                                                        group.id
+                                                                    )
+                                                                }
+                                                            >
+                                                                <UserPlus className="h-3 w-3 mr-1" />
+                                                                Add Member
+                                                            </Button>
+                                                        )}
                                                 </div>
-                                                {groupDetail.members.map(
-                                                    (member) => (
-                                                        <div
-                                                            key={
-                                                                member.user_id
-                                                            }
-                                                            className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-2.5 items-center border-b last:border-b-0 hover:bg-muted/20"
-                                                        >
-                                                            <div className="flex items-center gap-2.5 min-w-0">
-                                                                {member.avatar_url ? (
-                                                                    <img
-                                                                        src={member.avatar_url}
-                                                                        alt=""
-                                                                        className="h-7 w-7 rounded-full flex-shrink-0 border border-border"
-                                                                    />
-                                                                ) : (
-                                                                    <div className="h-7 w-7 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
-                                                                        {(member.display_name || member.email || "?")[0]?.toUpperCase()}
-                                                                    </div>
-                                                                )}
-                                                                <div className="min-w-0">
-                                                                    <div className="text-sm font-medium truncate">
-                                                                        {member.display_name || member.email || "Unknown User"}
-                                                                    </div>
-                                                                    <div className="text-xs text-muted-foreground font-mono truncate" title={member.user_id}>
-                                                                        {member.user_id}
+
+                                                {/* Members table */}
+                                                <div className="rounded-md border">
+                                                    <div className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-2 bg-muted/50 text-xs font-medium text-muted-foreground border-b">
+                                                        <span>Member</span>
+                                                        <span>Role</span>
+                                                        <span className="w-8" />
+                                                    </div>
+                                                    {detail.members.map(
+                                                        (member: GroupMember) => (
+                                                            <div
+                                                                key={
+                                                                    member.user_id
+                                                                }
+                                                                className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-2.5 items-center border-b last:border-b-0 hover:bg-muted/20"
+                                                            >
+                                                                <div className="flex items-center gap-2.5 min-w-0">
+                                                                    {member.avatar_url ? (
+                                                                        <img
+                                                                            src={member.avatar_url}
+                                                                            alt=""
+                                                                            className="h-7 w-7 rounded-full flex-shrink-0 border border-border"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="h-7 w-7 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
+                                                                            {(member.display_name || member.email || "?")[0]?.toUpperCase()}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-sm font-medium truncate">
+                                                                            {member.display_name || member.email || "Unknown User"}
+                                                                        </div>
+                                                                        <div className="text-xs text-muted-foreground font-mono truncate" title={member.user_id}>
+                                                                            {member.user_id}
+                                                                        </div>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                            {canManageGroup(
-                                                                group
-                                                            ) &&
-                                                                member.role !==
-                                                                "owner" ? (
-                                                                <Select
-                                                                    value={
-                                                                        member.role
-                                                                    }
-                                                                    onValueChange={(
-                                                                        v
-                                                                    ) =>
-                                                                        handleUpdateRole(
-                                                                            member.user_id,
+                                                                {canManageGroup(
+                                                                    group
+                                                                ) &&
+                                                                    member.role !==
+                                                                    "owner" ? (
+                                                                    <Select
+                                                                        value={
+                                                                            member.role
+                                                                        }
+                                                                        onValueChange={(
                                                                             v
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <SelectTrigger className="h-7 w-28 text-xs">
-                                                                        <SelectValue />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        <SelectItem value="viewer">
-                                                                            Viewer
-                                                                        </SelectItem>
-                                                                        <SelectItem value="member">
-                                                                            Member
-                                                                        </SelectItem>
-                                                                        <SelectItem value="admin">
-                                                                            Admin
-                                                                        </SelectItem>
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            ) : (
-                                                                <RoleBadge
-                                                                    role={
-                                                                        member.role
-                                                                    }
-                                                                />
-                                                            )}
-                                                            {canManageGroup(
-                                                                group
-                                                            ) &&
-                                                                member.role !==
-                                                                "owner" ? (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-7 w-7 text-destructive/60 hover:text-destructive"
-                                                                    onClick={() =>
-                                                                        setRemoveMemberTarget(
-                                                                            member
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </Button>
-                                                            ) : (
-                                                                <div className="w-7" />
-                                                            )}
-                                                        </div>
-                                                    )
-                                                )}
-                                                {groupDetail.members
-                                                    .length === 0 && (
-                                                        <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-                                                            No members yet
-                                                        </div>
+                                                                        ) =>
+                                                                            handleUpdateRole(
+                                                                                group.id,
+                                                                                member.user_id,
+                                                                                v
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <SelectTrigger className="h-7 w-28 text-xs">
+                                                                            <SelectValue />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="viewer">
+                                                                                Viewer
+                                                                            </SelectItem>
+                                                                            <SelectItem value="member">
+                                                                                Member
+                                                                            </SelectItem>
+                                                                            <SelectItem value="admin">
+                                                                                Admin
+                                                                            </SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                ) : (
+                                                                    <RoleBadge
+                                                                        role={
+                                                                            member.role
+                                                                        }
+                                                                    />
+                                                                )}
+                                                                {canManageGroup(
+                                                                    group
+                                                                ) &&
+                                                                    member.role !==
+                                                                    "owner" ? (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-7 w-7 text-destructive/60 hover:text-destructive"
+                                                                        onClick={() => {
+                                                                            setRemoveMemberTarget(
+                                                                                member
+                                                                            );
+                                                                            setRemoveMemberGroupId(group.id);
+                                                                        }}
+                                                                    >
+                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                ) : (
+                                                                    <div className="w-7" />
+                                                                )}
+                                                            </div>
+                                                        )
                                                     )}
+                                                    {detail.members
+                                                        .length === 0 && (
+                                                            <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+                                                                No members yet
+                                                            </div>
+                                                        )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ) : null}
-                                </CardContent>
-                            )}
+                                        ) : null}
+                                    </CardContent>
+                                );
+                            })()}
                         </Card>
                     ))}
                 </div>
@@ -825,12 +891,12 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
             )}
 
             {/* Add Member Dialog */}
-            {addMemberOpen && (
+            {addMemberGroupId && (
                 <Dialog
-                    open={addMemberOpen}
+                    open={!!addMemberGroupId}
                     onOpenChange={(o) => {
                         if (!o) {
-                            setAddMemberOpen(false);
+                            setAddMemberGroupId(null);
                             resetAddMemberState();
                         }
                     }}
@@ -853,7 +919,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                     <Input
                                         id="member-search"
-                                        value={searchQuery}
+                                        value={userSearchQuery}
                                         onChange={(e) =>
                                             handleSearchInput(e.target.value)
                                         }
@@ -904,7 +970,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                                 )}
 
                                 {/* No results */}
-                                {searchQuery.trim().length >= 2 &&
+                                {userSearchQuery.trim().length >= 2 &&
                                     !searching &&
                                     searchResults.length === 0 &&
                                     !selectedUser && (
@@ -945,7 +1011,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                                             onClick={() => {
                                                 setSelectedUser(null);
                                                 setNewMemberUserId("");
-                                                setSearchQuery("");
+                                                setUserSearchQuery("");
                                             }}
                                         >
                                             Change
@@ -983,7 +1049,7 @@ export function GroupManagementPage({ onBack }: GroupManagementPageProps) {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                    setAddMemberOpen(false);
+                                    setAddMemberGroupId(null);
                                     resetAddMemberState();
                                 }}
                                 disabled={addingMember}

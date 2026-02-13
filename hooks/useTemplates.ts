@@ -40,6 +40,7 @@ export interface Template {
     updated_at: string;
     can_edit: boolean | null;
     is_owner: boolean | null;
+    group_name?: string | null;
 }
 
 export interface TemplateVersion {
@@ -223,6 +224,22 @@ export function useTemplates(initialFilters?: TemplateFilters) {
         await fetchTemplates();
     };
 
+    const changeScope = async (
+        id: string,
+        newScope: string,
+        ownerGroupId?: string
+    ): Promise<Template> => {
+        const result = await apiRequest<Template>(`/templates/${id}/scope`, {
+            method: "PUT",
+            body: JSON.stringify({
+                new_scope: newScope,
+                owner_group_id: ownerGroupId,
+            }),
+        });
+        await fetchTemplates();
+        return result;
+    };
+
     return {
         templates,
         loading,
@@ -235,6 +252,7 @@ export function useTemplates(initialFilters?: TemplateFilters) {
         deleteTemplate,
         forkTemplate,
         setImmutable,
+        changeScope,
     };
 }
 
