@@ -31,8 +31,8 @@ jobs:
       - name: Build project
         run: npm run build
 
-  backend-ci:
-    name: Backend CI
+  backend-lint:
+    name: Backend Lint
     runs-on: ubuntu-latest
 
     defaults:
@@ -48,43 +48,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Check disk space
-        run: df -h
-
-      - name: Clean up disk space
-        run: |
-          # GitHub Actions Ubuntu runners come with pre-installed tools we don't need
-          # Removing them frees up several GB of disk space for our Python dependencies
-          # Clean apt package cache
-          sudo apt-get clean || true
-          # Remove .NET SDK (not needed for Python/Node.js project) - saves ~1-2GB
-          sudo rm -rf /usr/share/dotnet || true
-          # Remove Android SDK (not needed for this project) - saves ~2-3GB
-          sudo rm -rf /usr/local/lib/android || true
-          # Remove other pre-installed tools directory - saves additional space
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          # Clean pip cache before installation
-          pip cache purge || true
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # Install without cache to save disk space
-          pip install --no-cache-dir -r requirements.txt
-
-      - name: Clean up after installation
-        run: |
-          # Clean pip cache and build artifacts
-          pip cache purge || true
-          # Remove .pyc files and __pycache__ directories
-          find . -type d -name __pycache__ -exec rm -r {} + || true
-          find . -type f -name "*.pyc" -delete || true
-          # Check disk space after cleanup
-          df -h
-
       - name: Check formatting with black
         run: |
-          pip install --no-cache-dir black==26.1.0
+          pip install black==26.1.0
           black --check .
-          # Clean up after formatting check
-          pip cache purge || true
