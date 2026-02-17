@@ -168,6 +168,21 @@ class SupabaseDBService:
 
         return sessions
 
+    def get_session_basic(
+        self, session_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get just the session row without joins (documents, extractions, evaluations).
+        Use this for lightweight operations like config merging."""
+        result = (
+            self.client.table("sessions")
+            .select("*")
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        return result.data[0] if result.data else None
+
     def update_session(
         self, session_id: str, user_id: str, updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:

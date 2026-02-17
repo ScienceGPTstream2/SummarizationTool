@@ -124,6 +124,18 @@ async def get_available_models():
     """
     models = []
 
+    # Azure models that do NOT support custom temperature values.
+    # These models only accept the default temperature (1.0) or reject the param entirely.
+    # Based on live API testing (2026-02).
+    AZURE_NO_TEMP_MODELS = {
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "o3-mini",
+        "o4-mini",
+        "o3",
+    }
+
     # Add Azure OpenAI models if configured
     # Support multiple models from secrets.toml
     import json
@@ -154,6 +166,7 @@ async def get_available_models():
                         model_name, f"Azure deployment of {model_name}"
                     )
 
+                    supports_temp = model_name not in AZURE_NO_TEMP_MODELS
                     model_data = {
                         "id": f"azure-{deployment}",
                         "name": model_name,
@@ -161,6 +174,8 @@ async def get_available_models():
                         "description": description,
                         "deployment": deployment,
                         "api_version": api_version,
+                        "supports_temperature": supports_temp,
+                        "default_temperature": 0.5 if supports_temp else 1.0,
                     }
                     # Only include endpoint and api_key if they're model-specific (not in response, but for reference)
                     models.append(model_data)
@@ -186,6 +201,7 @@ async def get_available_models():
                 model_name, f"Azure deployment of {model_name}"
             )
 
+            supports_temp = model_name not in AZURE_NO_TEMP_MODELS
             models.append(
                 {
                     "id": f"azure-{deployment}",
@@ -194,6 +210,8 @@ async def get_available_models():
                     "description": description,
                     "deployment": deployment,
                     "api_version": api_version,
+                    "supports_temperature": supports_temp,
+                    "default_temperature": 0.5 if supports_temp else 1.0,
                 }
             )
 
@@ -230,6 +248,8 @@ async def get_available_models():
                 "description": "Reasoning",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "publishers/google/models/gemini-2.5-flash-lite",
@@ -238,6 +258,8 @@ async def get_available_models():
                 "description": "Fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "publishers/google/models/gemini-2.5-flash",
@@ -246,6 +268,8 @@ async def get_available_models():
                 "description": "Ultra-fast",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "publishers/google/models/gemini-3-pro-preview",
@@ -254,6 +278,8 @@ async def get_available_models():
                 "description": "Next-gen reasoning",
                 "project_id": gemini_project_id,
                 "location": gemini_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
         ]
         models.extend(gemini_models)
@@ -282,6 +308,8 @@ async def get_available_models():
                 "description": "Reasoning",
                 "project_id": anthropic_project_id,
                 "location": anthropic_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "claude-opus-4-1@20250805",
@@ -290,6 +318,8 @@ async def get_available_models():
                 "description": "Frontier reasoning",
                 "project_id": anthropic_project_id,
                 "location": anthropic_location,
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
         ]
         models.extend(anthropic_models)
@@ -315,6 +345,8 @@ async def get_available_models():
                 "project_id": llama_project_id,
                 "location": "us-east5",  # Llama 4 models available in us-east5
                 "region": "us-east5",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "meta/llama-4-scout-17b-16e-instruct-maas",
@@ -324,6 +356,8 @@ async def get_available_models():
                 "project_id": llama_project_id,
                 "location": "us-east5",  # Llama 4 models available in us-east5
                 "region": "us-east5",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "meta/llama-3.3-70b-instruct-maas",
@@ -333,6 +367,8 @@ async def get_available_models():
                 "project_id": llama_project_id,
                 "location": "us-central1",  # Llama 3.x models available in us-central1
                 "region": "us-central1",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             {
                 "id": "meta/llama-3.1-405b-instruct-maas",
@@ -342,6 +378,8 @@ async def get_available_models():
                 "project_id": llama_project_id,
                 "location": "us-central1",  # Llama 3.x models available in us-central1
                 "region": "us-central1",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
             },
             # NOTE: Llama 3.1 70B and 8B models were tested but are not available
             # in either us-central1 or us-east5 regions for this project
@@ -388,6 +426,8 @@ async def get_available_models():
                         "name": model["name"],
                         "provider": "Macbook LLM",
                         "description": "Self-hosted model",
+                        "supports_temperature": True,
+                        "default_temperature": 0.5,
                     }
                 )
         else:
@@ -401,6 +441,8 @@ async def get_available_models():
                             "name": model["name"],
                             "provider": "Macbook LLM",
                             "description": "Self-hosted model",
+                            "supports_temperature": True,
+                            "default_temperature": 0.5,
                         }
                     )
             else:

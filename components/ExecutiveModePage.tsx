@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Label } from "./ui/label";
+import { Slider } from "./ui/slider";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,8 @@ import {
   ArrowLeft,
   Eye,
   FileText,
+  Info,
+  AlertTriangle,
 } from "lucide-react";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
@@ -100,6 +103,7 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
   const [ingestionMethod, setIngestionMethod] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
   const [studyType, setStudyType] = useState("");
+  const [temperature, setTemperature] = useState<number>(0.5);
 
   // Data State
   const [files, setFiles] = useState<FileStatus[]>([]);
@@ -124,6 +128,16 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
     };
     loadModels();
   }, []);
+
+  // Reset temperature to the model's default when selected model changes
+  useEffect(() => {
+    if (selectedModel && availableModels.length > 0) {
+      const modelObj = availableModels.find((m) => m.id === selectedModel);
+      if (modelObj) {
+        setTemperature(modelObj.default_temperature ?? 0.5);
+      }
+    }
+  }, [selectedModel, availableModels]);
 
   // File Handling
   const handleDrag = (e: React.DragEvent) => {
@@ -375,6 +389,8 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
         model_id: modelObj.id,
         deployment: modelObj.deployment,
         api_version: modelObj.api_version,
+        temperature:
+          modelObj.supports_temperature !== false ? temperature : undefined,
       }),
     });
 
@@ -531,6 +547,74 @@ export function ExecutiveModePage({ onBack }: ExecutiveModePageProps) {
             </div>
 
             <div className="flex flex-col justify-center space-y-6">
+              {/* Temperature control */}
+              {(() => {
+                const modelObj = availableModels.find(
+                  (m) => m.id === selectedModel
+                );
+                const supportsTemp = modelObj?.supports_temperature ?? true;
+                const defaultTemp = modelObj?.default_temperature ?? 0.5;
+                return (
+                  <div
+                    className={`space-y-3 rounded-lg border p-3 ${supportsTemp ? "border-gray-200 bg-gray-50" : "border-amber-200 bg-amber-50/50"}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">
+                          Temperature
+                        </Label>
+                        <div className="relative group">
+                          <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+                          <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none w-56">
+                            <p className="font-medium mb-1">
+                              What is Temperature?
+                            </p>
+                            <p>
+                              Controls the randomness of the AI output. Lower
+                              values (closer to 0) produce more focused,
+                              deterministic text. Higher values (closer to 1)
+                              produce more creative, varied text.
+                            </p>
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-sm font-mono tabular-nums text-muted-foreground">
+                        {supportsTemp
+                          ? temperature.toFixed(2)
+                          : defaultTemp.toFixed(2)}
+                      </span>
+                    </div>
+                    {supportsTemp ? (
+                      <>
+                        <Slider
+                          value={[temperature]}
+                          onValueChange={([v]) => setTemperature(v)}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          className="w-full"
+                        />
+                        <div className="flex justify-between text-[10px] text-muted-foreground -mt-1">
+                          <span>Precise</span>
+                          <span>Creative</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-start gap-2 rounded-md bg-amber-100/60 border border-amber-200 px-3 py-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-800">
+                          The selected model (
+                          <span className="font-medium">{modelObj?.name}</span>)
+                          does not support temperature adjustment. It uses a
+                          fixed temperature of {defaultTemp.toFixed(2)}.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <Button
                 className="w-full h-24 text-base shadow-lg relative overflow-hidden"
                 onClick={runPipeline}

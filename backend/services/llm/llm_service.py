@@ -326,7 +326,7 @@ class LLMService:
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
         max_tokens: int = 8048,
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         system_message: Optional[str] = None,  # Custom system prompt
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:

@@ -10,6 +10,7 @@ export interface SessionConfiguration {
   entities: SessionEntity[];
   summary_prompt?: string | null;
   temperature: number;
+  model_temperatures?: Record<string, number>;
   files_config?: Record<string, any>;
   evaluation_config?: Record<string, any>;
 }

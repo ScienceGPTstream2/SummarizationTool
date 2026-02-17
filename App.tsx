@@ -129,8 +129,14 @@ export interface DocumentData {
     status?: "pending" | "processing" | "completed" | "error";
     selectedParser?: string;
     summaryPrompt?: string;
+    summariesByModel?: Record<string, string>;
+    finalSummary?: string;
+    paragraphSystemPrompt?: string;
+    modelTemperatures?: Record<string, number>;
   }>;
   sessionId?: string;
+  temperature?: number;
+  modelTemperatures?: Record<string, number>;
 }
 
 // User info from Supabase session
@@ -323,6 +329,7 @@ export default function App() {
                 selected_models: [],
                 entities: [],
                 temperature: 0.0,
+                model_temperatures: {},
               },
               documents: data.uploadedFiles.map((f) => ({
                 file_hash: f.fileId,
@@ -382,6 +389,7 @@ export default function App() {
                   prompt: e.prompt,
                 })),
                 temperature: 0.0,
+                model_temperatures: {},
               },
             }),
           });
@@ -610,6 +618,8 @@ export default function App() {
         selectedModel: sessionData.configuration.selected_models[0] || "",
         selectedModels: sessionData.configuration.selected_models,
         summaryPrompt: sessionData.configuration.summary_prompt || "",
+        temperature: sessionData.configuration.temperature ?? undefined,
+        modelTemperatures: sessionData.configuration.model_temperatures || {},
 
         // Restore uploaded files with proper processing status
         uploadedFiles: sessionData.documents.map((doc: any) => {
@@ -641,6 +651,25 @@ export default function App() {
                   r.entity_name === "__paragraph_summary__" &&
                   r.document_id === doc.id
               )?.extracted_text || "",
+
+            // Restore per-model paragraph summaries
+            summariesByModel: (() => {
+              const summaries: Record<string, string> = {};
+              sessionData.extraction_results
+                ?.filter(
+                  (r: any) =>
+                    r.entity_name === "__paragraph_summary__" &&
+                    r.document_id === doc.id &&
+                    r.extracted_text
+                )
+                .forEach((r: any) => {
+                  summaries[r.model_id] = r.extracted_text;
+                });
+              return summaries;
+            })(),
+
+            // Restore per-file, per-model temperatures from files_config
+            modelTemperatures: fileConfig.model_temperatures || {},
 
             selectedModels: config.selected_models || [],
             status: "completed" as const,
@@ -940,7 +969,11 @@ export default function App() {
           ],
           selectedProviders: evalConfig.selected_providers || [],
           selectedSourceModels: evalConfig.selected_source_models || [],
-          customEvaluationSteps: evalConfig.custom_evaluation_steps || {},
+          customEvaluationSteps:
+            evalConfig.custom_evaluation_steps &&
+            Object.keys(evalConfig.custom_evaluation_steps).length > 0
+              ? evalConfig.custom_evaluation_steps
+              : undefined, // Let EvaluationPage merge with its own defaults
         },
         entities: configEntities.map((e: any) => {
           const result = sessionData.extraction_results?.find(
