@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    allowedHosts: ["summarize.sciencegpt.ca"],
+    allowedHosts: ["summarize.sciencegpt.ca", "gpu.sciencegpt.ca"],
     port: 3000,
     open: true,
     watch: {
