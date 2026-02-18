@@ -77,6 +77,7 @@ from api import (
     extractions,
     server,
     paragraphgenerator,
+    paragraph_evaluation,
     evaluations,
     sessions,
 )
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(evaluations.router)
     app.include_router(server.router)
     app.include_router(paragraphgenerator.router)
+    app.include_router(paragraph_evaluation.router)
     app.include_router(sessions.router)
 
     return app

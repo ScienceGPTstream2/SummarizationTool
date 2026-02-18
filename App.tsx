@@ -129,6 +129,13 @@ export interface DocumentData {
     status?: "pending" | "processing" | "completed" | "error";
     selectedParser?: string;
     summaryPrompt?: string;
+    finalSummary?: string;
+    paragraphSummaryModel?: string;
+    paragraphSummaryCost?: number;
+    paragraphEvaluation?: {
+      groundTruth: string;
+      humanScore: number | null;
+    };
   }>;
   sessionId?: string;
 }
@@ -327,6 +334,8 @@ export default function App() {
               documents: data.uploadedFiles.map((f) => ({
                 file_hash: f.fileId,
                 filename: f.file.name,
+                parse_cost: f.processingResult?.parse_cost ?? null,
+                page_count: f.processingResult?.page_count ?? null,
               })),
             }),
           });
@@ -628,6 +637,7 @@ export default function App() {
               fileHash: doc.file_hash,
               markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
               processorUsed: "azure_doc_intelligence", // Default assumption if not stored
+              parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
             },
             paragraph_system_prompt:
               fileConfig.paragraph_system_prompt ||
@@ -641,6 +651,39 @@ export default function App() {
                   r.entity_name === "__paragraph_summary__" &&
                   r.document_id === doc.id
               )?.extracted_text || "",
+
+            // Restore paragraph summary model_id for human score saving
+            paragraphSummaryModel:
+              sessionData.extraction_results?.find(
+                (r: any) =>
+                  r.entity_name === "__paragraph_summary__" &&
+                  r.document_id === doc.id
+              )?.model_id || "",
+
+            // Restore paragraph generation LLM cost
+            paragraphSummaryCost:
+              sessionData.extraction_results?.find(
+                (r: any) =>
+                  r.entity_name === "__paragraph_summary__" &&
+                  r.document_id === doc.id
+              )?.cost ?? undefined,
+
+            // Restore paragraph evaluation record (ground truth + human score)
+            paragraphEvaluation: (() => {
+              const paragEval = sessionData.evaluation_results?.find(
+                (ev: any) =>
+                  ev.entity_name === "__paragraph_summary__" &&
+                  ev.document_id === doc.id
+              );
+              if (!paragEval) return undefined;
+              return {
+                groundTruth: paragEval.ground_truth || "",
+                humanScore:
+                  paragEval.human_score != null
+                    ? Math.round(paragEval.human_score * 100)
+                    : null,
+              };
+            })(),
 
             selectedModels: config.selected_models || [],
             status: "completed" as const,

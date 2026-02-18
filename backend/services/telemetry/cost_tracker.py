@@ -141,6 +141,7 @@ class CostTracker:
                     "claude-sonnet-4-5", "claude-sonnet-4.5"
                 )
                 model_lower = model_lower.replace("claude-opus-4-1", "claude-opus-4.1")
+                model_lower = model_lower.replace("claude-sonnet-4-6", "claude-sonnet-4.6")
             if model_lower.startswith("meta/llama-"):
                 model_lower = model_lower.replace("meta/llama-", "llama-")
             if "llama-4-maverick" in model_lower:
@@ -259,6 +260,24 @@ class CostTracker:
                 db.reset_session_metrics(session_id)
         except Exception as e:
             print(f"[COST_TRACKER] Failed to reset session metrics in DB: {e}")
+
+
+def infer_provider_from_model_id(model_id: str) -> str:
+    """Infer the pricing provider from a stored model ID string.
+
+    Used for deterministic cost recompute when the provider was not persisted.
+    Matches the _EXTRACTION_PROVIDER_MAP logic in extractions/router.py.
+    """
+    m = (model_id or "").lower()
+    if any(m.startswith(p) for p in ("gpt-", "o1", "o3", "o4")):
+        return "azure"
+    if m.startswith("claude-"):
+        return "gcp"
+    if any(m.startswith(p) for p in ("gemini-", "llama")):
+        return "gcp"
+    if "macbook" in m:
+        return "macbook"
+    return "azure"  # safe default — azure is most common deployment
 
 
 cost_tracker = CostTracker()

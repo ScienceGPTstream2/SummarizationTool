@@ -65,6 +65,7 @@ export interface ResultRow {
   systemPrompt: string;
   promptTemplate: string;
   entity: string;
+  entityNameRaw?: string; // Raw entity_name for API calls (e.g. "__paragraph_summary__")
   actualOutput: string;
   groundTruth: string;
   judge: string;
@@ -74,7 +75,10 @@ export interface ResultRow {
   relevance: number | null;
   safety: number | null;
   humanEval: number | null; // Changed to number 0-100
-  cost: string;
+  cost: string; // legacy single cost (kept for compatibility)
+  docParseCost?: string;
+  extractionCost?: string;
+  evalCost?: string;
 }
 
 const formatModelName = (modelId: string) => {
@@ -119,7 +123,7 @@ const formatCost = (value: number | undefined | null): string => {
 };
 
 // Transform documentData to flat rows
-export function transformToRows(documentData: any): ResultRow[] {
+export const transformToRows = (documentData: any): ResultRow[] => {
   const rows: ResultRow[] = [];
   let idCounter = 0;
 
@@ -149,6 +153,10 @@ export function transformToRows(documentData: any): ResultRow[] {
       documentData.processorUsed ||
       "";
     const entities = fileItem.entities || [];
+    const docParseCostRaw =
+      fileItem.processingResult?.parse_cost ??
+      fileItem.parse_cost ??
+      documentData.parse_cost;
 
     for (const entity of entities) {
       const entityName = entity.name;
@@ -183,6 +191,8 @@ export function transformToRows(documentData: any): ResultRow[] {
 
         if (!extractionData) continue;
 
+        const extractionCost =
+          extractionData.cost ?? extractionData.meta?.cost ?? extractionData.call_cost;
         const actualOutput = extractionData.extracted || "";
         const evalResults = extractionData.evaluationResults || [];
 
@@ -192,7 +202,7 @@ export function transformToRows(documentData: any): ResultRow[] {
 
         if (evalResults.length === 0) {
           // For rows without evaluation, show extraction cost if available
-          const extractionCost = extractionData.cost || null;
+          // Uses outer extractionCost (lines above) which has full ?? fallback chain
           rows.push({
             id: `row-${idCounter++}`,
             fileId: fileId,
@@ -218,10 +228,14 @@ export function transformToRows(documentData: any): ResultRow[] {
                   : extractionHumanScore
                 : null,
             cost: formatCost(extractionCost),
+            docParseCost: formatCost(docParseCostRaw),
+            extractionCost: formatCost(extractionCost),
+            evalCost: "",
           });
         } else {
           for (const result of evalResults) {
             const humanScore = result.human_score ?? result.humanScore ?? null;
+            const docParseCost = docParseCostRaw;
             rows.push({
               id: `row-${idCounter++}`,
               fileId: fileId,
@@ -247,17 +261,50 @@ export function transformToRows(documentData: any): ResultRow[] {
                     : humanScore
                   : null,
               cost: formatCost(result.evaluation_cost),
+              docParseCost: formatCost(docParseCost),
+              extractionCost: formatCost(extractionCost),
+              evalCost: formatCost(result.evaluation_cost),
             });
           }
         }
       }
     }
+
+    // Paragraph Evaluation row — human-only, no LLM judge scores
+    const paragraphEval = (fileItem as any).paragraphEvaluation;
+    if (fileItem.finalSummary && paragraphEval?.groundTruth) {
+      rows.push({
+        id: `row-${idCounter++}`,
+        fileId: fileId,
+        studyName: fileName,
+        llmSource: getDisplayModelName((fileItem as any).paragraphSummaryModel || ""),
+        sourceModelRaw: (fileItem as any).paragraphSummaryModel || "",
+        ingestion: ingestionTool,
+        systemPrompt: "",
+        promptTemplate: "",
+        entity: "Paragraph Evaluation",
+        entityNameRaw: "__paragraph_summary__",
+        actualOutput: fileItem.finalSummary || "",
+        groundTruth: paragraphEval.groundTruth,
+        judge: "Human",
+        judgeRaw: "human",
+        correctness: null,
+        completeness: null,
+        relevance: null,
+        safety: null,
+        humanEval: paragraphEval.humanScore ?? null,
+        cost: "",
+        docParseCost: "",
+        extractionCost: formatCost((fileItem as any).paragraphSummaryCost),
+        evalCost: "",
+      });
+    }
   }
 
   return rows;
-}
+};
 
-// Column definitions
+// Column definitions (updated to three cost columns)
 const ALL_COLUMNS = [
   { key: "studyName", label: "Study Name", type: "text" },
   { key: "llmSource", label: "LLM (Source)", type: "category" },
@@ -283,7 +330,9 @@ const ALL_COLUMNS = [
   { key: "relevance", label: "Relevance", type: "score" },
   { key: "safety", label: "Safety", type: "score" },
   { key: "humanEval", label: "Human Eval", type: "label" },
-  { key: "cost", label: "Cost", type: "text" },
+  { key: "docParseCost", label: "Doc Parse Cost", type: "text" },
+  { key: "extractionCost", label: "Extraction Cost", type: "text" },
+  { key: "evalCost", label: "Eval Cost", type: "text" },
 ] as const;
 
 type SortDirection = "asc" | "desc" | null;
@@ -435,9 +484,10 @@ export default function BatchResultsPage({
       // Only save if we have a judge model - human scores are stored per (entity, source_model, judge_model)
       if (currentRow && onSaveHumanScore && currentRow.judgeRaw) {
         // Capture row data now to avoid stale closure
+        // Use entityNameRaw (raw DB entity name) when available, fall back to display entity name
         const saveData = {
           fileId: currentRow.fileId,
-          entityName: currentRow.entity,
+          entityName: currentRow.entityNameRaw || currentRow.entity,
           sourceModel: currentRow.sourceModelRaw,
           judgeModel: currentRow.judgeRaw,
           humanScore: value,
@@ -480,6 +530,16 @@ export default function BatchResultsPage({
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Filtered Results");
+
+    // TEMP DEBUG LOGS: remove after verification
+    console.log("[EXPORT DEBUG] visibleColumns:", Array.from(visibleColumns));
+    console.log(
+      "[EXPORT DEBUG] sample row costs:",
+      filteredRows[0]?.docParseCost,
+      filteredRows[0]?.extractionCost,
+      filteredRows[0]?.evalCost,
+      filteredRows[0]?.cost
+    );
 
     if (sessionMetrics) {
       const metricsSheet = workbook.addWorksheet("Session Metrics");
@@ -940,9 +1000,19 @@ export default function BatchResultsPage({
                       />
                     </TableCell>
                   )}
-                  {visibleColumns.has("cost") && (
-                    <TableCell className="text-xs text-gray-600 px-1">
-                      {row.cost || "—"}
+                  {visibleColumns.has("docParseCost") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.docParseCost || "—"}
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("extractionCost") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.extractionCost || "—"}
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("evalCost") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.evalCost || "—"}
                     </TableCell>
                   )}
                   {/* Compare button removed, row is clickable */}
@@ -1053,24 +1123,24 @@ export default function BatchResultsPage({
               </Accordion>
 
               {/* Side by side comparison */}
-              <div className="grid grid-cols-2 gap-6 flex-1 min-h-0">
+              <div className="grid grid-cols-2 gap-6 flex-1 min-h-0 grid-rows-1">
                 <div className="flex flex-col h-full border rounded-xl overflow-hidden shadow-sm">
                   <div className="bg-gray-50 p-3 border-b font-medium text-gray-700 flex justify-between items-center">
                     <span>Actual Output (LLM)</span>
                   </div>
-                  <ScrollArea className="flex-1 bg-white">
+                  <div className="flex-1 min-h-0 overflow-y-auto bg-white">
                     <div className="p-4 whitespace-pre-wrap text-base leading-relaxed text-gray-800">
                       {selectedRowForCompare.actualOutput || (
                         <span className="text-gray-400 italic">No output</span>
                       )}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </div>
                 <div className="flex flex-col h-full border rounded-xl overflow-hidden shadow-sm">
                   <div className="bg-gray-50 p-3 border-b font-medium text-gray-700">
                     <span>Ground Truth</span>
                   </div>
-                  <ScrollArea className="flex-1 bg-white">
+                  <div className="flex-1 min-h-0 overflow-y-auto bg-white">
                     <div className="p-4 whitespace-pre-wrap text-base leading-relaxed text-gray-800">
                       {selectedRowForCompare.groundTruth || (
                         <span className="text-gray-400 italic">
@@ -1078,7 +1148,7 @@ export default function BatchResultsPage({
                         </span>
                       )}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </div>
               </div>
 

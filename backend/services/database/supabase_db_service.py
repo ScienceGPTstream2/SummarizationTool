@@ -230,6 +230,8 @@ class SupabaseDBService:
         session_id: Optional[str] = None,
         file_path: Optional[str] = None,
         study_type: Optional[str] = None,
+        parse_cost: Optional[float] = None,
+        page_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create a document record"""
         data = {
@@ -241,6 +243,10 @@ class SupabaseDBService:
             "study_type": study_type,
             "processing_status": "pending",
         }
+        if parse_cost is not None:
+            data["parse_cost"] = parse_cost
+        if page_count is not None:
+            data["page_count"] = page_count
 
         result = self.client.table("documents").insert(data).execute()
         return result.data[0] if result.data else None
@@ -369,6 +375,15 @@ class SupabaseDBService:
         )
 
         return result.data[0] if result.data else None
+
+    def update_extraction_cost(self, extraction_id: str, cost: float) -> None:
+        """Backfill a recomputed extraction cost into the DB."""
+        try:
+            self.client.table("extraction_results").update({"cost": cost}).eq(
+                "id", extraction_id
+            ).execute()
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to backfill extraction cost: {e}")
 
     def get_extraction_results_by_session(
         self, session_id: str

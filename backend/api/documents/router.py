@@ -106,19 +106,48 @@ async def process_uploaded_file(
                 async with aiofiles.open(markdown_path, "r") as f:
                     markdown_content_length = len(await f.read())
 
-            # Estimate parse cost from cached metadata (if available)
+            # For cached docs: always estimate parse_cost from cached metadata so that
+            # the caller gets a non-zero value even without a session_id header.
+            # Docling stores "conversion_time" as a datetime ISO string, not a float, so
+            # we must guard against that before passing it as duration.
             parse_cost = 0.0
             try:
+                raw_duration = cached_metadata.get("conversion_time")
+                cached_duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else 0.0
                 parse_cost = cost_tracker.estimate_call_cost(
                     provider="azure",
                     model=processor_name,
                     prompt_tokens=0,
                     completion_tokens=0,
                     page_count=cached_metadata.get("page_count") or 0,
-                    duration=cached_metadata.get("conversion_time") or 0,
+                    duration=cached_duration,
                 )
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to estimate cached parse cost: {e}")
+
+            # If a session_id is available, prefer the DB-persisted value for consistency,
+            # and backfill DB if the record doesn't have a cost yet.
+            try:
+                session_id = http_request.headers.get("X-Session-Id") if http_request else None
+                user_id = http_request.headers.get("X-User-Id") if http_request else None
+                if session_id:
+                    from services.database.supabase_db_service import get_db_service
+
+                    db = get_db_service()
+                    docs = db.get_documents_by_session(session_id)
+                    doc_match = next((d for d in docs if d.get("file_hash") == file_hash), None)
+
+                    if doc_match and doc_match.get("parse_cost") is not None and float(doc_match["parse_cost"]) > 0:
+                        # Already persisted — use the canonical value (same across all users)
+                        parse_cost = float(doc_match["parse_cost"])
+                    elif doc_match:
+                        # Not yet in DB (or stored as 0) — persist the freshly estimated value
+                        db.update_document(doc_match["id"], {
+                            "parse_cost": parse_cost,
+                            "page_count": cached_metadata.get("page_count"),
+                        })
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to handle cached parse cost DB sync: {e}")
 
             return JSONResponse(
                 status_code=200,
@@ -135,6 +164,7 @@ async def process_uploaded_file(
                     "figures": cached_metadata.get("figures", []),
                     "tables_found": cached_metadata.get("tables_found", 0),
                     "parse_cost": parse_cost,
+                    "page_count": cached_metadata.get("page_count"),
                 },
             )
 
@@ -166,6 +196,26 @@ async def process_uploaded_file(
             )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to estimate parse cost: {e}")
+
+        # Persist parse_cost and page_count to documents table if possible.
+        # page_count is stored so the deterministic recompute fallback in
+        # _db_to_session() can reconstruct parse_cost from page_count + processor_used.
+        try:
+            session_id = http_request.headers.get("X-Session-Id") if http_request else None
+            if session_id:
+                from services.database.supabase_db_service import get_db_service
+
+                db = get_db_service()
+                docs = db.get_documents_by_session(session_id)
+                doc_match = next((d for d in docs if d.get("file_hash") == file_hash), None)
+                if doc_match:
+                    db.update_document(doc_match["id"], {
+                        "parse_cost": parse_cost,
+                        "page_count": metadata.get("page_count"),
+                        "processor_used": result.get("processor_used", processor_name),
+                    })
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
 
         try:
             from services.telemetry.cost_tracker import cost_tracker
@@ -217,6 +267,10 @@ async def process_uploaded_file(
         # Include tables information if available
         if "tables_found" in result["metadata"]:
             response_content["tables_found"] = result["metadata"]["tables_found"]
+
+        # Include page_count for parse cost recompute on history reload
+        if "page_count" in result["metadata"]:
+            response_content["page_count"] = result["metadata"]["page_count"]
 
         return JSONResponse(status_code=200, content=response_content)
 

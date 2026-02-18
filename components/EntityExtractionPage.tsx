@@ -570,6 +570,72 @@ export function EntityExtractionPage({
     }
   };
 
+  // Auto-generate paragraph evaluation ground truth in background after paragraph creation.
+  // Fires-and-forgets; updates state with the ground truth on success.
+  const triggerParagraphEvalGeneration = async (
+    fileId: string,
+    entityOrder: string[],
+    paragraphModelId: string
+  ) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || !fileId) return;
+
+    try {
+      const resp = await authenticatedFetch("/api/paragraph-evaluation/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          file_hash: fileId,
+          user_id: undefined, // backend resolves from auth token
+          entity_order: entityOrder,
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        // Update files state so EvaluationPage sees the ground truth immediately
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.fileId === fileId
+              ? {
+                  ...f,
+                  paragraphSummaryModel: paragraphModelId,
+                  paragraphEvaluation: {
+                    groundTruth: data.ground_truth,
+                    humanScore:
+                      f.paragraphEvaluation?.humanScore ?? null,
+                  },
+                }
+              : f
+          )
+        );
+        setDocumentData((prev) => ({
+          ...prev,
+          uploadedFiles: (prev.uploadedFiles || []).map((f) =>
+            f.fileId === fileId
+              ? {
+                  ...f,
+                  paragraphSummaryModel: paragraphModelId,
+                  paragraphEvaluation: {
+                    groundTruth: data.ground_truth,
+                    humanScore:
+                      (f as any).paragraphEvaluation?.humanScore ?? null,
+                  },
+                }
+              : f
+          ),
+        }));
+        console.log(
+          `[ParagraphEval] Ground truth generated for file ${fileId}, length=${data.ground_truth?.length}`
+        );
+      }
+    } catch (err) {
+      console.warn("[ParagraphEval] Background ground truth generation failed:", err);
+      // Don't surface errors to user — this is a background operation
+    }
+  };
+
   const processFile = async (file: any) => {
     const conversionId =
       file.processingResult?.conversionId || documentData.conversionId;
@@ -742,6 +808,11 @@ export function EntityExtractionPage({
             status: "completed",
           },
         }));
+
+        // Auto-generate paragraph evaluation ground truth in background
+        const entityOrder = updatedEntities.map((e: any) => e.name);
+        const paragraphModelId = file.selectedModels?.[0] || file.selectedModel || "";
+        triggerParagraphEvalGeneration(file.fileId, entityOrder, paragraphModelId);
       }
     } catch (err) {
       console.error(`Error generating summary for file ${file.fileId}:`, err);
@@ -1156,6 +1227,7 @@ export function EntityExtractionPage({
         duration: meta.duration,
         promptTokens: meta.prompt_tokens,
         completionTokens: meta.completion_tokens,
+        cost: meta.cost ?? undefined,
       };
     }
 
@@ -1247,6 +1319,7 @@ export function EntityExtractionPage({
           duration: result.duration,
           promptTokens: result.promptTokens,
           completionTokens: result.completionTokens,
+          cost: result.cost ?? undefined,
         };
       }
     });
@@ -1601,6 +1674,14 @@ export function EntityExtractionPage({
             : f
         ),
       }));
+
+      // Auto-generate paragraph evaluation ground truth in background
+      const entityOrder = entities.map((e: any) => e.name);
+      triggerParagraphEvalGeneration(
+        currentFile?.fileId || selectedFileId,
+        entityOrder,
+        modelObj?.id || ""
+      );
     } catch (err) {
       console.error("Summary generation error:", err);
       alert("Failed to generate summary");
@@ -1865,6 +1946,14 @@ export function EntityExtractionPage({
         ...documentData,
         uploadedFiles: updatedFiles,
       });
+
+      // Auto-generate paragraph evaluation ground truth in background
+      const entityOrder = updatedEntities.map((e: any) => e.name);
+      triggerParagraphEvalGeneration(
+        currentFile?.fileId || selectedFileId,
+        entityOrder,
+        modelIdToUse || ""
+      );
     } catch (err: any) {
       if (err.name === "AbortError") {
         console.log("Summarization aborted");
