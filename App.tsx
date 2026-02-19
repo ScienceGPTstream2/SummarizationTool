@@ -334,6 +334,7 @@ export default function App() {
               documents: data.uploadedFiles.map((f) => ({
                 file_hash: f.fileId,
                 filename: f.file.name,
+                processor_used: f.processingResult?.processorUsed ?? null,
                 parse_cost: f.processingResult?.parse_cost ?? null,
                 page_count: f.processingResult?.page_count ?? null,
               })),
@@ -636,9 +637,16 @@ export default function App() {
               conversionId: doc.file_hash,
               fileHash: doc.file_hash,
               markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
-              processorUsed: "azure_doc_intelligence", // Default assumption if not stored
+              processorUsed:
+                doc.processor_used ||
+                fileConfig.processor_used ||
+                "azure_doc_intelligence",
               parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
             },
+            processorUsed:
+              doc.processor_used ||
+              fileConfig.processor_used ||
+              undefined,
             paragraph_system_prompt:
               fileConfig.paragraph_system_prompt ||
               config.paragraph_system_prompt ||

@@ -107,6 +107,7 @@ interface Entity {
   duration?: number;
   promptTokens?: number;
   completionTokens?: number;
+  cost?: number;
   // NEW: Store extraction results for multiple models
   extractionsByModel?: Record<
     string,
@@ -117,6 +118,7 @@ interface Entity {
       duration?: number;
       promptTokens?: number;
       completionTokens?: number;
+      cost?: number;
     }
   >;
 }
@@ -355,6 +357,7 @@ export function EntityExtractionPage({
             promptTokens?: number;
             completionTokens?: number;
             duration?: number;
+            cost?: number;
           };
           await fetch(
             `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
@@ -378,6 +381,7 @@ export function EntityExtractionPage({
                 duration_ms: modelData.duration
                   ? Math.round(modelData.duration * 1000)
                   : undefined,
+                cost: modelData.cost,
               }),
             }
           );
@@ -406,6 +410,7 @@ export function EntityExtractionPage({
               duration_ms: entity.duration
                 ? Math.round(entity.duration * 1000)
                 : undefined,
+              cost: entity.cost,
             }),
           }
         );
@@ -781,6 +786,7 @@ export function EntityExtractionPage({
                   ...f,
                   entities: updatedEntities,
                   finalSummary: summaryData.summary,
+                  paragraphSummaryCost: summaryData.meta?.cost ?? undefined,
                 }
               : f
           )
@@ -795,6 +801,7 @@ export function EntityExtractionPage({
                   ...f,
                   entities: updatedEntities,
                   finalSummary: summaryData.summary,
+                  paragraphSummaryCost: summaryData.meta?.cost ?? undefined,
                 }
               : f
           ),
@@ -1662,7 +1669,7 @@ export function EntityExtractionPage({
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt, paragraphSummaryCost: summaryData.meta?.cost ?? undefined }
             : f
         )
       );
@@ -1670,7 +1677,7 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt }
+            ? { ...f, finalSummary, summaryPrompt, paragraphSystemPrompt, paragraphSummaryCost: summaryData.meta?.cost ?? undefined }
             : f
         ),
       }));
@@ -1936,6 +1943,7 @@ export function EntityExtractionPage({
               entities: updatedEntities,
               summaryPrompt: summaryPrompt,
               finalSummary,
+              paragraphSummaryCost: summaryData.meta?.cost ?? undefined,
             }
           : f
       );

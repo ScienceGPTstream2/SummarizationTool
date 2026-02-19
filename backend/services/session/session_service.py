@@ -94,6 +94,7 @@ class SessionService:
                     user_id=request.user_id,
                     file_hash=doc.file_hash,
                     filename=doc.filename,
+                    processor_used=doc.processor_used,
                     parse_cost=doc.parse_cost,
                     page_count=doc.page_count,
                 )
@@ -102,6 +103,9 @@ class SessionService:
                         **{
                             "file_hash": db_doc["file_hash"],
                             "filename": db_doc["filename"],
+                            "processor_used": db_doc.get("processor_used"),
+                            "parse_cost": db_doc.get("parse_cost"),
+                            "page_count": db_doc.get("page_count"),
                         }
                     )
                 )
@@ -223,6 +227,9 @@ class SessionService:
                         user_id=user_id,
                         file_hash=doc.file_hash,
                         filename=doc.filename,
+                        processor_used=doc.processor_used,
+                        parse_cost=doc.parse_cost,
+                        page_count=doc.page_count,
                     )
 
         # Handle extraction results updates
@@ -245,6 +252,10 @@ class SessionService:
                     bbox_references=result.references,
                     status=result.status,
                     error_message=result.error_message,
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                    duration_ms=result.duration_ms,
+                    cost=result.cost,
                 )
 
         # Handle evaluation results updates
@@ -542,6 +553,7 @@ class SessionService:
                     ],  # CRITICAL: Include ID for matching extraction results
                     file_hash=doc["file_hash"],
                     filename=doc["filename"],
+                    processor_used=doc.get("processor_used"),
                     parse_cost=parse_cost,
                     page_count=doc.get("page_count"),
                 )
@@ -556,19 +568,21 @@ class SessionService:
             if not cost:
                 pt = ext.get("prompt_tokens")
                 ct = ext.get("completion_tokens")
-                if pt is not None and ct is not None:
+                if pt is not None or ct is not None:
                     try:
                         provider = infer_provider_from_model_id(
                             ext.get("model_id", "")
                         )
-                        cost = cost_tracker.estimate_call_cost(
+                        _recomputed = cost_tracker.estimate_call_cost(
                             provider=provider,
                             model=ext.get("model_id", ""),
                             prompt_tokens=pt,
                             completion_tokens=ct,
                         )
-                        if cost:
+                        if _recomputed:
+                            cost = _recomputed
                             self.db.update_extraction_cost(ext["id"], cost)
+                        # else: cost stays None → shows "—" not "0.000000"
                     except Exception as e:
                         print(
                             f"[COST_TRACKER] extraction cost recompute failed: {e}"

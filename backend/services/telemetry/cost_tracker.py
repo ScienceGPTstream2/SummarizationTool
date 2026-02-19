@@ -129,6 +129,12 @@ class CostTracker:
                 return model_lower
             if model_lower.startswith("azure:"):
                 return model_lower
+            # Strip "azure-" prefix that appears when model_id comes from /api/models
+            # endpoint (which returns id = f"azure-{deployment}").  Without this,
+            # "azure-gpt-5.1" would normalize to "azure:azure-gpt-5.1" (not found)
+            # instead of "azure:gpt-5.1" (found in pricing.json).
+            if model_lower.startswith("azure-"):
+                model_lower = model_lower[len("azure-"):]
             return f"azure:{model_lower}"
         if provider == "gcp":
             if model_lower.startswith("vertex:"):

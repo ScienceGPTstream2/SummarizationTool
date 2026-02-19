@@ -230,6 +230,7 @@ class SupabaseDBService:
         session_id: Optional[str] = None,
         file_path: Optional[str] = None,
         study_type: Optional[str] = None,
+        processor_used: Optional[str] = None,
         parse_cost: Optional[float] = None,
         page_count: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -247,6 +248,8 @@ class SupabaseDBService:
             data["parse_cost"] = parse_cost
         if page_count is not None:
             data["page_count"] = page_count
+        if processor_used is not None:
+            data["processor_used"] = processor_used
 
         result = self.client.table("documents").insert(data).execute()
         return result.data[0] if result.data else None
@@ -269,6 +272,28 @@ class SupabaseDBService:
         )
 
         return result.data or []
+
+    def get_parse_cost_by_file_hash(self, file_hash: str) -> Optional[float]:
+        """Return any previously stored parse_cost for this file_hash across all sessions.
+
+        Used as a Tier-4 fallback for Docling cached docs whose metadata.json predates the
+        parse_duration_seconds field — looks up the cost that was stored during the original
+        fresh processing run (potentially in a different session).
+        """
+        try:
+            result = (
+                self.client.table("documents")
+                .select("parse_cost")
+                .eq("file_hash", file_hash)
+                .gt("parse_cost", 0)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return float(result.data[0]["parse_cost"])
+        except Exception as e:
+            print(f"[COST_TRACKER] get_parse_cost_by_file_hash failed: {e}")
+        return None
 
     def list_user_documents(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all documents for a user (from all sessions)"""
@@ -359,11 +384,17 @@ class SupabaseDBService:
             "bbox_references": bbox_references,
             "status": status,
             "error_message": error_message,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "duration_ms": duration_ms,
-            "cost": cost,
         }
+        # Only include cost/token fields if they have values, so a second write
+        # without these fields never overwrites an already-persisted cost.
+        if prompt_tokens is not None:
+            data["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            data["completion_tokens"] = completion_tokens
+        if duration_ms is not None:
+            data["duration_ms"] = duration_ms
+        if cost is not None:
+            data["cost"] = cost
 
         if status == "completed":
             data["extracted_at"] = datetime.utcnow().isoformat()

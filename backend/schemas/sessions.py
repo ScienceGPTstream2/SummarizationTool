@@ -37,6 +37,7 @@ class SessionDocument(BaseModel):
     file_hash: str
     filename: str
     id: Optional[str] = None
+    processor_used: Optional[str] = None
     parse_cost: Optional[float] = None
     page_count: Optional[int] = None
 
