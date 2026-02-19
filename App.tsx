@@ -795,9 +795,9 @@ export default function App() {
                   const avgScore =
                     evalResult.metrics.length > 0
                       ? evalResult.metrics.reduce(
-                        (sum: number, m: any) => sum + m.score,
-                        0
-                      ) / evalResult.metrics.length
+                          (sum: number, m: any) => sum + m.score,
+                          0
+                        ) / evalResult.metrics.length
                       : 0;
                   return {
                     ...evalResult,
@@ -889,9 +889,9 @@ export default function App() {
                       const avgScore =
                         evalResult.metrics.length > 0
                           ? evalResult.metrics.reduce(
-                            (sum: number, m: any) => sum + (m.score || 0),
-                            0
-                          ) / evalResult.metrics.length
+                              (sum: number, m: any) => sum + (m.score || 0),
+                              0
+                            ) / evalResult.metrics.length
                           : 0;
                       return {
                         ...evalResult,
@@ -964,7 +964,7 @@ export default function App() {
           // Get ground truth from files_config first, fallback to evaluation results
           const groundTruth =
             filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
-            e.name
+              e.name
             ] ||
             entityEvaluations.find((ev: any) => ev.ground_truth)
               ?.ground_truth ||
@@ -1045,9 +1045,9 @@ export default function App() {
               const avgScore =
                 evalResult.metrics.length > 0
                   ? evalResult.metrics.reduce(
-                    (sum: number, m: any) => sum + m.score,
-                    0
-                  ) / evalResult.metrics.length
+                      (sum: number, m: any) => sum + m.score,
+                      0
+                    ) / evalResult.metrics.length
                   : 0;
               return {
                 ...evalResult,
@@ -1126,9 +1126,9 @@ export default function App() {
                     const avgScore =
                       evalResult.metrics.length > 0
                         ? evalResult.metrics.reduce(
-                          (sum: number, m: any) => sum + (m.score || 0),
-                          0
-                        ) / evalResult.metrics.length
+                            (sum: number, m: any) => sum + (m.score || 0),
+                            0
+                          ) / evalResult.metrics.length
                         : 0;
                     return {
                       ...evalResult,

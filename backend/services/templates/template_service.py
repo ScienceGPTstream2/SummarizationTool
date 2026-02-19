@@ -218,7 +218,8 @@ class TemplateService:
         # Apply tags filter (post-query for array overlap)
         if tags:
             accessible = [
-                t for t in accessible
+                t
+                for t in accessible
                 if any(tag in (t.get("tags") or []) for tag in tags)
             ]
 
@@ -252,8 +253,15 @@ class TemplateService:
 
         # Filter allowed fields
         allowed = {
-            "name", "description", "study_type", "system_prompt",
-            "entities", "summary_prompt", "variables", "tags", "is_immutable"
+            "name",
+            "description",
+            "study_type",
+            "system_prompt",
+            "entities",
+            "summary_prompt",
+            "variables",
+            "tags",
+            "is_immutable",
         }
         data = {k: v for k, v in updates.items() if k in allowed}
 
@@ -298,7 +306,9 @@ class TemplateService:
             if template.get("created_by") != user_id:
                 return False
 
-        self.db.client.table("prompt_templates").delete().eq("id", template_id).execute()
+        self.db.client.table("prompt_templates").delete().eq(
+            "id", template_id
+        ).execute()
         return True
 
     # ==========================================
@@ -588,7 +598,9 @@ class TemplateService:
             if template["owner_user_id"] != granting_user_id:
                 return None
         elif template["scope"] == "group":
-            role = self.group_service._get_role(template["owner_group_id"], granting_user_id)
+            role = self.group_service._get_role(
+                template["owner_group_id"], granting_user_id
+            )
             if role not in ("admin", "owner"):
                 return None
         else:
@@ -673,7 +685,9 @@ class TemplateService:
             if template["owner_user_id"] != removing_user_id:
                 return False
         elif template["scope"] == "group":
-            role = self.group_service._get_role(template["owner_group_id"], removing_user_id)
+            role = self.group_service._get_role(
+                template["owner_group_id"], removing_user_id
+            )
             if role not in ("admin", "owner"):
                 return False
         else:

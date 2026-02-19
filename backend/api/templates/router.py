@@ -125,7 +125,9 @@ class PermissionResponse(BaseModel):
 
 @router.get("", response_model=List[TemplateResponse])
 async def list_templates(
-    scope: Optional[str] = Query(None, description="Filter by scope: user, group, global"),
+    scope: Optional[str] = Query(
+        None, description="Filter by scope: user, group, global"
+    ),
     study_type: Optional[str] = Query(None, description="Filter by study type"),
     search: Optional[str] = Query(None, description="Search in name/description"),
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
@@ -169,7 +171,11 @@ async def create_template(
             study_type=request.study_type,
             system_prompt=request.system_prompt,
             summary_prompt=request.summary_prompt,
-            variables=[v.model_dump() for v in request.variables] if request.variables else None,
+            variables=(
+                [v.model_dump() for v in request.variables]
+                if request.variables
+                else None
+            ),
             tags=request.tags,
             is_immutable=request.is_immutable,
         )
@@ -210,9 +216,15 @@ async def update_template(
     # Convert entities and variables if present
     updates = request.model_dump(exclude_none=True, exclude={"change_summary"})
     if "entities" in updates:
-        updates["entities"] = [e.model_dump() if hasattr(e, "model_dump") else e for e in updates["entities"]]
+        updates["entities"] = [
+            e.model_dump() if hasattr(e, "model_dump") else e
+            for e in updates["entities"]
+        ]
     if "variables" in updates:
-        updates["variables"] = [v.model_dump() if hasattr(v, "model_dump") else v for v in updates["variables"]]
+        updates["variables"] = [
+            v.model_dump() if hasattr(v, "model_dump") else v
+            for v in updates["variables"]
+        ]
 
     template = service.update_template(
         template_id=template_id,
@@ -395,7 +407,9 @@ async def get_permissions(
     return permissions
 
 
-@router.post("/{template_id}/permissions", response_model=PermissionResponse, status_code=201)
+@router.post(
+    "/{template_id}/permissions", response_model=PermissionResponse, status_code=201
+)
 async def set_permission(
     template_id: str,
     request: SetPermissionRequest,

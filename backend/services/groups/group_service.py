@@ -90,18 +90,13 @@ class GroupService:
                 return None
 
         # Get group
-        result = (
-            self.db.client.table("groups")
-            .select("*")
-            .eq("id", group_id)
-            .execute()
-        )
+        result = self.db.client.table("groups").select("*").eq("id", group_id).execute()
 
         if not result.data:
             return None
 
         group = result.data[0]
-        
+
         # Set role
         if is_system_admin:
             group["user_role"] = "system_admin"
@@ -207,10 +202,7 @@ class GroupService:
             return self.get_group(group_id, user_id)
 
         result = (
-            self.db.client.table("groups")
-            .update(data)
-            .eq("id", group_id)
-            .execute()
+            self.db.client.table("groups").update(data).eq("id", group_id).execute()
         )
 
         return result.data[0] if result.data else None
@@ -300,7 +292,9 @@ class GroupService:
             Created membership or None if not authorized
         """
         # Check permission (system admins bypass)
-        if not is_system_admin and not self._has_admin_role(group_id, requesting_user_id):
+        if not is_system_admin and not self._has_admin_role(
+            group_id, requesting_user_id
+        ):
             return None
 
         # Cannot add someone as owner
@@ -318,7 +312,9 @@ class GroupService:
 
         if existing.data:
             # Update role instead
-            return self.update_member_role(group_id, target_user_id, role, requesting_user_id)
+            return self.update_member_role(
+                group_id, target_user_id, role, requesting_user_id
+            )
 
         data = {
             "user_id": target_user_id,
@@ -356,7 +352,7 @@ class GroupService:
             target_role = self._get_role(group_id, target_user_id)
             if target_role == "owner" or new_role == "owner":
                 return None
-                
+
             result = (
                 self.db.client.table("user_groups")
                 .update({"role": new_role})
@@ -419,9 +415,9 @@ class GroupService:
             if self._is_only_owner(group_id, target_user_id):
                 return False
 
-            self.db.client.table("user_groups").delete().eq(
-                "group_id", group_id
-            ).eq("user_id", target_user_id).execute()
+            self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
+                "user_id", target_user_id
+            ).execute()
             return True
 
         # System admins can remove anyone except owners
@@ -429,9 +425,9 @@ class GroupService:
             target_role = self._get_role(group_id, target_user_id)
             if target_role == "owner":
                 return False
-            self.db.client.table("user_groups").delete().eq(
-                "group_id", group_id
-            ).eq("user_id", target_user_id).execute()
+            self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
+                "user_id", target_user_id
+            ).execute()
             return True
 
         # Otherwise need admin role
@@ -443,9 +439,9 @@ class GroupService:
         if target_role == "owner":
             return False
 
-        self.db.client.table("user_groups").delete().eq(
-            "group_id", group_id
-        ).eq("user_id", target_user_id).execute()
+        self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
+            "user_id", target_user_id
+        ).execute()
         return True
 
     # ==========================================

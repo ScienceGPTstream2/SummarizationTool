@@ -31,7 +31,7 @@ async def get_current_user(
     try:
         user_info = auth_service.get_user_info(token)
         app_metadata = user_info.get("app_metadata", {})
-        
+
         return {
             "id": user_info.get("id"),
             "email": user_info.get("email"),
@@ -43,4 +43,3 @@ async def get_current_user(
     except ValueError as e:
         print(f"[AUTH] Supabase token verification failed: {str(e)}")
         raise HTTPException(status_code=401, detail=str(e))
-

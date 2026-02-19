@@ -98,7 +98,9 @@ async def get_group(
     """Get a group by ID with members"""
     service = get_group_service()
     group = service.get_group(
-        group_id, current_user["id"], is_system_admin=current_user.get("is_admin", False)
+        group_id,
+        current_user["id"],
+        is_system_admin=current_user.get("is_admin", False),
     )
 
     if not group:
@@ -142,7 +144,9 @@ async def delete_group(
     """Delete a group. Requires owner role (or system admin)."""
     service = get_group_service()
     deleted = service.delete_group(
-        group_id, current_user["id"], is_system_admin=current_user.get("is_admin", False)
+        group_id,
+        current_user["id"],
+        is_system_admin=current_user.get("is_admin", False),
     )
 
     if not deleted:
@@ -165,7 +169,9 @@ async def get_group_members(
     """Get all members of a group"""
     service = get_group_service()
     members = service.get_group_members(
-        group_id, current_user["id"], is_system_admin=current_user.get("is_admin", False)
+        group_id,
+        current_user["id"],
+        is_system_admin=current_user.get("is_admin", False),
     )
 
     if members is None:
@@ -293,10 +299,12 @@ async def search_users(
     existing_member_ids: set = set()
     if group_id:
         try:
-            members = service.db.client.table("user_groups") \
-                .select("user_id") \
-                .eq("group_id", group_id) \
+            members = (
+                service.db.client.table("user_groups")
+                .select("user_id")
+                .eq("group_id", group_id)
                 .execute()
+            )
             existing_member_ids = {m["user_id"] for m in (members.data or [])}
         except Exception:
             pass
