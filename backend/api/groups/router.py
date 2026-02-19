@@ -347,7 +347,9 @@ async def search_users(
 
                 if len(results) >= 10:
                     break
-    except Exception:
+    except Exception as e:
+        # Log the error but continue with empty results if user search fails
+        print(f"Error searching users: {e}")
         pass
 
     return results
