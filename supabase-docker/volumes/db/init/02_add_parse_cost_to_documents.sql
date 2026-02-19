@@ -1,3 +1,3 @@
--- Migration: add parse_cost column to documents for per-file processing cost tracking
-ALTER TABLE public.documents
-ADD COLUMN IF NOT EXISTS parse_cost DECIMAL;
+-- SUPERSEDED: This change is now handled by migration
+-- supabase-docker/migrations/20260216152300_add_parse_cost_to_documents.sql
+-- This file is kept for reference only and has no effect.

@@ -1,6 +1,3 @@
--- Migration: add page_count to documents for deterministic parse cost recompute
--- page_count is needed to recompute parse_cost when it is NULL on history reload.
--- The IF NOT EXISTS clause makes this idempotent (safe to run multiple times).
-
-ALTER TABLE public.documents
-    ADD COLUMN IF NOT EXISTS page_count INTEGER;
+-- SUPERSEDED: This change is now handled by migration
+-- supabase-docker/migrations/20260218150800_add_page_count_to_documents.sql
+-- This file is kept for reference only and has no effect.
