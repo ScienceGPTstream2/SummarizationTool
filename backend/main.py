@@ -80,6 +80,8 @@ from api import (
     paragraph_evaluation,
     evaluations,
     sessions,
+    groups,
+    templates,
 )
 
 
@@ -111,6 +113,8 @@ def create_app() -> FastAPI:
     app.include_router(paragraphgenerator.router)
     app.include_router(paragraph_evaluation.router)
     app.include_router(sessions.router)
+    app.include_router(groups.router)
+    app.include_router(templates.router)
 
     return app
 

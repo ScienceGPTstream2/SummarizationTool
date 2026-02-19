@@ -118,7 +118,59 @@ auth.users
 public.sessions        -- User sessions with extraction configs
 public.documents       -- Uploaded documents linked to sessions
 public.extraction_results  -- LLM extraction results per document
+public.groups          -- User groups for collaboration
+public.user_groups     -- Group memberships and roles
+public.prompt_templates -- Prompt templates with versioning
 ```
+
+---
+
+## Database Migrations
+
+Migrations are managed via **Supabase CLI** and run automatically on `docker compose up -d`.
+
+### How It Works
+
+1. Migration files live in `migrations/` directory with timestamp prefixes (e.g., `20260208000000_groups_and_templates.sql`)
+2. The `db-migrations` service runs on startup and applies any pending migrations
+3. Supabase CLI tracks applied migrations in `supabase_migrations.schema_migrations` table
+
+### Creating New Migrations
+
+```bash
+# Create a new migration file
+touch migrations/$(date +%Y%m%d%H%M%S)_your_migration_name.sql
+# Then edit the file with your SQL
+```
+
+### Migration Naming Convention
+
+```
+YYYYMMDDHHMMSS_description.sql
+```
+
+Examples:
+- `20260208000000_groups_and_templates.sql`
+- `20260209120000_add_user_preferences.sql`
+
+### Best Practices
+
+- Use `CREATE TABLE IF NOT EXISTS` for tables
+- Use `CREATE INDEX IF NOT EXISTS` for indexes  
+- Use `DROP POLICY IF EXISTS` before `CREATE POLICY` (policies don't support IF NOT EXISTS)
+
+### Check Migration Status
+
+```bash
+# List migrations in tracking table
+docker exec supabase-db psql -U postgres -d postgres -c \
+  "SELECT version, name FROM supabase_migrations.schema_migrations;"
+
+# Re-run migrations manually
+docker compose up -d --force-recreate db-migrations
+docker compose logs -f db-migrations
+```
+
 
 ---
 

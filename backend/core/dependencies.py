@@ -30,11 +30,15 @@ async def get_current_user(
 
     try:
         user_info = auth_service.get_user_info(token)
+        app_metadata = user_info.get("app_metadata", {})
+
         return {
             "id": user_info.get("id"),
             "email": user_info.get("email"),
             "role": user_info.get("role"),
             "metadata": user_info.get("user_metadata", {}),
+            "app_metadata": app_metadata,
+            "is_admin": app_metadata.get("is_admin", False),
         }
     except ValueError as e:
         print(f"[AUTH] Supabase token verification failed: {str(e)}")
