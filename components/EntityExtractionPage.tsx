@@ -118,8 +118,6 @@ interface Entity {
       promptTokens?: number;
       completionTokens?: number;
       cost?: number;
-      retriesAttempted?: number;
-      retryReasons?: string[];
     }
   >;
 }
@@ -1412,8 +1410,6 @@ export function EntityExtractionPage({
         promptTokens: meta.prompt_tokens,
         completionTokens: meta.completion_tokens,
         cost: meta.cost ?? undefined,
-        retriesAttempted: meta.retries_attempted || 0,
-        retryReasons: meta.retry_reasons || [],
       };
     }
 
@@ -1882,7 +1878,7 @@ export function EntityExtractionPage({
   const regenerateSummaryForCurrentModel = async () => {
     setIsGeneratingParagraph(true);
     try {
-      const { summary, cost: summaryCost } = await generateSummaryForModel(selectedModel);
+      const { summary } = await generateSummaryForModel(selectedModel);
       const summaryModelId = selectedModel;
 
       if (sessionIdRef.current) {
@@ -1899,17 +1895,7 @@ export function EntityExtractionPage({
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? {
-                ...f,
-                finalSummary: summary,
-                summaryPrompt,
-                paragraphSystemPrompt,
-                summariesByModel: {
-                  ...(f.summariesByModel || {}),
-                  [summaryModelId]: summary,
-                },
-                ...(summaryCost != null && { paragraphSummaryCost: summaryCost }),
-              }
+            ? { ...f, finalSummary: summary, summaryPrompt, paragraphSystemPrompt }
             : f
         )
       );
@@ -1917,17 +1903,7 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? {
-                ...f,
-                finalSummary: summary,
-                summaryPrompt,
-                paragraphSystemPrompt,
-                summariesByModel: {
-                  ...(f.summariesByModel || {}),
-                  [summaryModelId]: summary,
-                },
-                ...(summaryCost != null && { paragraphSummaryCost: summaryCost }),
-              }
+            ? { ...f, finalSummary: summary, summaryPrompt, paragraphSystemPrompt }
             : f
         ),
       }));
@@ -2101,16 +2077,6 @@ export function EntityExtractionPage({
       // Small delay to ensure UI updates before the API call
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Generate paragraph summaries for ALL selected models — show each as it arrives
-      const preSelectedModels =
-        currentFile?.selectedModels || documentData.selectedModels || [];
-      const allModelsToSummarize =
-        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
-
-      const formattedPrompt = summaryPrompt.includes("{{entities}}")
-        ? summaryPrompt
-        : `${summaryPrompt}\n\n{{entities}}`;
-
       const fileId = selectedFileId;
 
       // First update entities state
@@ -2125,7 +2091,6 @@ export function EntityExtractionPage({
               selectedModel: selectedModel,
               entities: updatedEntities,
               summaryPrompt: summaryPrompt,
-
             }
           : f
       );
@@ -2134,69 +2099,6 @@ export function EntityExtractionPage({
         ...documentData,
         uploadedFiles: updatedFilesWithEntities,
       });
-
-      // Fire all paragraph requests concurrently, update UI as each completes
-      const summaryPromises = allModelsToSummarize.map(
-        async (modelId: string) => {
-          const mObj = availableModels.find((m) => m.id === modelId);
-          if (!mObj) return;
-
-          const mType = getModelType(mObj.provider || "");
-
-          // Use per-model entity results if available
-          const modelEntities = updatedEntities.map((e) => {
-            if (e.extractionsByModel?.[modelId]) {
-              return {
-                ...e,
-                extracted: e.extractionsByModel[modelId].extracted,
-              };
-            }
-            return e;
-          });
-
-          try {
-            const resp = await authenticatedFetch("/api/generate_paragraph", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                entities: modelEntities,
-                summary_prompt: formattedPrompt,
-                model_type: mType,
-                model_id: mObj.id,
-                deployment: mObj.deployment,
-                api_version: mObj.api_version,
-                temperature:
-                  mObj.supports_temperature !== false
-                    ? getModelTemperature(modelId)
-                    : undefined,
-                session_id: sessionIdRef.current,
-                file_hash: currentFile?.fileId,
-              }),
-              signal,
-            });
-
-            if (resp.ok) {
-              const data = await resp.json();
-              console.log(`✅ Paragraph generated for ${mObj.name}`);
-              // Immediately show this model's result
-              updateParagraphForModel(fileId, modelId, data.summary, data.meta?.cost);
-            }
-          } catch (err: any) {
-            if (err.name === "AbortError") throw err;
-            console.error(`Error generating paragraph for ${mObj.name}:`, err);
-          }
-        }
-      );
-
-      await Promise.all(summaryPromises);
-
-      // Auto-generate paragraph evaluation ground truth in background
-      const entityOrder = updatedEntities.map((e: any) => e.name);
-      triggerParagraphEvalGeneration(
-        currentFile?.fileId || selectedFileId,
-        entityOrder,
-        allModelsToSummarize[0] || selectedModel || ""
-      );
     } catch (err: any) {
       if (err.name === "AbortError") {
         console.log("Summarization aborted");
