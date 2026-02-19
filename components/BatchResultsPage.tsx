@@ -192,7 +192,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
         if (!extractionData) continue;
 
         const extractionCost =
-          extractionData.cost ?? extractionData.meta?.cost ?? extractionData.call_cost;
+          extractionData.cost ??
+          extractionData.meta?.cost ??
+          extractionData.call_cost;
         const actualOutput = extractionData.extracted || "";
         const evalResults = extractionData.evaluationResults || [];
 
@@ -277,7 +279,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
         id: `row-${idCounter++}`,
         fileId: fileId,
         studyName: fileName,
-        llmSource: getDisplayModelName((fileItem as any).paragraphSummaryModel || ""),
+        llmSource: getDisplayModelName(
+          (fileItem as any).paragraphSummaryModel || ""
+        ),
         sourceModelRaw: (fileItem as any).paragraphSummaryModel || "",
         ingestion: ingestionTool,
         systemPrompt: "",

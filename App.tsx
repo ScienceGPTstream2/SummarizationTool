@@ -657,9 +657,7 @@ export default function App() {
               parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
             },
             processorUsed:
-              doc.processor_used ||
-              fileConfig.processor_used ||
-              undefined,
+              doc.processor_used || fileConfig.processor_used || undefined,
             paragraph_system_prompt:
               fileConfig.paragraph_system_prompt ||
               config.paragraph_system_prompt ||
@@ -724,7 +722,6 @@ export default function App() {
 
             // Restore per-file, per-model temperatures from files_config
             modelTemperatures: fileConfig.model_temperatures || {},
-
 
             selectedModels: config.selected_models || [],
             status: "completed" as const,

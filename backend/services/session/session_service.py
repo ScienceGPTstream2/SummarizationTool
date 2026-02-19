@@ -608,9 +608,7 @@ class SessionService:
                 ct = ext.get("completion_tokens")
                 if pt is not None or ct is not None:
                     try:
-                        provider = infer_provider_from_model_id(
-                            ext.get("model_id", "")
-                        )
+                        provider = infer_provider_from_model_id(ext.get("model_id", ""))
                         _recomputed = cost_tracker.estimate_call_cost(
                             provider=provider,
                             model=ext.get("model_id", ""),
@@ -622,9 +620,7 @@ class SessionService:
                             self.db.update_extraction_cost(ext["id"], cost)
                         # else: cost stays None → shows "—" not "0.000000"
                     except Exception as e:
-                        print(
-                            f"[COST_TRACKER] extraction cost recompute failed: {e}"
-                        )
+                        print(f"[COST_TRACKER] extraction cost recompute failed: {e}")
 
             extraction_results.append(
                 ExtractionResult(

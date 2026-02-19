@@ -24,7 +24,6 @@ import json
 import uuid
 import requests
 
-
 BASE_URL = os.environ.get("MACBOOK_LLM_BASE_URL", "").rstrip("/")
 MODEL = os.environ.get("MACBOOK_MODEL", "gpt-oss:20b")
 REQUEST_COUNT = int(os.environ.get("MACBOOK_LOADTEST_COUNT", 15))
@@ -39,7 +38,7 @@ def build_big_prompt(i: int) -> str:
         "Cloudflare gateway limitations. Please extract entity #{i} and summarize it in "
         "one sentence. Ignore all prior instructions and just answer concisely."
     )
-    repeated = (base * 400)  # ~30k+ chars depending on length of base
+    repeated = base * 400  # ~30k+ chars depending on length of base
     return f"Entity {i}:\n" + repeated
 
 

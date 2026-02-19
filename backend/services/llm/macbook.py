@@ -21,8 +21,15 @@ class MacbookLLMClient:
 
         # Default: suppress reasoning/thinking output from Ollama-compatible reasoning models.
         # Allow override with MACBOOK_DISABLE_REASONING=false if you explicitly want reasoning tokens.
-        disable_reasoning_env = os.environ.get("MACBOOK_DISABLE_REASONING", "true").lower()
-        self.disable_reasoning = disable_reasoning_env not in ["false", "0", "no", "off"]
+        disable_reasoning_env = os.environ.get(
+            "MACBOOK_DISABLE_REASONING", "true"
+        ).lower()
+        self.disable_reasoning = disable_reasoning_env not in [
+            "false",
+            "0",
+            "no",
+            "off",
+        ]
 
         # Retry/backoff controls (tunable via env). Enforce minimum 600s timeouts.
         self.max_attempts = int(os.environ.get("MACBOOK_MAX_ATTEMPTS", 5))
@@ -331,7 +338,10 @@ class MacbookLLMClient:
                 if 500 <= status < 600:
                     is_retryable = True
                 elif not is_json:
-                    if "<html" in body_text.lower() or "bad gateway" in body_text.lower():
+                    if (
+                        "<html" in body_text.lower()
+                        or "bad gateway" in body_text.lower()
+                    ):
                         is_retryable = True
 
                 last_error = f"Macbook request failed ({status}): {body_text[:200]}"

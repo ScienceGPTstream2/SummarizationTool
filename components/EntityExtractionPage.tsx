@@ -626,16 +626,19 @@ export function EntityExtractionPage({
     if (!sessionId || !fileId) return;
 
     try {
-      const resp = await authenticatedFetch("/api/paragraph-evaluation/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          file_hash: fileId,
-          user_id: undefined, // backend resolves from auth token
-          entity_order: entityOrder,
-        }),
-      });
+      const resp = await authenticatedFetch(
+        "/api/paragraph-evaluation/generate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            file_hash: fileId,
+            user_id: undefined, // backend resolves from auth token
+            entity_order: entityOrder,
+          }),
+        }
+      );
 
       if (resp.ok) {
         const data = await resp.json();
@@ -648,8 +651,7 @@ export function EntityExtractionPage({
                   paragraphSummaryModel: paragraphModelId,
                   paragraphEvaluation: {
                     groundTruth: data.ground_truth,
-                    humanScore:
-                      f.paragraphEvaluation?.humanScore ?? null,
+                    humanScore: f.paragraphEvaluation?.humanScore ?? null,
                   },
                 }
               : f
@@ -676,7 +678,10 @@ export function EntityExtractionPage({
         );
       }
     } catch (err) {
-      console.warn("[ParagraphEval] Background ground truth generation failed:", err);
+      console.warn(
+        "[ParagraphEval] Background ground truth generation failed:",
+        err
+      );
       // Don't surface errors to user — this is a background operation
     }
   };
@@ -910,8 +915,13 @@ export function EntityExtractionPage({
 
         // Auto-generate paragraph evaluation ground truth in background
         const entityOrder = updatedEntities.map((e: any) => e.name);
-        const paragraphModelId = file.selectedModels?.[0] || file.selectedModel || "";
-        triggerParagraphEvalGeneration(file.fileId, entityOrder, paragraphModelId);
+        const paragraphModelId =
+          file.selectedModels?.[0] || file.selectedModel || "";
+        triggerParagraphEvalGeneration(
+          file.fileId,
+          entityOrder,
+          paragraphModelId
+        );
       }
     } catch (err) {
       clearTimeout(summaryRetryMsgTimer);
@@ -1761,7 +1771,10 @@ export function EntityExtractionPage({
 
     if (!resp.ok) throw new Error("Summary generation failed");
     const data = await resp.json();
-    return { summary: data.summary as string, cost: data.meta?.cost as number | undefined };
+    return {
+      summary: data.summary as string,
+      cost: data.meta?.cost as number | undefined,
+    };
   };
 
   // Generate paragraphs for ALL selected models that don't have one yet
@@ -1895,7 +1908,12 @@ export function EntityExtractionPage({
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary: summary, summaryPrompt, paragraphSystemPrompt }
+            ? {
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+              }
             : f
         )
       );
@@ -1903,7 +1921,12 @@ export function EntityExtractionPage({
         ...prev,
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
-            ? { ...f, finalSummary: summary, summaryPrompt, paragraphSystemPrompt }
+            ? {
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+              }
             : f
         ),
       }));

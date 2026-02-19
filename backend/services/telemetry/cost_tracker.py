@@ -134,7 +134,7 @@ class CostTracker:
             # "azure-gpt-5.1" would normalize to "azure:azure-gpt-5.1" (not found)
             # instead of "azure:gpt-5.1" (found in pricing.json).
             if model_lower.startswith("azure-"):
-                model_lower = model_lower[len("azure-"):]
+                model_lower = model_lower[len("azure-") :]
             return f"azure:{model_lower}"
         if provider == "gcp":
             if model_lower.startswith("vertex:"):
@@ -147,7 +147,9 @@ class CostTracker:
                     "claude-sonnet-4-5", "claude-sonnet-4.5"
                 )
                 model_lower = model_lower.replace("claude-opus-4-1", "claude-opus-4.1")
-                model_lower = model_lower.replace("claude-sonnet-4-6", "claude-sonnet-4.6")
+                model_lower = model_lower.replace(
+                    "claude-sonnet-4-6", "claude-sonnet-4.6"
+                )
             if model_lower.startswith("meta/llama-"):
                 model_lower = model_lower.replace("meta/llama-", "llama-")
             if "llama-4-maverick" in model_lower:
