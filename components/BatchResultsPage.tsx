@@ -935,11 +935,11 @@ export default function BatchResultsPage({
                     </TableCell>
                   )}
                   {visibleColumns.has("judge") && (
-                    <TableCell className="max-w-[90px]">
+                    <TableCell className="max-w-[160px]">
                       {row.judge ? (
                         <Badge
                           variant="outline"
-                          className="text-xs text-purple-600 border-purple-300 truncate max-w-[80px]"
+                          className="text-xs text-purple-600 border-purple-300 truncate max-w-[150px] block"
                           title={row.judge}
                         >
                           {row.judge}
@@ -996,7 +996,7 @@ export default function BatchResultsPage({
                             ? "Run evaluation first to enable human scoring"
                             : "Enter human evaluation score (0-100)"
                         }
-                        className={`h-7 text-xs w-14 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : ""}`}
+                        className={`h-7 text-xs w-16 text-center ${!row.judgeRaw ? "opacity-50 cursor-not-allowed" : "border-blue-300 focus:border-blue-500"}`}
                       />
                     </TableCell>
                   )}

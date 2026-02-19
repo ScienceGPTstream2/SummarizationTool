@@ -17,6 +17,9 @@ export interface ModelConfig {
   api_version?: string;
   project_id?: string; // Added for Gemini
   location?: string; // Added for Gemini
+  // Temperature capability metadata
+  supports_temperature?: boolean;
+  default_temperature?: number;
 }
 
 export interface ApiKeyConfig {
@@ -53,6 +56,8 @@ export const allModels: ModelConfig[] = [
     category: "azure",
     deployment: "gpt-5-mini",
     api_version: "2024-12-01-preview",
+    supports_temperature: false,
+    default_temperature: 1.0,
   },
   // Gemini Models (using service account authentication - no user API key required)
   {
@@ -64,6 +69,8 @@ export const allModels: ModelConfig[] = [
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
+    supports_temperature: true,
+    default_temperature: 0.0,
   },
   {
     id: "publishers/google/models/gemini-2.5-flash-lite",
@@ -74,6 +81,8 @@ export const allModels: ModelConfig[] = [
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
+    supports_temperature: true,
+    default_temperature: 0.0,
   },
   {
     id: "publishers/google/models/gemini-2.5-flash",
@@ -84,6 +93,8 @@ export const allModels: ModelConfig[] = [
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
+    supports_temperature: true,
+    default_temperature: 0.0,
   },
   {
     id: "publishers/google/models/gemini-3-pro-preview",
@@ -94,6 +105,8 @@ export const allModels: ModelConfig[] = [
     category: "google",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "us-central1",
+    supports_temperature: true,
+    default_temperature: 0.0,
   },
   {
     id: "claude-opus-4-1@20250805",
@@ -104,6 +117,8 @@ export const allModels: ModelConfig[] = [
     category: "anthropic",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "global",
+    supports_temperature: true,
+    default_temperature: 1.0,
   },
   {
     id: "claude-sonnet-4@20250514",
@@ -114,6 +129,8 @@ export const allModels: ModelConfig[] = [
     category: "anthropic",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "global",
+    supports_temperature: true,
+    default_temperature: 1.0,
   },
   {
     id: "claude-haiku-4-5@20251001",
@@ -125,6 +142,8 @@ export const allModels: ModelConfig[] = [
     category: "anthropic",
     project_id: "hcsx-scigpt2-innocentrhino-acm",
     location: "global",
+    supports_temperature: true,
+    default_temperature: 1.0,
   },
 ];
 
@@ -236,6 +255,8 @@ export class SettingsManager {
           api_version?: string;
           project_id?: string;
           location?: string;
+          supports_temperature?: boolean;
+          default_temperature?: number;
         }> = await response.json();
         // Convert backend model format to ModelConfig format
         return backendModels.map((model) => ({
@@ -260,6 +281,8 @@ export class SettingsManager {
           api_version: model.api_version,
           project_id: model.project_id,
           location: model.location,
+          supports_temperature: model.supports_temperature ?? true,
+          default_temperature: model.default_temperature ?? 0.5,
         }));
       }
     } catch (error) {

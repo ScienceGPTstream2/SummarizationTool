@@ -1,20 +1,9 @@
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  Table,
-  TableCell,
-  TableRow,
-  WidthType,
-  AlignmentType,
-  HeadingLevel,
-} from "docx";
+import { asBlob } from "html-docx-js-typescript";
 import { DocumentData } from "../App";
 
 // Get parser name from ID
 const getParserName = (parserId: string): string => {
-  const parserNames = {
+  const parserNames: Record<string, string> = {
     docling: "Docling",
     "azure-document-intelligence": "Azure Document Intelligence",
     mineru: "MinerU",
@@ -22,12 +11,12 @@ const getParserName = (parserId: string): string => {
     pymupdf4llm: "PyMuPDF4LLM",
     "gpt4-vision": "GPT 4.1 Vision Model",
   };
-  return parserNames[parserId as keyof typeof parserNames] || parserId;
+  return parserNames[parserId] || parserId;
 };
 
 // Get model name from ID
 const getModelName = (modelId: string): string => {
-  const modelNames = {
+  const modelNames: Record<string, string> = {
     "gpt-4o": "GPT-4o",
     "gpt-4-turbo": "GPT-4 Turbo",
     "gpt-4.1": "GPT-4.1",
@@ -40,12 +29,12 @@ const getModelName = (modelId: string): string => {
     "llama-3.1-70b": "Llama 3.1 70B",
     "llama-3.1-8b": "Llama 3.1 8B",
   };
-  return modelNames[modelId as keyof typeof modelNames] || modelId;
+  return modelNames[modelId] || modelId;
 };
 
 // Get study type name from ID
 const getStudyTypeName = (studyTypeId: string): string => {
-  const studyTypeNames = {
+  const studyTypeNames: Record<string, string> = {
     "clinical-trial": "Clinical Trial",
     observational: "Observational Study",
     "meta-analysis": "Meta-Analysis",
@@ -54,14 +43,26 @@ const getStudyTypeName = (studyTypeId: string): string => {
     "level-1-in-vivo": "Level 1 - In vivo",
     "level-2-in-vivo": "Level 2 - In vivo",
   };
-  return (
-    studyTypeNames[studyTypeId as keyof typeof studyTypeNames] || studyTypeId
-  );
+  return studyTypeNames[studyTypeId] || studyTypeId;
 };
 
-export const generateWordDocument = async (
-  documentData: DocumentData
-): Promise<Blob> => {
+/**
+ * Escape text for safe HTML embedding (only for plain text, NOT for content that's already HTML).
+ */
+const escapeHtml = (text: string): string => {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+};
+
+/**
+ * Build the full HTML document for the Word export.
+ * The extracted content is inserted as-is (it may contain HTML tables).
+ */
+const buildHtmlDocument = (documentData: DocumentData): string => {
   const currentDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -70,188 +71,184 @@ export const generateWordDocument = async (
     minute: "2-digit",
   });
 
-  const doc = new Document({
-    sections: [
-      {
-        properties: {},
-        children: [
-          // Title
-          new Paragraph({
-            text: "AI Document Summarization Report",
-            heading: HeadingLevel.HEADING_1,
-            alignment: AlignmentType.CENTER,
-          }),
+  // Build entity rows
+  const entityRows = documentData.entities
+    .map((entity) => {
+      const extracted = entity.extracted || "No result";
+      const meta = entity.duration
+        ? `<p style="color: #808080; font-size: 9pt; margin-top: 4px;">Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${entity.completionTokens} (out)</p>`
+        : "";
 
-          new Paragraph({
-            text: `Generated on: ${currentDate}`,
-            alignment: AlignmentType.CENTER,
-          }),
+      return `
+      <tr>
+        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; font-weight: 500;">
+          ${escapeHtml(entity.name)}
+        </td>
+        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; font-size: 9pt;">
+          ${escapeHtml(entity.prompt.substring(0, 200) + (entity.prompt.length > 200 ? "..." : ""))}
+        </td>
+        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top;">
+          ${extracted}
+          ${meta}
+        </td>
+      </tr>`;
+    })
+    .join("\n");
 
-          new Paragraph({ text: "" }), // Space
+  // Build complete entity prompts section
+  const entityPrompts = documentData.entities
+    .map(
+      (entity, index) => `
+      <h3>${index + 1}. ${escapeHtml(entity.name)}</h3>
+      <pre style="background: #f5f5f5; padding: 8px; border: 1px solid #ddd; white-space: pre-wrap; word-wrap: break-word; font-size: 9pt;">${escapeHtml(entity.prompt)}</pre>
+    `
+    )
+    .join("\n");
 
-          // Pipeline Metadata Section
-          new Paragraph({
-            text: "Pipeline Configuration",
-            heading: HeadingLevel.HEADING_2,
-          }),
+  // Final summary - insert as-is since it may contain HTML
+  const finalSummary = documentData.finalSummary || "";
 
-          new Paragraph({
-            children: [
-              new TextRun({ text: "Document: ", bold: true }),
-              new TextRun({
-                text: documentData.file?.name || "Unknown document",
-              }),
-            ],
-          }),
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      font-size: 11pt;
+      color: #333;
+      line-height: 1.4;
+    }
+    h1 {
+      text-align: center;
+      color: #1F4E79;
+      font-size: 18pt;
+      margin-bottom: 4px;
+    }
+    h2 {
+      color: #1F4E79;
+      font-size: 14pt;
+      border-bottom: 2px solid #D6E4F0;
+      padding-bottom: 4px;
+      margin-top: 20px;
+    }
+    h3 {
+      color: #2E75B6;
+      font-size: 12pt;
+      margin-top: 14px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 10pt;
+      margin-bottom: 20px;
+    }
+    .config-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    .config-table td {
+      padding: 6px 10px;
+      border: 1px solid #B4C6E7;
+    }
+    .config-label {
+      background: #F2F7FB;
+      color: #44546A;
+      font-weight: bold;
+      width: 30%;
+    }
+    .entity-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    .entity-table th {
+      background: #E9EFF7;
+      color: #1F4E79;
+      padding: 8px;
+      border: 1px solid #B4C6E7;
+      text-align: center;
+      font-size: 10pt;
+    }
+    .entity-table td {
+      border: 1px solid #ccc;
+      padding: 6px 8px;
+      vertical-align: top;
+      font-size: 10pt;
+    }
+    /* Style for any HTML tables inside extracted content */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 4px 6px;
+      font-size: 9pt;
+    }
+    th {
+      background: #f0f0f0;
+      font-weight: 500;
+    }
+    caption {
+      font-weight: 500;
+      margin-bottom: 4px;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <h1>AI Document Summarization Report</h1>
+  <p class="subtitle">Generated on: ${escapeHtml(currentDate)}</p>
 
-          new Paragraph({
-            children: [
-              new TextRun({ text: "Parser Used: ", bold: true }),
-              new TextRun({ text: getParserName(documentData.parser) }),
-            ],
-          }),
+  <h2>Pipeline Configuration</h2>
+  <table class="config-table">
+    <tr>
+      <td class="config-label">Document</td>
+      <td>${escapeHtml(documentData.file?.name || "Unknown document")}</td>
+    </tr>
+    <tr>
+      <td class="config-label">Parser Used</td>
+      <td>${escapeHtml(getParserName(documentData.parser))}</td>
+    </tr>
+    <tr>
+      <td class="config-label">Study Type</td>
+      <td>${escapeHtml(getStudyTypeName(documentData.studyType))}</td>
+    </tr>
+    <tr>
+      <td class="config-label">AI Model</td>
+      <td>${escapeHtml(getModelName(documentData.selectedModel))}</td>
+    </tr>
+  </table>
 
-          new Paragraph({
-            children: [
-              new TextRun({ text: "Study Type: ", bold: true }),
-              new TextRun({ text: getStudyTypeName(documentData.studyType) }),
-            ],
-          }),
+  <h2>Entity Extraction Configuration</h2>
+  <table class="entity-table">
+    <tr>
+      <th style="width: 25%;">Entity</th>
+      <th style="width: 50%;">Extraction Prompt</th>
+      <th style="width: 25%;">Extracted Result</th>
+    </tr>
+    ${entityRows}
+  </table>
 
-          new Paragraph({
-            children: [
-              new TextRun({ text: "AI Model: ", bold: true }),
-              new TextRun({ text: getModelName(documentData.selectedModel) }),
-            ],
-          }),
+  <h2>Final Summary</h2>
+  <div>${finalSummary}</div>
 
-          new Paragraph({ text: "" }), // Space
+  <h2>Complete Entity Prompts</h2>
+  ${entityPrompts}
+</body>
+</html>`;
+};
 
-          // Entity Extraction Configuration
-          new Paragraph({
-            text: "Entity Extraction Configuration",
-            heading: HeadingLevel.HEADING_2,
-          }),
-
-          // Entities table
-          new Table({
-            width: {
-              size: 100,
-              type: WidthType.PERCENTAGE,
-            },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({
-                    children: [
-                      new Paragraph({
-                        text: "Entity",
-                        alignment: AlignmentType.CENTER,
-                      }),
-                    ],
-                    width: { size: 25, type: WidthType.PERCENTAGE },
-                  }),
-                  new TableCell({
-                    children: [
-                      new Paragraph({
-                        text: "Extraction Prompt",
-                        alignment: AlignmentType.CENTER,
-                      }),
-                    ],
-                    width: { size: 50, type: WidthType.PERCENTAGE },
-                  }),
-                  new TableCell({
-                    children: [
-                      new Paragraph({
-                        text: "Extracted Result",
-                        alignment: AlignmentType.CENTER,
-                      }),
-                    ],
-                    width: { size: 25, type: WidthType.PERCENTAGE },
-                  }),
-                ],
-              }),
-              ...documentData.entities.map(
-                (entity) =>
-                  new TableRow({
-                    children: [
-                      new TableCell({
-                        children: [new Paragraph({ text: entity.name })],
-                      }),
-                      new TableCell({
-                        children: [
-                          new Paragraph({
-                            text:
-                              entity.prompt.substring(0, 200) +
-                              (entity.prompt.length > 200 ? "..." : ""),
-                          }),
-                        ],
-                      }),
-                      new TableCell({
-                        children: [
-                          new Paragraph({
-                            text: entity.extracted || "No result",
-                          }),
-                          ...(entity.duration
-                            ? [
-                                new Paragraph({
-                                  children: [
-                                    new TextRun({
-                                      text: `Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${
-                                        entity.completionTokens
-                                      } (out)`,
-                                      size: 18, // half points, so 9pt
-                                      color: "808080",
-                                    }),
-                                  ],
-                                }),
-                              ]
-                            : []),
-                        ],
-                      }),
-                    ],
-                  })
-              ),
-            ],
-          }),
-
-          new Paragraph({ text: "" }), // Space
-
-          // Final Summary
-          new Paragraph({
-            text: "Final Summary",
-            heading: HeadingLevel.HEADING_2,
-          }),
-
-          new Paragraph({
-            text: documentData.finalSummary,
-          }),
-
-          new Paragraph({ text: "" }), // Space
-
-          // Full Prompts Section
-          new Paragraph({
-            text: "Complete Entity Prompts",
-            heading: HeadingLevel.HEADING_2,
-          }),
-
-          ...documentData.entities.flatMap((entity, index) => [
-            new Paragraph({
-              text: `${index + 1}. ${entity.name}`,
-              heading: HeadingLevel.HEADING_3,
-            }),
-            new Paragraph({
-              text: entity.prompt,
-            }),
-            new Paragraph({ text: "" }), // Space between entities
-          ]),
-        ],
-      },
-    ],
-  });
-
-  const buffer = await Packer.toBlob(doc);
-  return buffer;
+export const generateWordDocument = async (
+  documentData: DocumentData
+): Promise<Blob> => {
+  const htmlContent = buildHtmlDocument(documentData);
+  const blob = (await asBlob(htmlContent)) as Blob;
+  return blob;
 };
 
 export const generateMarkdownDocument = (

@@ -10,12 +10,135 @@ import {
   AlignmentType,
   BorderStyle,
   TextRun,
-  HeadingLevel,
   ShadingType,
   PageOrientation,
+  FileChild,
 } from "docx";
 import { saveAs } from "file-saver";
+import { MarkdownDocx } from "markdown-docx";
 import { DocumentData } from "../App";
+
+// Professional color palette for the report
+const COLORS = {
+  primary: "1F4E79", // Deep blue for title
+  sectionBg: "D6E4F0", // Light blue background for section headers
+  sectionText: "1F4E79", // Deep blue text for section headers
+  subsectionText: "2E75B6", // Medium blue for subsection headers
+  headerBg: "E9EFF7", // Very light blue for table headers
+  headerText: "1F4E79", // Deep blue for table header text
+  labelBg: "F2F7FB", // Near-white blue for config labels
+  labelText: "44546A", // Dark gray-blue for label text
+  borderColor: "B4C6E7", // Soft blue border
+  bodyText: "333333", // Dark gray for body text
+};
+
+// Helper to create a styled section heading (replaces ugly default Heading styles)
+const createSectionHeading = (
+  text: string,
+  options?: { pageBreakBefore?: boolean }
+): Paragraph => {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text,
+        bold: true,
+        size: 28, // 14pt
+        color: COLORS.sectionText,
+        font: "Calibri",
+      }),
+    ],
+    spacing: { before: options?.pageBreakBefore ? 0 : 360, after: 200 },
+    border: {
+      bottom: {
+        style: BorderStyle.SINGLE,
+        size: 6,
+        color: COLORS.sectionBg,
+        space: 4,
+      },
+    },
+    pageBreakBefore: options?.pageBreakBefore || false,
+  });
+};
+
+// Helper to create a subsection heading
+const createSubsectionHeading = (text: string): Paragraph => {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text,
+        bold: true,
+        size: 24, // 12pt
+        color: COLORS.subsectionText,
+        font: "Calibri",
+      }),
+    ],
+    spacing: { before: 200, after: 100 },
+  });
+};
+
+// Helper to create a styled table header cell
+const createHeaderCell = (text: string, widthPercent?: number): TableCell => {
+  const cell = new TableCell({
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text,
+            size: 18,
+            bold: true,
+            color: COLORS.headerText,
+            font: "Calibri",
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+      }),
+    ],
+    shading: { fill: COLORS.headerBg, type: ShadingType.CLEAR },
+    verticalAlign: VerticalAlign.CENTER,
+    ...(widthPercent
+      ? { width: { size: widthPercent, type: WidthType.PERCENTAGE } }
+      : {}),
+  });
+  return cell;
+};
+
+// Helper to create a config label cell
+const createConfigLabelCell = (text: string): TableCell => {
+  return new TableCell({
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text,
+            bold: true,
+            color: COLORS.labelText,
+            font: "Calibri",
+          }),
+        ],
+      }),
+    ],
+    shading: { fill: COLORS.labelBg, type: ShadingType.CLEAR },
+    width: { size: 30, type: WidthType.PERCENTAGE },
+  });
+};
+
+// Soft blue table borders
+const TABLE_BORDERS = {
+  top: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  bottom: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  left: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  right: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  insideHorizontal: {
+    style: BorderStyle.SINGLE,
+    size: 1,
+    color: COLORS.borderColor,
+  },
+  insideVertical: {
+    style: BorderStyle.SINGLE,
+    size: 1,
+    color: COLORS.borderColor,
+  },
+};
 
 const DEFAULT_METRIC_STEPS: Record<string, string[]> = {
   correctness: [
@@ -76,11 +199,147 @@ const getMetricReason = (result: any, metricName: string): string => {
   return metric?.reason || "";
 };
 
-// Helper to truncate text for table cells
-const truncateText = (text: string, maxLength: number = 200): string => {
-  if (!text) return "";
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength) + "...";
+/**
+ * Decode common HTML entities in text.
+ */
+const decodeHtmlEntities = (text: string): string => {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+};
+
+/**
+ * Parse a single HTML table string into markdown.
+ */
+const convertOneHtmlTable = (tableHtml: string): string => {
+  const rows: string[][] = [];
+  let caption = "";
+
+  const captionMatch = tableHtml.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i);
+  if (captionMatch) {
+    caption = decodeHtmlEntities(
+      captionMatch[1].replace(/<[^>]+>/g, "").trim()
+    );
+  }
+
+  // Match <tr> blocks — support both closed and unclosed rows
+  const rowMatches = tableHtml.match(
+    /<tr[^>]*>[\s\S]*?(?:<\/tr>|(?=<tr[^>]*>)|$)/gi
+  );
+  if (!rowMatches) return tableHtml;
+
+  let hasHeader = false;
+
+  rowMatches.forEach((rowHtml) => {
+    const cells: string[] = [];
+    // Match cells: support colspan, rowspan, and both closed & unclosed cells
+    const cellRegex =
+      /<(th|td)\b([^>]*)>([\s\S]*?)(?:<\/\1>|(?=<(?:th|td|tr)\b)|$)/gi;
+    let cellMatch;
+
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      const tag = cellMatch[1].toLowerCase();
+      const attrs = cellMatch[2] || "";
+      const colspanMatch = attrs.match(/colspan\s*=\s*"?(\d+)"?/i);
+      const colspan = colspanMatch ? parseInt(colspanMatch[1], 10) : 1;
+      const cellText = decodeHtmlEntities(
+        cellMatch[3].replace(/<[^>]+>/g, "").trim()
+      );
+
+      if (tag === "th") hasHeader = true;
+
+      cells.push(cellText);
+      for (let i = 1; i < colspan; i++) {
+        cells.push("");
+      }
+    }
+
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  });
+
+  if (rows.length === 0) return tableHtml;
+
+  // Normalize column count
+  const maxCols = Math.max(...rows.map((r) => r.length));
+  rows.forEach((row) => {
+    while (row.length < maxCols) row.push("");
+  });
+
+  // Build markdown table
+  let md = "";
+  if (caption) md += `**${caption}**\n\n`;
+
+  if (hasHeader && rows.length > 0) {
+    md += "| " + rows[0].join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.slice(1).forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  } else {
+    md += "| " + rows[0].map((_, i) => `Col ${i + 1}`).join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  }
+
+  return md;
+};
+
+/**
+ * Convert HTML tables to markdown tables so markdown-docx can render them.
+ * Handles both complete (<table>...</table>) and truncated tables.
+ */
+const htmlTablesToMarkdown = (text: string): string => {
+  if (!text.includes("<table")) return text;
+
+  // First pass: replace complete tables (<table>...</table>)
+  let result = text.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (match) =>
+    convertOneHtmlTable(match)
+  );
+
+  // Second pass: handle any remaining truncated/unclosed tables
+  if (result.includes("<table")) {
+    result = result.replace(/<table[^>]*>[\s\S]*$/gi, (match) =>
+      convertOneHtmlTable(match)
+    );
+  }
+
+  return result;
+};
+
+/**
+ * Convert markdown text into an array of docx FileChild elements using markdown-docx.
+ * Supports: tables (markdown & HTML), bold, italic, lists, code blocks, headings, links, etc.
+ * Falls back to a plain text paragraph if input is empty.
+ */
+const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
+  if (!text) return [new Paragraph({ text: "" })];
+
+  try {
+    // Convert any HTML tables to markdown tables first
+    const normalizedText = htmlTablesToMarkdown(text);
+
+    const converter = new MarkdownDocx(normalizedText, {
+      ignoreImage: true,
+      gfm: true,
+    });
+    const elements = await converter.toSection();
+    return elements.length > 0 ? elements : [new Paragraph({ text: "" })];
+  } catch {
+    // Fallback: if markdown-docx fails, just render as plain text
+    return [
+      new Paragraph({
+        children: [new TextRun({ text, size: 16, font: "Calibri" })],
+      }),
+    ];
+  }
 };
 
 export async function downloadEvaluationReport(
@@ -260,364 +519,120 @@ export async function downloadEvaluationReport(
   // ====== TITLE & HEADER ======
   sections.push(
     new Paragraph({
-      text: "LLM Evaluation Report",
-      heading: HeadingLevel.HEADING_1,
+      children: [
+        new TextRun({
+          text: "LLM Evaluation Report",
+          bold: true,
+          size: 36, // 18pt
+          color: COLORS.primary,
+          font: "Calibri",
+        }),
+      ],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
+      spacing: { after: 100 },
     })
   );
 
   sections.push(
     new Paragraph({
-      text: `Generated: ${new Date().toLocaleString()}`,
+      children: [
+        new TextRun({
+          text: `Generated: ${new Date().toLocaleString()}`,
+          size: 20,
+          color: "888888",
+          font: "Calibri",
+        }),
+      ],
       alignment: AlignmentType.CENTER,
       spacing: { after: 400 },
     })
   );
 
   // ====== CONFIGURATION SUMMARY ======
-  sections.push(
-    new Paragraph({
-      text: "Configuration Summary",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 200, after: 200 },
-    })
-  );
+  sections.push(createSectionHeading("Configuration Summary"));
+
+  const configValueCell = (text: string): TableCell =>
+    new TableCell({
+      children: [
+        new Paragraph({
+          children: [
+            new TextRun({ text, color: COLORS.bodyText, font: "Calibri" }),
+          ],
+        }),
+      ],
+      width: { size: 70, type: WidthType.PERCENTAGE },
+    });
 
   const configTable = new Table({
     rows: [
       new TableRow({
         children: [
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: "Documents Evaluated",
-                    bold: true,
-                    color: "666666",
-                  }),
-                ],
-              }),
-            ],
-            shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-            width: { size: 30, type: WidthType.PERCENTAGE },
-          }),
-          new TableCell({
-            children: [new Paragraph({ text: uniqueFiles.toString() })],
-            width: { size: 70, type: WidthType.PERCENTAGE },
-          }),
+          createConfigLabelCell("Documents Evaluated"),
+          configValueCell(uniqueFiles.toString()),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: "Entities Evaluated",
-                    bold: true,
-                    color: "666666",
-                  }),
-                ],
-              }),
-            ],
-            shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-          }),
-          new TableCell({
-            children: [new Paragraph({ text: uniqueEntities.toString() })],
-          }),
+          createConfigLabelCell("Entities Evaluated"),
+          configValueCell(uniqueEntities.toString()),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: "Source LLMs",
-                    bold: true,
-                    color: "666666",
-                  }),
-                ],
-              }),
-            ],
-            shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-          }),
-          new TableCell({
-            children: [
-              new Paragraph({
-                text: Array.from(uniqueSourceModels).join(", "),
-              }),
-            ],
-          }),
+          createConfigLabelCell("Source LLMs"),
+          configValueCell(Array.from(uniqueSourceModels).join(", ")),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: "LLM Judges",
-                    bold: true,
-                    color: "666666",
-                  }),
-                ],
-              }),
-            ],
-            shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-          }),
-          new TableCell({
-            children: [
-              new Paragraph({
-                text: Array.from(uniqueJudges).join(", ") || "N/A",
-              }),
-            ],
-          }),
+          createConfigLabelCell("LLM Judges"),
+          configValueCell(Array.from(uniqueJudges).join(", ") || "N/A"),
         ],
       }),
       new TableRow({
         children: [
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({ text: "Metrics", bold: true, color: "666666" }),
-                ],
-              }),
-            ],
-            shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-          }),
-          new TableCell({
-            children: [
-              new Paragraph({ text: metricsUsed.join(", ") || "N/A" }),
-            ],
-          }),
+          createConfigLabelCell("Metrics"),
+          configValueCell(metricsUsed.join(", ") || "N/A"),
         ],
       }),
     ],
     width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 1 },
-      bottom: { style: BorderStyle.SINGLE, size: 1 },
-      left: { style: BorderStyle.SINGLE, size: 1 },
-      right: { style: BorderStyle.SINGLE, size: 1 },
-      insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-      insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-    },
+    borders: TABLE_BORDERS,
   });
 
   sections.push(configTable);
 
   // ====== MAIN RESULTS TABLE ======
-  sections.push(
-    new Paragraph({
-      text: "Evaluation Results",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 400, after: 200 },
-    })
-  );
+  sections.push(createSectionHeading("Evaluation Results"));
 
   // Build header row
   const headerCells = [
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Study Name",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "LLM (Source)",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Entity",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Ground Truth",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "LLM Output",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Judge",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
+    createHeaderCell("Study Name"),
+    createHeaderCell("LLM (Source)"),
+    createHeaderCell("Entity"),
+    createHeaderCell("Ground Truth"),
+    createHeaderCell("LLM Output"),
+    createHeaderCell("Judge"),
   ];
 
   // Add metric columns dynamically
-  if (hasCorrectness) {
-    headerCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Correctness",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasCompleteness) {
-    headerCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Completeness",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasRelevance) {
-    headerCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Relevance",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasSafety) {
-    headerCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Safety",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
+  if (hasCorrectness) headerCells.push(createHeaderCell("Correctness"));
+  if (hasCompleteness) headerCells.push(createHeaderCell("Completeness"));
+  if (hasRelevance) headerCells.push(createHeaderCell("Relevance"));
+  if (hasSafety) headerCells.push(createHeaderCell("Safety"));
 
   const tableRows: TableRow[] = [new TableRow({ children: headerCells })];
 
   // Build data rows
   for (const row of allRows) {
+    // Convert markdown content to docx elements (async)
+    const groundTruthElements = (await markdownToDocxElements(
+      row.groundTruth
+    )) as (Paragraph | Table)[];
+    const actualOutputElements = (await markdownToDocxElements(
+      row.actualOutput
+    )) as (Paragraph | Table)[];
+
     const rowCells = [
       new TableCell({
         children: [
@@ -646,29 +661,11 @@ export async function downloadEvaluationReport(
         verticalAlign: VerticalAlign.CENTER,
       }),
       new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: truncateText(row.groundTruth, 150),
-                size: 16,
-              }),
-            ],
-          }),
-        ],
+        children: groundTruthElements,
         verticalAlign: VerticalAlign.TOP,
       }),
       new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: truncateText(row.actualOutput, 150),
-                size: 16,
-              }),
-            ],
-          }),
-        ],
+        children: actualOutputElements,
         verticalAlign: VerticalAlign.TOP,
       }),
       new TableCell({
@@ -760,26 +757,14 @@ export async function downloadEvaluationReport(
   const mainTable = new Table({
     rows: tableRows,
     width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 1 },
-      bottom: { style: BorderStyle.SINGLE, size: 1 },
-      left: { style: BorderStyle.SINGLE, size: 1 },
-      right: { style: BorderStyle.SINGLE, size: 1 },
-      insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-      insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-    },
+    borders: TABLE_BORDERS,
   });
 
   sections.push(mainTable);
 
   // ====== SUMMARY STATISTICS ======
   sections.push(
-    new Paragraph({
-      text: "Summary Statistics",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 400, after: 200 },
-      pageBreakBefore: true,
-    })
+    createSectionHeading("Summary Statistics", { pageBreakBefore: true })
   );
 
   // Calculate averages by source model
@@ -810,110 +795,13 @@ export async function downloadEvaluationReport(
   });
 
   // Build summary table
-  const summaryHeaderCells = [
-    new TableCell({
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Source LLM",
-              size: 18,
-              bold: true,
-              color: "666666",
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-        }),
-      ],
-      shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-      verticalAlign: VerticalAlign.CENTER,
-    }),
-  ];
-
-  if (hasCorrectness) {
-    summaryHeaderCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Avg Correctness",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasCompleteness) {
-    summaryHeaderCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Avg Completeness",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasRelevance) {
-    summaryHeaderCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Avg Relevance",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
-  if (hasSafety) {
-    summaryHeaderCells.push(
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "Avg Safety",
-                size: 18,
-                bold: true,
-                color: "666666",
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        shading: { fill: "F2F2F2", type: ShadingType.SOLID },
-        verticalAlign: VerticalAlign.CENTER,
-      })
-    );
-  }
+  const summaryHeaderCells = [createHeaderCell("Source LLM")];
+  if (hasCorrectness)
+    summaryHeaderCells.push(createHeaderCell("Avg Correctness"));
+  if (hasCompleteness)
+    summaryHeaderCells.push(createHeaderCell("Avg Completeness"));
+  if (hasRelevance) summaryHeaderCells.push(createHeaderCell("Avg Relevance"));
+  if (hasSafety) summaryHeaderCells.push(createHeaderCell("Avg Safety"));
 
   const summaryRows: TableRow[] = [
     new TableRow({ children: summaryHeaderCells }),
@@ -1003,24 +891,14 @@ export async function downloadEvaluationReport(
   const summaryTable = new Table({
     rows: summaryRows,
     width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 1 },
-      bottom: { style: BorderStyle.SINGLE, size: 1 },
-      left: { style: BorderStyle.SINGLE, size: 1 },
-      right: { style: BorderStyle.SINGLE, size: 1 },
-      insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-      insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-    },
+    borders: TABLE_BORDERS,
   });
 
   sections.push(summaryTable);
 
   // ====== DETAILED EXPLANATIONS (condensed) ======
   sections.push(
-    new Paragraph({
-      text: "Detailed Evaluation Reasoning",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 400, after: 200 },
+    createSectionHeading("Detailed Evaluation Reasoning", {
       pageBreakBefore: true,
     })
   );
@@ -1042,19 +920,15 @@ export async function downloadEvaluationReport(
     entityModelGroups.get(key)!.push(row);
   });
 
-  entityModelGroups.forEach((rows, key) => {
+  for (const [key, rows] of entityModelGroups) {
     const [studyName, entity, llmSource] = key.split("|");
 
     sections.push(
-      new Paragraph({
-        text: `${entity} — ${llmSource} (${studyName})`,
-        heading: HeadingLevel.HEADING_3,
-        spacing: { before: 300, after: 100 },
-      })
+      createSubsectionHeading(`${entity} — ${llmSource} (${studyName})`)
     );
 
     // Show each judge's reasoning
-    rows.forEach((row) => {
+    for (const row of rows) {
       sections.push(
         new Paragraph({
           children: [new TextRun({ text: `${row.judge}:`, bold: true })],
@@ -1079,32 +953,53 @@ export async function downloadEvaluationReport(
         );
       }
 
-      // Show reasons (pick first non-empty)
-      const reasons = [
-        row.reasons.correctness,
-        row.reasons.completeness,
-        row.reasons.relevance,
-        row.reasons.safety,
-      ].filter((r) => r);
-      if (reasons.length > 0) {
+      // Show all non-empty reasons with their metric names
+      const reasonEntries: { metric: string; reason: string }[] = [];
+      if (row.reasons.correctness)
+        reasonEntries.push({
+          metric: "Correctness",
+          reason: row.reasons.correctness,
+        });
+      if (row.reasons.completeness)
+        reasonEntries.push({
+          metric: "Completeness",
+          reason: row.reasons.completeness,
+        });
+      if (row.reasons.relevance)
+        reasonEntries.push({
+          metric: "Relevance",
+          reason: row.reasons.relevance,
+        });
+      if (row.reasons.safety)
+        reasonEntries.push({ metric: "Safety", reason: row.reasons.safety });
+
+      for (const { metric, reason } of reasonEntries) {
+        // Metric label
         sections.push(
           new Paragraph({
-            text: reasons[0], // Show primary reason
-            spacing: { after: 100 },
+            children: [
+              new TextRun({
+                text: `${metric}:`,
+                bold: true,
+                size: 18,
+                font: "Calibri",
+              }),
+            ],
+            spacing: { before: 60, after: 20 },
             indent: { left: 360 },
           })
         );
+        // Render reason with full markdown support (tables, bold, lists, etc.)
+        const reasonElements = await markdownToDocxElements(reason);
+        sections.push(...reasonElements);
       }
-    });
-  });
+    }
+  }
 
   // ====== METRICS REFERENCE ======
   if (metricsUsed.length > 0) {
     sections.push(
-      new Paragraph({
-        text: "Evaluation Metrics Reference",
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 400, after: 200 },
+      createSectionHeading("Evaluation Metrics Reference", {
         pageBreakBefore: true,
       })
     );
@@ -1117,13 +1012,7 @@ export async function downloadEvaluationReport(
         ] || DEFAULT_METRIC_STEPS[normalizedName];
 
       if (steps && steps.length > 0) {
-        sections.push(
-          new Paragraph({
-            text: metricName,
-            heading: HeadingLevel.HEADING_3,
-            spacing: { before: 200, after: 100 },
-          })
-        );
+        sections.push(createSubsectionHeading(metricName));
 
         steps.forEach((step) => {
           sections.push(
@@ -1158,6 +1047,7 @@ export async function downloadEvaluationReport(
   });
 
   const blob = await Packer.toBlob(doc);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
   saveAs(blob, `Evaluation_Report_${timestamp}.docx`);
 }

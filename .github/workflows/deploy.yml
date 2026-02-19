@@ -13,7 +13,8 @@ jobs:
       - name: Pull latest repo
         run: |
           cd ~/SummarizationTool
-          git pull
+          git fetch origin main
+          git reset --hard origin/main
 
       - name: Install backend deps
         run: |
@@ -24,9 +25,20 @@ jobs:
       - name: Install frontend deps
         run: |
           cd ~/SummarizationTool
-          npm install
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd ~/SummarizationTool
+          npm run build
 
       - name: Restart services
         run: |
           sudo systemctl restart summarization-backend
           sudo systemctl restart summarization-frontend
+
+      - name: Health check
+        run: |
+          sleep 5
+          sudo systemctl is-active summarization-backend
+          sudo systemctl is-active summarization-frontend

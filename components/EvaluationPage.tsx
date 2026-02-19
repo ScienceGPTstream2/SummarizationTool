@@ -76,6 +76,7 @@ import { DocumentData } from "../App";
 import { authenticatedFetch, getValidToken } from "../utils/authUtils";
 import { toast } from "sonner";
 import BatchResultsPage from "./BatchResultsPage";
+import { MarkdownViewer } from "./MarkdownViewer";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -388,10 +389,14 @@ export function EvaluationPage({
   // Custom evaluation steps - restore from documentData or use defaults
   const [customEvaluationSteps, setCustomEvaluationSteps] = useState<
     Record<string, string[]>
-  >(
-    documentData.evaluationConfig?.customEvaluationSteps ||
-      DEFAULT_EVALUATION_STEPS
-  );
+  >(() => {
+    const restored = documentData.evaluationConfig?.customEvaluationSteps;
+    if (restored && Object.keys(restored).length > 0) {
+      // Merge: defaults first, then restored overrides (preserves user edits)
+      return { ...DEFAULT_EVALUATION_STEPS, ...restored };
+    }
+    return { ...DEFAULT_EVALUATION_STEPS };
+  });
 
   // Dialog state for viewing/editing evaluation prompts
   const [editingMetric, setEditingMetric] = useState<string | null>(null);
@@ -603,7 +608,7 @@ export function EvaluationPage({
       } catch (error) {
         console.error("Failed to auto-save eval config:", error);
       }
-    }, 300); // 300ms debounce - fast save while preventing rapid-fire requests
+    }, 1500); // 1.5s debounce - avoids flooding backend while user is typing
 
     return () => {
       if (evalConfigSaveTimerRef.current) {
@@ -1172,7 +1177,7 @@ export function EvaluationPage({
   ) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: prev[metricId].map((step, idx) =>
+      [metricId]: (prev[metricId] || []).map((step, idx) =>
         idx === stepIndex ? newValue : step
       ),
     }));
@@ -1181,14 +1186,14 @@ export function EvaluationPage({
   const addEvaluationStep = (metricId: string) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: [...prev[metricId], ""],
+      [metricId]: [...(prev[metricId] || []), ""],
     }));
   };
 
   const removeEvaluationStep = (metricId: string, stepIndex: number) => {
     setCustomEvaluationSteps((prev) => ({
       ...prev,
-      [metricId]: prev[metricId].filter((_, idx) => idx !== stepIndex),
+      [metricId]: (prev[metricId] || []).filter((_, idx) => idx !== stepIndex),
     }));
   };
 
@@ -1714,6 +1719,29 @@ export function EvaluationPage({
       if (!controller.signal.aborted) {
         // Show success message only if not aborted
         setEvaluationComplete(true);
+
+        // Mark session as completed in the database
+        try {
+          const token = await getValidToken();
+          const { getCurrentUser } = await import("../utils/authUtils");
+          const user = await getCurrentUser();
+          if (token && user && documentData.sessionId) {
+            await fetch(`/api/sessions/${documentData.sessionId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                user_id: user.id,
+                status: "completed",
+              }),
+            });
+            console.log("✅ Session status set to completed");
+          }
+        } catch (err) {
+          console.error("Failed to update session status:", err);
+        }
       }
     } catch (error: any) {
       if (error.name !== "AbortError") {
@@ -2116,6 +2144,29 @@ export function EvaluationPage({
       toast.success("Batch Evaluation Complete", {
         description: `Successfully processed ${completedCount} evaluations.`,
       });
+
+      // Mark session as completed in the database
+      try {
+        const token = await getValidToken();
+        const { getCurrentUser } = await import("../utils/authUtils");
+        const user = await getCurrentUser();
+        if (token && user && documentData.sessionId) {
+          await fetch(`/api/sessions/${documentData.sessionId}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              user_id: user.id,
+              status: "completed",
+            }),
+          });
+          console.log("✅ Session status set to completed (batch eval)");
+        }
+      } catch (err) {
+        console.error("Failed to update session status:", err);
+      }
     } catch (error: any) {
       if (error.name === "AbortError") {
         toast("Evaluation Stopped", {
@@ -2904,7 +2955,8 @@ export function EvaluationPage({
                                 removeEvaluationStep(editingMetric, idx)
                               }
                               disabled={
-                                customEvaluationSteps[editingMetric].length <= 1
+                                (customEvaluationSteps[editingMetric]?.length ??
+                                  0) <= 1
                               }
                               className="mt-2"
                             >
@@ -3079,43 +3131,52 @@ export function EvaluationPage({
                                       : ""}
                                   </Label>
                                   <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                    <p className="text-sm whitespace-pre-wrap">
-                                      {(() => {
-                                        // Logic to resolve display text
-                                        if (
-                                          singleModeSourceModel &&
-                                          entity.extractionsByModel?.[
-                                            singleModeSourceModel
-                                          ]?.extracted
-                                        ) {
-                                          return entity.extractionsByModel[
+                                    {(() => {
+                                      // Logic to resolve display text
+                                      let extractedText: string | null = null;
+                                      if (
+                                        singleModeSourceModel &&
+                                        entity.extractionsByModel?.[
+                                          singleModeSourceModel
+                                        ]?.extracted
+                                      ) {
+                                        extractedText =
+                                          entity.extractionsByModel[
                                             singleModeSourceModel
                                           ].extracted;
-                                        }
-                                        // Check if there's any model with extraction for this entity
-                                        if (
-                                          singleModeSourceModel &&
-                                          entity.extractionsByModel &&
-                                          !entity.extractionsByModel[
-                                            singleModeSourceModel
-                                          ]
-                                        ) {
-                                          return (
-                                            <span className="text-muted-foreground italic">
-                                              No extraction available for this
-                                              model. Select a different model.
-                                            </span>
-                                          );
-                                        }
+                                      } else if (
+                                        singleModeSourceModel &&
+                                        entity.extractionsByModel &&
+                                        !entity.extractionsByModel[
+                                          singleModeSourceModel
+                                        ]
+                                      ) {
                                         return (
-                                          entity.extracted || (
-                                            <span className="text-muted-foreground italic">
-                                              No extraction available
-                                            </span>
-                                          )
+                                          <p className="text-sm text-muted-foreground italic">
+                                            No extraction available for this
+                                            model. Select a different model.
+                                          </p>
                                         );
-                                      })()}
-                                    </p>
+                                      } else {
+                                        extractedText =
+                                          entity.extracted || null;
+                                      }
+
+                                      if (!extractedText) {
+                                        return (
+                                          <p className="text-sm text-muted-foreground italic">
+                                            No extraction available
+                                          </p>
+                                        );
+                                      }
+
+                                      return (
+                                        <MarkdownViewer
+                                          content={extractedText}
+                                          className="text-sm"
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                   {entity.duration && (
                                     <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
