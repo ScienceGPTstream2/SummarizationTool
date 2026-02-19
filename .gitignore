@@ -74,3 +74,6 @@ backend/uploads/
 /files/
 
 /backend/files/
+/backend/services/document/processors/docling/docling_service_sequential.py
+/backend/services/document/processors/docling/vram_guard.py
+/backend/services/document/processors/docling/docling_service_multi_thread.py
