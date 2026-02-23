@@ -108,6 +108,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
     const ingestionTool =
       fileItem.processorUsed || documentData.processorUsed || "";
     const entities = fileItem.entities || [];
+    const docParseCost = (fileItem as any).processingResult?.parse_cost ?? "";
 
     for (const entity of entities) {
       const entityName = (entity as { name?: string }).name || "";
@@ -172,6 +173,11 @@ export async function downloadExcelReport(documentData: DocumentData) {
             Relevance: "",
             Safety: "",
             "Human Eval": "",
+            "Doc Parse Cost": formatCost(docParseCost as number),
+            "Extraction Cost": formatCost(
+              (extractionData as any)?.cost as number
+            ),
+            "Eval Cost": "",
           });
         } else {
           for (const result of evalResults) {
@@ -190,7 +196,11 @@ export async function downloadExcelReport(documentData: DocumentData) {
               Relevance: getMetricScore(result, "relevance"),
               Safety: getMetricScore(result, "safety"),
               "Human Eval": "",
-              Cost: formatCost(result.evaluation_cost),
+              "Doc Parse Cost": formatCost(docParseCost as number),
+              "Extraction Cost": formatCost(
+                (extractionData as any)?.cost as number
+              ),
+              "Eval Cost": formatCost(result.evaluation_cost),
             });
           }
         }
@@ -312,7 +322,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
     { header: "Relevance", key: "Relevance", width: 25 },
     { header: "Safety", key: "Safety", width: 25 },
     { header: "Human Eval", key: "Human Eval", width: 25 },
-    { header: "Cost", key: "Cost", width: 15 },
+    { header: "Doc Parse Cost", key: "Doc Parse Cost", width: 15 },
+    { header: "Extraction Cost", key: "Extraction Cost", width: 15 },
+    { header: "Eval Cost", key: "Eval Cost", width: 15 },
   ];
 
   // Style Header Row

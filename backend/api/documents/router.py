@@ -11,6 +11,7 @@ from services.document import get_organized_file_service
 from services.document.document_service import DocumentService
 from services.document.bbox_normalizer import normalize_bbox_format
 from services.llm.llm_service import LLMService
+from services.telemetry.cost_tracker import cost_tracker
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -105,6 +106,103 @@ async def process_uploaded_file(
                 async with aiofiles.open(markdown_path, "r") as f:
                     markdown_content_length = len(await f.read())
 
+            # For cached docs: 4-tier fallback to get parse_cost.
+            # Tier 1: parse_cost stored directly in metadata.json (written by recent fresh runs).
+            # Tier 2: parse_duration_seconds stored in metadata.json → recompute cost
+            #         (Docling: cost_per_minute × duration_seconds/60; Azure DI: page_count-based).
+            # Tier 3: legacy estimation from conversion_time (only works for Azure DI; Docling
+            #         stores conversion_time as ISO string → duration=0 → cost=0).
+            # Tier 4: cross-session DB lookup — any prior session that processed the same file
+            #         and stored a non-zero parse_cost (handles legacy Docling metadata).
+            parse_cost = 0.0
+            try:
+                _stored_pc = cached_metadata.get("parse_cost")
+                _stored_dur = cached_metadata.get("parse_duration_seconds")
+
+                if _stored_pc and float(_stored_pc) > 0:
+                    # Tier 1: direct stored value
+                    parse_cost = float(_stored_pc)
+                elif _stored_dur and float(_stored_dur) > 0:
+                    # Tier 2: recompute from stored float duration (Docling & Azure DI)
+                    parse_cost = cost_tracker.estimate_call_cost(
+                        provider="azure",
+                        model=processor_name,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        page_count=cached_metadata.get("page_count") or 0,
+                        duration=float(_stored_dur),
+                    )
+                else:
+                    # Tier 3: legacy estimation (Azure DI works via page_count; Docling → 0)
+                    raw_duration = cached_metadata.get("conversion_time")
+                    cached_duration = (
+                        float(raw_duration)
+                        if isinstance(raw_duration, (int, float))
+                        else 0.0
+                    )
+                    parse_cost = cost_tracker.estimate_call_cost(
+                        provider="azure",
+                        model=processor_name,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        page_count=cached_metadata.get("page_count") or 0,
+                        duration=cached_duration,
+                    )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to estimate cached parse cost: {e}")
+
+            # Tier 4: cross-session DB lookup (Docling legacy docs without stored duration)
+            if not parse_cost:
+                try:
+                    from services.database.supabase_db_service import (
+                        get_db_service as _gds,
+                    )
+
+                    _historical = _gds().get_parse_cost_by_file_hash(file_hash)
+                    if _historical:
+                        parse_cost = _historical
+                except Exception as _e:
+                    print(
+                        f"[COST_TRACKER] Cross-session parse cost lookup failed: {_e}"
+                    )
+
+            # If a session_id is available, prefer the DB-persisted value for consistency,
+            # and backfill DB if the record doesn't have a cost yet.
+            try:
+                session_id = (
+                    http_request.headers.get("X-Session-Id") if http_request else None
+                )
+                user_id = (
+                    http_request.headers.get("X-User-Id") if http_request else None
+                )
+                if session_id:
+                    from services.database.supabase_db_service import get_db_service
+
+                    db = get_db_service()
+                    docs = db.get_documents_by_session(session_id)
+                    doc_match = next(
+                        (d for d in docs if d.get("file_hash") == file_hash), None
+                    )
+
+                    if (
+                        doc_match
+                        and doc_match.get("parse_cost") is not None
+                        and float(doc_match["parse_cost"]) > 0
+                    ):
+                        # Already persisted — use the canonical value (same across all users)
+                        parse_cost = float(doc_match["parse_cost"])
+                    elif doc_match:
+                        # Not yet in DB (or stored as 0) — persist the freshly estimated value
+                        db.update_document(
+                            doc_match["id"],
+                            {
+                                "parse_cost": parse_cost,
+                                "page_count": cached_metadata.get("page_count"),
+                            },
+                        )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to handle cached parse cost DB sync: {e}")
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -119,6 +217,8 @@ async def process_uploaded_file(
                     "figures_found": cached_metadata.get("figures_found", 0),
                     "figures": cached_metadata.get("figures", []),
                     "tables_found": cached_metadata.get("tables_found", 0),
+                    "parse_cost": parse_cost,
+                    "page_count": cached_metadata.get("page_count"),
                 },
             )
 
@@ -135,6 +235,67 @@ async def process_uploaded_file(
             output_dir=output_dir,  # Direct output to organized structure
         )
         conversion_duration = time.perf_counter() - conversion_start
+
+        # Estimate parse cost (per-page or per-minute depending on processor)
+        parse_cost = 0.0
+        try:
+            metadata = result.get("metadata", {})
+            parse_cost = cost_tracker.estimate_call_cost(
+                provider="azure",
+                model=result.get("processor_used", processor_name),
+                prompt_tokens=0,
+                completion_tokens=0,
+                page_count=metadata.get("page_count") or 0,
+                duration=conversion_duration,
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to estimate parse cost: {e}")
+
+        # Persist parse_cost and page_count to documents table if possible.
+        # page_count is stored so the deterministic recompute fallback in
+        # _db_to_session() can reconstruct parse_cost from page_count + processor_used.
+        try:
+            session_id = (
+                http_request.headers.get("X-Session-Id") if http_request else None
+            )
+            if session_id:
+                from services.database.supabase_db_service import get_db_service
+
+                db = get_db_service()
+                docs = db.get_documents_by_session(session_id)
+                doc_match = next(
+                    (d for d in docs if d.get("file_hash") == file_hash), None
+                )
+                if doc_match:
+                    db.update_document(
+                        doc_match["id"],
+                        {
+                            "parse_cost": parse_cost,
+                            "page_count": metadata.get("page_count"),
+                            "processor_used": result.get(
+                                "processor_used", processor_name
+                            ),
+                        },
+                    )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
+
+        # Write parse_cost and parse_duration_seconds into metadata.json so cached access
+        # later can return the real value. parse_duration_seconds is stored as a float so
+        # that Docling cost (cost_per_minute × duration/60) can be recomputed deterministically
+        # even for files where parse_cost was not yet stored (legacy metadata.json files).
+        try:
+            if parse_cost:
+                import json as _json
+
+                _meta_path = output_dir / "metadata.json"
+                if _meta_path.exists():
+                    _meta_data = _json.loads(_meta_path.read_text())
+                    _meta_data["parse_cost"] = parse_cost
+                    _meta_data["parse_duration_seconds"] = conversion_duration
+                    _meta_path.write_text(_json.dumps(_meta_data, indent=2))
+        except Exception as _e:
+            print(f"[COST_TRACKER] Failed to write parse_cost to metadata.json: {_e}")
 
         try:
             from services.telemetry.cost_tracker import cost_tracker
@@ -175,6 +336,7 @@ async def process_uploaded_file(
             "processor_fallback": result.get("processor_fallback", False),
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
+            "parse_cost": parse_cost,
         }
 
         # Include figures information if available
@@ -185,6 +347,10 @@ async def process_uploaded_file(
         # Include tables information if available
         if "tables_found" in result["metadata"]:
             response_content["tables_found"] = result["metadata"]["tables_found"]
+
+        # Include page_count for parse cost recompute on history reload
+        if "page_count" in result["metadata"]:
+            response_content["page_count"] = result["metadata"]["page_count"]
 
         return JSONResponse(status_code=200, content=response_content)
 

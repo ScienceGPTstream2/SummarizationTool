@@ -73,7 +73,11 @@ CREATE TABLE IF NOT EXISTS public.documents (
     processing_status TEXT DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'error')),
     processing_error TEXT,
     processed_at TIMESTAMPTZ,
-    
+    -- Cost tracking (migrated via 02_add_parse_cost_to_documents.sql)
+    parse_cost DECIMAL,
+    -- Page count for parse cost recompute (migrated via 04_add_page_count_to_documents.sql)
+    page_count INTEGER,
+
     -- Study type (per document)
     study_type TEXT,
     
