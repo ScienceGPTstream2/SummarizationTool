@@ -1,0 +1,3 @@
+-- SUPERSEDED: This change is now handled by migration
+-- supabase-docker/migrations/20260218150800_add_page_count_to_documents.sql
+-- This file is kept for reference only and has no effect.

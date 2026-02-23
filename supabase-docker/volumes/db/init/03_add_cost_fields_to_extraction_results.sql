@@ -1,0 +1,3 @@
+-- SUPERSEDED: This change is now handled by migration
+-- supabase-docker/migrations/20260218140300_add_cost_fields_to_extraction_results.sql
+-- This file is kept for reference only and has no effect.

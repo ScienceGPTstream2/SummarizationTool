@@ -20,6 +20,7 @@ from schemas.sessions import (
     SessionSummary,
 )
 from services.database import get_db_service, SupabaseDBService
+from services.telemetry.cost_tracker import cost_tracker, infer_provider_from_model_id
 
 
 class SessionService:
@@ -93,12 +94,18 @@ class SessionService:
                     user_id=request.user_id,
                     file_hash=doc.file_hash,
                     filename=doc.filename,
+                    processor_used=doc.processor_used,
+                    parse_cost=doc.parse_cost,
+                    page_count=doc.page_count,
                 )
                 documents.append(
                     SessionDocument(
                         **{
                             "file_hash": db_doc["file_hash"],
                             "filename": db_doc["filename"],
+                            "processor_used": db_doc.get("processor_used"),
+                            "parse_cost": db_doc.get("parse_cost"),
+                            "page_count": db_doc.get("page_count"),
                         }
                     )
                 )
@@ -230,6 +237,9 @@ class SessionService:
                         user_id=user_id,
                         file_hash=doc.file_hash,
                         filename=doc.filename,
+                        processor_used=doc.processor_used,
+                        parse_cost=doc.parse_cost,
+                        page_count=doc.page_count,
                     )
 
         # Handle extraction results updates
@@ -252,6 +262,10 @@ class SessionService:
                     bbox_references=result.references,
                     status=result.status,
                     error_message=result.error_message,
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                    duration_ms=result.duration_ms,
+                    cost=result.cost,
                 )
 
         # Handle evaluation results updates
@@ -546,6 +560,30 @@ class SessionService:
         # Parse documents - include id for matching extraction results
         documents = []
         for doc in db_session.get("documents", []):
+            parse_cost = doc.get("parse_cost")
+            # Deterministic recompute fallback: if parse_cost is missing OR 0
+            # (e.g., stored as 0 from a previous run where estimation failed),
+            # recompute from page_count + processor_used and backfill the DB.
+            if not parse_cost:
+                page_count = doc.get("page_count")
+                processor_used = doc.get("processor_used")
+                if page_count and processor_used:
+                    try:
+                        parse_cost = cost_tracker.estimate_call_cost(
+                            provider="azure",
+                            model=processor_used,
+                            prompt_tokens=0,
+                            completion_tokens=0,
+                            page_count=page_count,
+                            duration=0,
+                        )
+                        if parse_cost:
+                            self.db.update_document(
+                                doc["id"], {"parse_cost": parse_cost}
+                            )
+                    except Exception as e:
+                        print(f"[COST_TRACKER] parse_cost recompute failed: {e}")
+
             documents.append(
                 SessionDocument(
                     id=doc[
@@ -553,12 +591,37 @@ class SessionService:
                     ],  # CRITICAL: Include ID for matching extraction results
                     file_hash=doc["file_hash"],
                     filename=doc["filename"],
+                    processor_used=doc.get("processor_used"),
+                    parse_cost=parse_cost,
+                    page_count=doc.get("page_count"),
                 )
             )
 
         # Parse extraction results
         extraction_results = []
         for ext in db_session.get("extraction_results", []):
+            cost = ext.get("cost")
+            # Deterministic recompute fallback: if cost is missing OR stored as 0
+            # (which happens when pricing lookup fails), recompute from token counts.
+            if not cost:
+                pt = ext.get("prompt_tokens")
+                ct = ext.get("completion_tokens")
+                if pt is not None or ct is not None:
+                    try:
+                        provider = infer_provider_from_model_id(ext.get("model_id", ""))
+                        _recomputed = cost_tracker.estimate_call_cost(
+                            provider=provider,
+                            model=ext.get("model_id", ""),
+                            prompt_tokens=pt,
+                            completion_tokens=ct,
+                        )
+                        if _recomputed:
+                            cost = _recomputed
+                            self.db.update_extraction_cost(ext["id"], cost)
+                        # else: cost stays None → shows "—" not "0.000000"
+                    except Exception as e:
+                        print(f"[COST_TRACKER] extraction cost recompute failed: {e}")
+
             extraction_results.append(
                 ExtractionResult(
                     entity_name=ext["entity_name"],
@@ -579,7 +642,7 @@ class SessionService:
                     prompt_tokens=ext.get("prompt_tokens"),
                     completion_tokens=ext.get("completion_tokens"),
                     duration_ms=ext.get("duration_ms"),
-                    cost=ext.get("cost"),
+                    cost=cost,
                 )
             )
 

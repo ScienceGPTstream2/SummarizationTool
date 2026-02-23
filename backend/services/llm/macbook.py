@@ -1,6 +1,7 @@
 import os
 import asyncio
 import time
+import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import requests
@@ -17,6 +18,29 @@ class MacbookLLMClient:
             self.base_url = self._load_base_url_from_secrets()
         self.base_url = (self.base_url or "").rstrip("/")
         self.disabled = not bool(self.base_url)
+
+        # Default: suppress reasoning/thinking output from Ollama-compatible reasoning models.
+        # Allow override with MACBOOK_DISABLE_REASONING=false if you explicitly want reasoning tokens.
+        disable_reasoning_env = os.environ.get(
+            "MACBOOK_DISABLE_REASONING", "true"
+        ).lower()
+        self.disable_reasoning = disable_reasoning_env not in [
+            "false",
+            "0",
+            "no",
+            "off",
+        ]
+
+        # Retry/backoff controls (tunable via env). Enforce minimum 600s timeouts.
+        self.max_attempts = int(os.environ.get("MACBOOK_MAX_ATTEMPTS", 5))
+        self.initial_backoff = float(os.environ.get("MACBOOK_INITIAL_BACKOFF", 1.0))
+        self.max_backoff = float(os.environ.get("MACBOOK_MAX_BACKOFF", 8.0))
+        self.per_attempt_timeout = max(
+            600.0, float(os.environ.get("MACBOOK_PER_ATTEMPT_TIMEOUT", 30.0))
+        )
+        self.total_retry_cap = max(
+            600.0, float(os.environ.get("MACBOOK_TOTAL_RETRY_CAP", 60.0))
+        )
 
         if self.disabled:
             print("[MacbookLLM] MACBOOK_LLM_BASE_URL is not set; Macbook LLM disabled")
@@ -123,13 +147,22 @@ class MacbookLLMClient:
         temperature: float,
         max_tokens: int,
     ) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "stream": False,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+
+        # For reasoning models (e.g., DeepSeek-R1 / GPT-OSS builds), ask for final answer only.
+        if self.disable_reasoning:
+            payload["options"] = {
+                "reasoning": False,
+                "thinking": False,
+            }
+
+        return payload
 
     async def fetch_available_models(self) -> List[Dict[str, Any]]:
         if self.disabled:
@@ -146,8 +179,8 @@ class MacbookLLMClient:
 
         url = f"{self.base_url}/api/tags"
         try:
-            # Allow up to 15s to accommodate slow /tags responses (was 5s)
-            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=15))
+            # Allow up to 600s to accommodate slow /tags responses
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=600))
             if not resp.ok:
                 print(
                     f"[MacbookLLM] /api/tags failed: status={resp.status_code} body={resp.text}"
@@ -209,7 +242,7 @@ class MacbookLLMClient:
 
         url = f"{self.base_url}/api/tags"
         try:
-            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=3))
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=600))
             if not resp.ok:
                 print(
                     f"[MacbookLLM] health check failed: status={resp.status_code} body={resp.text}"
@@ -233,26 +266,42 @@ class MacbookLLMClient:
         url = f"{self.base_url}/api/generate"
         payload = self._build_request_payload(model_id, prompt, temperature, max_tokens)
 
-        # Retry with simple backoff for transient 5xx/timeout
+        # Retry with bounded exponential backoff for transient 5xx/HTML gateway errors/non-JSON
         attempts = 0
-        max_attempts = 3
-        backoff = 1.0
         last_error: Optional[str] = None
         start_time = time.time()
+        prompt_len = len(prompt or "")
+        backoff = self.initial_backoff
 
-        while attempts < max_attempts:
+        while attempts < self.max_attempts:
             attempts += 1
             try:
+                start = time.time()
                 resp = await asyncio.to_thread(
-                    lambda: requests.post(url, json=payload, timeout=180)
+                    lambda: requests.post(
+                        url, json=payload, timeout=self.per_attempt_timeout
+                    )
+                )
+                elapsed = time.time() - start
+                print(
+                    f"[MacbookLLM] attempt={attempts}/{self.max_attempts} model={model_id} "
+                    f"prompt_len={prompt_len} max_tokens={max_tokens} temp={temperature} "
+                    f"status={resp.status_code} elapsed={elapsed:.2f}s"
                 )
             except Exception as e:
                 last_error = f"Macbook request failed: {str(e)}"
                 self._fail_count += 1
+                print(
+                    f"[MacbookLLM] attempt={attempts}/{self.max_attempts} model={model_id} "
+                    f"prompt_len={prompt_len} error={last_error}"
+                )
             else:
+                is_json = False
+                raw = None
                 if resp.ok:
                     try:
                         raw = resp.json()
+                        is_json = True
                     except Exception:
                         last_error = "Invalid JSON response from Macbook LLM"
                         self._fail_count += 1
@@ -265,6 +314,7 @@ class MacbookLLMClient:
                             or raw.get("text")
                             or ""
                         )
+                        content = self._sanitize_content(content)
                         duration = time.time() - start_time
                         return {
                             "success": True,
@@ -278,19 +328,83 @@ class MacbookLLMClient:
                                 "completion_tokens": raw.get("eval_count"),
                             },
                         }
-                else:
-                    # Non-200
-                    last_error = (
-                        f"Macbook request failed ({resp.status_code}): {resp.text}"
-                    )
-                    if 500 <= resp.status_code < 600:
-                        self._fail_count += 1
-            # Backoff before retry
-            await asyncio.sleep(backoff)
-            backoff *= 2
 
+                # Non-200 or non-JSON success: classify
+                body_text = resp.text if hasattr(resp, "text") else ""
+                status = resp.status_code
+                is_retryable = False
+
+                # Retry on gateway/5xx or non-JSON HTML bodies that look like Cloudflare/Nginx
+                if 500 <= status < 600:
+                    is_retryable = True
+                elif not is_json:
+                    if (
+                        "<html" in body_text.lower()
+                        or "bad gateway" in body_text.lower()
+                    ):
+                        is_retryable = True
+
+                last_error = f"Macbook request failed ({status}): {body_text[:200]}"
+                elapsed_total = time.time() - start_time
+                print(
+                    f"[MacbookLLM] non-success attempt={attempts}/{self.max_attempts} model={model_id} "
+                    f"prompt_len={prompt_len} status={status} elapsed_total={elapsed_total:.2f}s retryable={is_retryable}"
+                )
+                if is_retryable:
+                    self._fail_count += 1
+                else:
+                    return {"success": False, "error": last_error}
+
+            # Backoff before retry with jitter; cap total elapsed
+            elapsed_total = time.time() - start_time
+            if elapsed_total >= self.total_retry_cap:
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, self.max_backoff)
         # After retries exhausted
+        total_duration = time.time() - start_time
+        print(
+            f"[MacbookLLM] exhausted retries model={model_id} prompt_len={prompt_len} "
+            f"attempts={attempts} last_error={last_error} total_elapsed={total_duration:.2f}s"
+        )
         return {"success": False, "error": last_error or "Macbook request failed"}
+
+    def _sanitize_content(self, content: str) -> str:
+        """Remove think/analysis tags sometimes emitted by local models.
+
+        Keeps user-facing text intact while stripping agent markup like
+        </thinking>, </end_of_turn>, and paired <thinking>...</thinking> blocks.
+        """
+
+        if not content:
+            return content
+
+        # Remove closing tags and paired blocks
+        patterns = [
+            # Paired blocks (allow attributes in opening tag) — strip these first
+            r"<thinking[^>]*>[\s\S]*?</thinking>",
+            r"<analysis[^>]*>[\s\S]*?</analysis>",
+            r"<reflection[^>]*>[\s\S]*?</reflection>",
+            r"<think[^>]*>[\s\S]*?</think>",
+            # Stray openings/closings
+            r"</end_of_turn>",
+            r"</thinking>",
+            r"</analysis>",
+            r"</reflection>",
+            r"</think>",
+            r"<thinking[^>]*>",
+            r"<analysis[^>]*>",
+            r"<reflection[^>]*>",
+            r"<think[^>]*>",
+        ]
+
+        sanitized = content
+        for pat in patterns:
+            sanitized = re.sub(pat, "", sanitized, flags=re.IGNORECASE)
+
+        # Collapse extra whitespace created by removals
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+        return sanitized.strip()
 
     async def extract_entities_with_macbook(
         self,
