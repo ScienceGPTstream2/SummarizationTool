@@ -111,6 +111,7 @@ class LlamaLLMClient:
         location_override: Optional[str] = None,
         region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
+        request_timeout: int = 120,
     ) -> Dict[str, Any]:
         # Use overrides if provided, otherwise fall back to instance variables
         used_project_id = project_id_override or self.project_id
@@ -205,7 +206,7 @@ class LlamaLLMClient:
 
                 resp = await asyncio.to_thread(
                     lambda: requests.post(
-                        url, headers=headers, json=payload, timeout=120
+                        url, headers=headers, json=payload, timeout=request_timeout
                     )
                 )
                 duration = time.time() - start_time
@@ -329,6 +330,7 @@ class LlamaLLMClient:
             print(f"[LLMService] Llama content extraction error: {e}, Raw: {raw}")
             return {"success": False, "error": f"Unexpected response format: {raw}"}
 
+        _usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
         result = {
             "success": True,
             "content": content,
@@ -337,6 +339,8 @@ class LlamaLLMClient:
                 "timestamp": datetime.utcnow().isoformat(),
                 "model": model_name,
                 "duration": duration,
+                "prompt_tokens": _usage.get("prompt_tokens"),
+                "completion_tokens": _usage.get("completion_tokens"),
             },
         }
 
@@ -819,8 +823,9 @@ Text: {essential_markdown}"""
             messages,
             max_tokens,
             temperature,
-            project_id_override,
-            location_override,
-            region_override,
-            service_account_path_override,
+            project_id_override=project_id_override,
+            location_override=location_override,
+            region_override=region_override,
+            service_account_path_override=service_account_path_override,
+            request_timeout=240,
         )

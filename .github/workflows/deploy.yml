@@ -16,6 +16,22 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+      - name: Restart Supabase stack if supabase-docker changed
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "Initial push – skipping supabase-docker check."
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD -- supabase-docker/ 2>/dev/null | wc -l)
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "supabase-docker changes detected ($CHANGED files) – running docker compose up -d"
+              cd ~/SummarizationTool/supabase-docker
+              docker compose up -d
+            else
+              echo "No changes in supabase-docker, skipping."
+            fi
+          fi
+
       - name: Install backend deps
         run: |
           cd ~/SummarizationTool/backend
