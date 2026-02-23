@@ -222,6 +222,7 @@ class LLMService:
             elif model_type == "macbook":
                 if self.macbook_client.disabled:
                     return {"success": False, "error": "Macbook LLM is not configured."}
+                # Macbook models can be slower; allow up to 180s end-to-end (slightly above client HTTP timeout)
                 result = await self._call_with_timeout_logging(
                     operation_name,
                     self.macbook_client.extract_entities_with_macbook(
@@ -232,6 +233,7 @@ class LLMService:
                         temperature,
                         system_message,
                     ),
+                    timeout_seconds=180,
                 )
                 self._record_session_metrics(session_id, "macbook", result)
                 return result
@@ -387,12 +389,17 @@ class LLMService:
         elif model_type == "macbook":
             if self.macbook_client.disabled:
                 return {"success": False, "error": "Macbook LLM is not configured."}
-            result = await self.macbook_client.generate_paragraph_with_macbook(
-                user_prompt,
-                model_id,
-                max_tokens,
-                temperature,
-                system_message,
+            # Allow more time for macbook completions
+            result = await self._call_with_timeout_logging(
+                "paragraph_macbook",
+                self.macbook_client.generate_paragraph_with_macbook(
+                    user_prompt,
+                    model_id,
+                    max_tokens,
+                    temperature,
+                    system_message,
+                ),
+                timeout_seconds=180,
             )
             self._record_session_metrics(session_id, "macbook", result)
             return result
