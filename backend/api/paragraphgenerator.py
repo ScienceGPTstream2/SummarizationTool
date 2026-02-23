@@ -7,20 +7,10 @@ from typing import List, Dict, Optional
 from core.dependencies import get_current_user
 from services.llm.llm_service import LLMService
 from services.session.session_service import get_session_service
-from services.telemetry.cost_tracker import cost_tracker
 from schemas.sessions import ExtractionResult
 
 router = APIRouter(prefix="/api", tags=["paragraph_generator"])
 llm_service = LLMService()
-
-# Maps request.model_type → provider key used by cost_tracker
-_PARAGRAPH_PROVIDER_MAP = {
-    "azure": "azure",
-    "gemini": "gcp",
-    "anthropic": "gcp",
-    "llama": "gcp",
-    "macbook": "macbook",
-}
 
 
 class ParagraphGenerationRequest(BaseModel):
@@ -97,37 +87,6 @@ async def generate_paragraph(
         if result.get("success"):
             summary_text = result.get("content")
 
-            # Extract token/duration info from meta (used for cost + DB persistence)
-            meta = result.get("meta", {}) or {}
-            prompt_tokens = meta.get("prompt_tokens")
-            completion_tokens = meta.get("completion_tokens")
-            duration = meta.get("duration")
-            duration_ms = int(duration * 1000) if duration else None
-
-            # Compute paragraph LLM cost regardless of whether session_id is present
-            _provider = _PARAGRAPH_PROVIDER_MAP.get(
-                request.model_type or "azure", "azure"
-            )
-            _model = (
-                meta.get("deployment")
-                or meta.get("model")
-                or request.model_id
-                or "unknown"
-            )
-            paragraph_cost = None
-            if prompt_tokens is not None or completion_tokens is not None:
-                try:
-                    paragraph_cost = cost_tracker.estimate_call_cost(
-                        provider=_provider,
-                        model=_model,
-                        prompt_tokens=prompt_tokens or 0,
-                        completion_tokens=completion_tokens or 0,
-                    )
-                except Exception as cost_err:
-                    print(
-                        f"[COST_TRACKER] Failed to compute paragraph cost: {cost_err}"
-                    )
-
             # Persist to database if session_id is provided
             print(
                 f"[Summarize] Persistence requested. Session ID: {request.session_id}, User ID: {user.get('id')}"
@@ -138,6 +97,13 @@ async def generate_paragraph(
                     user_id = user.get("id")
 
                     if user_id:
+                        # Extract token and duration info from meta
+                        meta = result.get("meta", {}) or {}
+                        prompt_tokens = meta.get("prompt_tokens")
+                        completion_tokens = meta.get("completion_tokens")
+                        duration = meta.get("duration")
+                        duration_ms = int(duration * 1000) if duration else None
+
                         # Create extraction result object
                         summary_result = ExtractionResult(
                             entity_name="__paragraph_summary__",
@@ -148,7 +114,6 @@ async def generate_paragraph(
                             prompt_tokens=prompt_tokens,
                             completion_tokens=completion_tokens,
                             duration_ms=duration_ms,
-                            cost=paragraph_cost,
                         )
 
                         # Save using the service
@@ -164,10 +129,7 @@ async def generate_paragraph(
                     print(f"Error saving summary to DB: {db_err}")
                     # We log but don't fail the request
 
-            response_meta = {**meta}
-            if paragraph_cost is not None:
-                response_meta["cost"] = paragraph_cost
-            return {"summary": summary_text, "meta": response_meta}
+            return {"summary": summary_text, "meta": result.get("meta")}
         else:
             raise HTTPException(
                 status_code=500,

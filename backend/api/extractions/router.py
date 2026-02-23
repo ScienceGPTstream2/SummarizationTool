@@ -23,21 +23,11 @@ router = APIRouter(prefix="/api", tags=["extractions"])
 
 from services.session.session_service import SessionService, get_session_service
 from schemas.sessions import ExtractionResult
-from services.telemetry.cost_tracker import cost_tracker
 
 # Initialize services
 document_service = DocumentService()
 llm_service = LLMService()
 session_service = get_session_service()
-
-# Maps request.model_type → provider key used by cost_tracker (matches llm_service._record_session_metrics)
-_EXTRACTION_PROVIDER_MAP = {
-    "azure": "azure",
-    "gemini": "gcp",
-    "anthropic": "gcp",
-    "llama": "gcp",
-    "macbook": "macbook",
-}
 
 # Timeout logging setup
 TIMEOUT_LOG_DIR = Path(__file__).resolve().parents[2] / "output" / "timeout_logs"
@@ -172,34 +162,6 @@ async def extract_entities(
                     f"[EXTRACTION] References found: {len(result.get('references', []))}"
                 )
             if result.get("success"):
-                # Compute per-extraction cost and inject into meta so it's available
-                # both in the API response and in the persistence loop below.
-                _meta = result.get("meta") or {}
-                _provider = _EXTRACTION_PROVIDER_MAP.get(request.model_type, "azure")
-                _model = (
-                    _meta.get("deployment")
-                    or _meta.get("model")
-                    or request.model_id
-                    or request.deployment
-                    or "unknown"
-                )
-                _pt = _meta.get("prompt_tokens")
-                _ct = _meta.get("completion_tokens")
-                if _pt is not None or _ct is not None:
-                    try:
-                        _cost = cost_tracker.estimate_call_cost(
-                            provider=_provider,
-                            model=_model,
-                            prompt_tokens=_pt or 0,
-                            completion_tokens=_ct or 0,
-                        )
-                        _meta["cost"] = _cost
-                    except Exception as _e:
-                        print(
-                            f"[COST_TRACKER] Failed to compute extraction cost for '{entity.name}': {_e}"
-                        )
-                    result["meta"] = _meta
-
                 response_data = {
                     "name": entity.name,
                     "extracted": result.get("content"),
@@ -287,59 +249,50 @@ async def extract_entities(
                         document_id = doc["id"]
                         break
 
-                # Always persist all successful extractions. document_id is passed when the
-                # file_hash lookup above succeeded; if it's None, add_extraction_result_fast
-                # will use result.file_hash to find the document (same pattern as paragraph
-                # generator — this prevents silent cost loss on any hash-lookup edge case).
-                if not document_id:
+                # If found, save all successful extractions
+                if document_id:
+                    for entity_res in extracted_entities:
+                        # Skip if error string
+                        if isinstance(entity_res.get("extracted"), str) and entity_res[
+                            "extracted"
+                        ].startswith("Error:"):
+                            continue
+
+                        # Extract token and duration info from meta
+                        meta = entity_res.get("meta", {}) or {}
+                        prompt_tokens = meta.get("prompt_tokens")
+                        completion_tokens = meta.get("completion_tokens")
+                        duration = meta.get("duration")
+                        duration_ms = int(duration * 1000) if duration else None
+
+                        # Convert to ExtractionResult schema
+                        result_obj = ExtractionResult(
+                            entity_name=entity_res["name"],
+                            model_id=request.model_id
+                            or request.deployment
+                            or "unknown-model",
+                            extracted_text=entity_res["extracted"],
+                            references=entity_res.get("references"),
+                            status="completed",
+                            extracted_at=None,  # will happen in add_extraction_result
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            duration_ms=duration_ms,
+                        )
+
+                        # Save to DB
+                        session_service.add_extraction_result(
+                            user_id=user_id,
+                            session_id=request.session_id,
+                            result=result_obj,
+                            document_id=document_id,
+                        )
+                        print(
+                            f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
+                        )
+                else:
                     print(
-                        f"Warning: Could not find document with hash {request.conversion_id} "
-                        f"in session {request.session_id} — using file_hash fallback"
-                    )
-                for entity_res in extracted_entities:
-                    # Skip if error string
-                    if isinstance(entity_res.get("extracted"), str) and entity_res[
-                        "extracted"
-                    ].startswith("Error:"):
-                        continue
-
-                    # Extract token, duration, and cost info from meta
-                    meta = entity_res.get("meta", {}) or {}
-                    prompt_tokens = meta.get("prompt_tokens")
-                    completion_tokens = meta.get("completion_tokens")
-                    duration = meta.get("duration")
-                    duration_ms = int(duration * 1000) if duration else None
-                    # cost was computed in run_extraction() and injected into meta
-                    extraction_cost = meta.get("cost")
-
-                    # Convert to ExtractionResult schema.
-                    # file_hash enables add_extraction_result_fast to find document_id
-                    # via fallback when document_id is None (mirrors paragraph pattern).
-                    result_obj = ExtractionResult(
-                        entity_name=entity_res["name"],
-                        model_id=request.model_id
-                        or request.deployment
-                        or "unknown-model",
-                        extracted_text=entity_res["extracted"],
-                        references=entity_res.get("references"),
-                        status="completed",
-                        extracted_at=None,  # will happen in add_extraction_result
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        duration_ms=duration_ms,
-                        cost=extraction_cost,
-                        file_hash=request.conversion_id,  # enables fallback in add_extraction_result_fast
-                    )
-
-                    # Save to DB
-                    session_service.add_extraction_result(
-                        user_id=user_id,
-                        session_id=request.session_id,
-                        result=result_obj,
-                        document_id=document_id,  # may be None; fallback uses file_hash
-                    )
-                    print(
-                        f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
+                        f"Warning: Could not find document with hash {request.conversion_id} in session {request.session_id}"
                     )
 
             except Exception as e:
