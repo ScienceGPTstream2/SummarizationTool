@@ -106,7 +106,6 @@ interface Entity {
   duration?: number;
   promptTokens?: number;
   completionTokens?: number;
-  cost?: number;
   // NEW: Store extraction results for multiple models
   extractionsByModel?: Record<
     string,
@@ -117,7 +116,6 @@ interface Entity {
       duration?: number;
       promptTokens?: number;
       completionTokens?: number;
-      cost?: number;
     }
   >;
 }
@@ -383,7 +381,6 @@ export function EntityExtractionPage({
             promptTokens?: number;
             completionTokens?: number;
             duration?: number;
-            cost?: number;
           };
           await fetch(
             `/api/sessions/${sessionId}/extractions?user_id=${user.id}`,
@@ -407,7 +404,6 @@ export function EntityExtractionPage({
                 duration_ms: modelData.duration
                   ? Math.round(modelData.duration * 1000)
                   : undefined,
-                cost: modelData.cost,
               }),
             }
           );
@@ -436,7 +432,6 @@ export function EntityExtractionPage({
               duration_ms: entity.duration
                 ? Math.round(entity.duration * 1000)
                 : undefined,
-              cost: entity.cost,
             }),
           }
         );
@@ -612,77 +607,6 @@ export function EntityExtractionPage({
       console.error("Batch processing error:", error);
     } finally {
       setIsBatchRunning(false);
-    }
-  };
-
-  // Auto-generate paragraph evaluation ground truth in background after paragraph creation.
-  // Fires-and-forgets; updates state with the ground truth on success.
-  const triggerParagraphEvalGeneration = async (
-    fileId: string,
-    entityOrder: string[],
-    paragraphModelId: string
-  ) => {
-    const sessionId = sessionIdRef.current;
-    if (!sessionId || !fileId) return;
-
-    try {
-      const resp = await authenticatedFetch(
-        "/api/paragraph-evaluation/generate",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_id: sessionId,
-            file_hash: fileId,
-            user_id: undefined, // backend resolves from auth token
-            entity_order: entityOrder,
-          }),
-        }
-      );
-
-      if (resp.ok) {
-        const data = await resp.json();
-        // Update files state so EvaluationPage sees the ground truth immediately
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.fileId === fileId
-              ? {
-                  ...f,
-                  paragraphSummaryModel: paragraphModelId,
-                  paragraphEvaluation: {
-                    groundTruth: data.ground_truth,
-                    humanScore: f.paragraphEvaluation?.humanScore ?? null,
-                  },
-                }
-              : f
-          )
-        );
-        setDocumentData((prev) => ({
-          ...prev,
-          uploadedFiles: (prev.uploadedFiles || []).map((f) =>
-            f.fileId === fileId
-              ? {
-                  ...f,
-                  paragraphSummaryModel: paragraphModelId,
-                  paragraphEvaluation: {
-                    groundTruth: data.ground_truth,
-                    humanScore:
-                      (f as any).paragraphEvaluation?.humanScore ?? null,
-                  },
-                }
-              : f
-          ),
-        }));
-        console.log(
-          `[ParagraphEval] Ground truth generated for file ${fileId}, length=${data.ground_truth?.length}`
-        );
-      }
-    } catch (err) {
-      console.warn(
-        "[ParagraphEval] Background ground truth generation failed:",
-        err
-      );
-      // Don't surface errors to user — this is a background operation
     }
   };
 
@@ -893,7 +817,7 @@ export function EntityExtractionPage({
           if (resp.ok) {
             const data = await resp.json();
             // Immediately show this model's result
-            updateParagraphForModel(fileId, mId, data.summary, data.meta?.cost);
+            updateParagraphForModel(fileId, mId, data.summary);
             completedCount++;
           }
         } catch {
@@ -912,16 +836,6 @@ export function EntityExtractionPage({
             status: "completed",
           },
         }));
-
-        // Auto-generate paragraph evaluation ground truth in background
-        const entityOrder = updatedEntities.map((e: any) => e.name);
-        const paragraphModelId =
-          file.selectedModels?.[0] || file.selectedModel || "";
-        triggerParagraphEvalGeneration(
-          file.fileId,
-          entityOrder,
-          paragraphModelId
-        );
       }
     } catch (err) {
       clearTimeout(summaryRetryMsgTimer);
@@ -1419,7 +1333,8 @@ export function EntityExtractionPage({
         duration: meta.duration,
         promptTokens: meta.prompt_tokens,
         completionTokens: meta.completion_tokens,
-        cost: meta.cost ?? undefined,
+        retriesAttempted: meta.retries_attempted || 0,
+        retryReasons: meta.retry_reasons || [],
       };
     }
 
@@ -1511,7 +1426,6 @@ export function EntityExtractionPage({
           duration: result.duration,
           promptTokens: result.promptTokens,
           completionTokens: result.completionTokens,
-          cost: result.cost ?? undefined,
         };
       }
     });
@@ -1771,10 +1685,7 @@ export function EntityExtractionPage({
 
     if (!resp.ok) throw new Error("Summary generation failed");
     const data = await resp.json();
-    return {
-      summary: data.summary as string,
-      cost: data.meta?.cost as number | undefined,
-    };
+    return data.summary as string;
   };
 
   // Generate paragraphs for ALL selected models that don't have one yet
@@ -1782,8 +1693,7 @@ export function EntityExtractionPage({
   const updateParagraphForModel = (
     fileId: string,
     modelId: string,
-    summary: string,
-    cost?: number
+    summary: string
   ) => {
     setFiles((prev) =>
       prev.map((f) =>
@@ -1795,9 +1705,6 @@ export function EntityExtractionPage({
                 ...(f.summariesByModel || {}),
                 [modelId]: summary,
               },
-              ...(cost != null && {
-                paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
-              }),
             }
           : f
       )
@@ -1813,9 +1720,6 @@ export function EntityExtractionPage({
                 ...(f.summariesByModel || {}),
                 [modelId]: summary,
               },
-              ...(cost != null && {
-                paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
-              }),
             }
           : f
       ),
@@ -1854,12 +1758,12 @@ export function EntityExtractionPage({
       // Fire all requests concurrently, but update UI as each one completes
       const promises = modelsToGenerate.map(async (modelId: string) => {
         try {
-          const { summary, cost } = await generateSummaryForModel(modelId);
+          const summary = await generateSummaryForModel(modelId);
           console.log(
             `✅ Paragraph generated for ${availableModels.find((m) => m.id === modelId)?.name || modelId}`
           );
           // Immediately show this model's result in the UI
-          updateParagraphForModel(fileId, modelId, summary, cost);
+          updateParagraphForModel(fileId, modelId, summary);
           return { modelId, success: true };
         } catch (err) {
           console.error(`Failed to generate paragraph for ${modelId}:`, err);
@@ -1891,7 +1795,7 @@ export function EntityExtractionPage({
   const regenerateSummaryForCurrentModel = async () => {
     setIsGeneratingParagraph(true);
     try {
-      const { summary } = await generateSummaryForModel(selectedModel);
+      const summary = await generateSummaryForModel(selectedModel);
       const summaryModelId = selectedModel;
 
       if (sessionIdRef.current) {
@@ -1913,6 +1817,10 @@ export function EntityExtractionPage({
                 finalSummary: summary,
                 summaryPrompt,
                 paragraphSystemPrompt,
+                summariesByModel: {
+                  ...(f.summariesByModel || {}),
+                  [summaryModelId]: summary,
+                },
               }
             : f
         )
@@ -1926,18 +1834,14 @@ export function EntityExtractionPage({
                 finalSummary: summary,
                 summaryPrompt,
                 paragraphSystemPrompt,
+                summariesByModel: {
+                  ...(f.summariesByModel || {}),
+                  [summaryModelId]: summary,
+                },
               }
             : f
         ),
       }));
-
-      // Auto-generate paragraph evaluation ground truth in background
-      const entityOrder = entities.map((e: any) => e.name);
-      triggerParagraphEvalGeneration(
-        currentFile?.fileId || selectedFileId,
-        entityOrder,
-        summaryModelId || ""
-      );
     } catch (err) {
       console.error("Summary regeneration error:", err);
       alert("Failed to regenerate summary");
@@ -2100,6 +2004,16 @@ export function EntityExtractionPage({
       // Small delay to ensure UI updates before the API call
       await new Promise((resolve) => setTimeout(resolve, 100));
 
+      // Generate paragraph summaries for ALL selected models — show each as it arrives
+      const preSelectedModels =
+        currentFile?.selectedModels || documentData.selectedModels || [];
+      const allModelsToSummarize =
+        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+      const formattedPrompt = summaryPrompt.includes("{{entities}}")
+        ? summaryPrompt
+        : `${summaryPrompt}\n\n{{entities}}`;
+
       const fileId = selectedFileId;
 
       // First update entities state
@@ -2122,6 +2036,61 @@ export function EntityExtractionPage({
         ...documentData,
         uploadedFiles: updatedFilesWithEntities,
       });
+
+      // Fire all paragraph requests concurrently, update UI as each completes
+      const summaryPromises = allModelsToSummarize.map(
+        async (modelId: string) => {
+          const mObj = availableModels.find((m) => m.id === modelId);
+          if (!mObj) return;
+
+          const mType = getModelType(mObj.provider || "");
+
+          // Use per-model entity results if available
+          const modelEntities = updatedEntities.map((e) => {
+            if (e.extractionsByModel?.[modelId]) {
+              return {
+                ...e,
+                extracted: e.extractionsByModel[modelId].extracted,
+              };
+            }
+            return e;
+          });
+
+          try {
+            const resp = await authenticatedFetch("/api/generate_paragraph", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                entities: modelEntities,
+                summary_prompt: formattedPrompt,
+                model_type: mType,
+                model_id: mObj.id,
+                deployment: mObj.deployment,
+                api_version: mObj.api_version,
+                temperature:
+                  mObj.supports_temperature !== false
+                    ? getModelTemperature(modelId)
+                    : undefined,
+                session_id: sessionIdRef.current,
+                file_hash: currentFile?.fileId,
+              }),
+              signal,
+            });
+
+            if (resp.ok) {
+              const data = await resp.json();
+              console.log(`✅ Paragraph generated for ${mObj.name}`);
+              // Immediately show this model's result
+              updateParagraphForModel(fileId, modelId, data.summary);
+            }
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            console.error(`Error generating paragraph for ${mObj.name}:`, err);
+          }
+        }
+      );
+
+      await Promise.all(summaryPromises);
     } catch (err: any) {
       if (err.name === "AbortError") {
         console.log("Summarization aborted");
