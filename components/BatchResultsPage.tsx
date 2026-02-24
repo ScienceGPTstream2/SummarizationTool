@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import Fuse from "fuse.js";
+import { MarkdownViewer } from "./MarkdownViewer";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -1133,8 +1134,12 @@ export default function BatchResultsPage({
                     <span>Actual Output (LLM)</span>
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto bg-white">
-                    <div className="p-4 whitespace-pre-wrap text-base leading-relaxed text-gray-800">
-                      {selectedRowForCompare.actualOutput || (
+                    <div className="p-4 text-base leading-relaxed text-gray-800">
+                      {selectedRowForCompare.actualOutput ? (
+                        <MarkdownViewer
+                          content={selectedRowForCompare.actualOutput}
+                        />
+                      ) : (
                         <span className="text-gray-400 italic">No output</span>
                       )}
                     </div>
@@ -1145,8 +1150,12 @@ export default function BatchResultsPage({
                     <span>Ground Truth</span>
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto bg-white">
-                    <div className="p-4 whitespace-pre-wrap text-base leading-relaxed text-gray-800">
-                      {selectedRowForCompare.groundTruth || (
+                    <div className="p-4 text-base leading-relaxed text-gray-800">
+                      {selectedRowForCompare.groundTruth ? (
+                        <MarkdownViewer
+                          content={selectedRowForCompare.groundTruth}
+                        />
+                      ) : (
                         <span className="text-gray-400 italic">
                           No ground truth
                         </span>

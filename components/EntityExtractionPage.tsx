@@ -68,6 +68,7 @@ import {
   generateWordDocument,
   generateMarkdownDocument,
   downloadFile,
+  EntityExportOptions,
 } from "./ExportUtils";
 import { loadStudyTypeTemplate } from "./TemplateLoader";
 import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
@@ -2176,7 +2177,7 @@ export function EntityExtractionPage({
   const handleExportWord = async () => {
     setIsExporting(true);
     try {
-      // Use current file data for export
+      // Use current file data for export, merged with documentData for parser/studyType
       const fileData = {
         ...documentData,
         ...currentFile,
@@ -2185,8 +2186,15 @@ export function EntityExtractionPage({
         fileId: currentFile.fileId,
       };
 
-      const wordBlob = await generateWordDocument(fileData);
-      const fileName = `summary - report - ${currentFile.file?.name || "document"}.docx`;
+      // Pass model-specific options so the export shows the correct model's results
+      const exportOptions: EntityExportOptions = {
+        selectedModel,
+        summaryPrompt,
+        paragraphSystemPrompt,
+      };
+
+      const wordBlob = await generateWordDocument(fileData, exportOptions);
+      const fileName = `summary-report-${currentFile.file?.name || "document"}.docx`;
       downloadFile(
         wordBlob,
         fileName,
