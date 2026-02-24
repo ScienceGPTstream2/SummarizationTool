@@ -121,8 +121,11 @@ export function TemplateWorkspacePage({ onBack }: TemplateWorkspacePageProps) {
     [filters]
   );
 
-  // Handlers
-  const handleCreate = () => {
+  // Tracks folder_id from TemplateList navigation, passed to new templates
+  const [pendingFolderId, setPendingFolderId] = useState<string | null>(null);
+
+  const handleCreate = (folderId?: string | null) => {
+    setPendingFolderId(folderId ?? null);
     setEditingTemplate(null);
     setIsCreatingFromBuiltIn(false);
     setEditorOpen(true);
@@ -178,7 +181,16 @@ export function TemplateWorkspacePage({ onBack }: TemplateWorkspacePageProps) {
     if (editingTemplate && !isCreatingFromBuiltIn) {
       await updateTemplate(editingTemplate.id, data as UpdateTemplateData);
     } else {
+      // folder_id is included in data by TemplateEditor; pendingFolderId is used as the initial default
       await createTemplate(data as CreateTemplateData);
+    }
+  };
+
+  const handleMoveTemplate = async (template: Template, targetFolderId: string | null) => {
+    try {
+      await updateTemplate(template.id, { folder_id: targetFolderId });
+    } catch (err: any) {
+      console.error("Move failed:", err);
     }
   };
 
@@ -275,10 +287,12 @@ export function TemplateWorkspacePage({ onBack }: TemplateWorkspacePageProps) {
         onCreate={handleCreate}
         onUseBuiltIn={handleUseBuiltIn}
         onChangeScope={handleOpenScopeChange}
+        onMoveTemplate={handleMoveTemplate}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        groups={groups}
       />
 
       {/* Template Editor Dialog */}
@@ -294,6 +308,7 @@ export function TemplateWorkspacePage({ onBack }: TemplateWorkspacePageProps) {
           groups={groups}
           onSave={handleSave}
           isCreating={isCreatingFromBuiltIn || !editingTemplate}
+          initialFolderId={pendingFolderId}
         />
       )}
 

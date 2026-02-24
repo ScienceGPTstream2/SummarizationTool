@@ -37,6 +37,7 @@ class TemplateService:
         variables: Optional[List[Dict[str, Any]]] = None,
         tags: Optional[List[str]] = None,
         is_immutable: bool = False,
+        folder_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new template.
@@ -97,6 +98,9 @@ class TemplateService:
         else:  # global - only via service role
             data["owner_user_id"] = None
             data["owner_group_id"] = None
+
+        if folder_id:
+            data["folder_id"] = folder_id
 
         result = self.db.client.table("prompt_templates").insert(data).execute()
 
@@ -262,6 +266,7 @@ class TemplateService:
             "variables",
             "tags",
             "is_immutable",
+            "folder_id",
         }
         data = {k: v for k, v in updates.items() if k in allowed}
 

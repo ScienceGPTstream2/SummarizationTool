@@ -171,6 +171,22 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(
     isAuthCallback ? "auth_callback" : "upload"
   );
+  // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
+  // Used so Back buttons on those pages return to the right place.
+  const [previousWorkflowStep, setPreviousWorkflowStep] = useState<Step>("upload");
+
+  // Wrapper so navigating to a tool page always records where we came from
+  const navigateTo = (step: Step) => {
+    const toolOnlySteps: Step[] = ["templates", "groups", "history", "executive"];
+    if (toolOnlySteps.includes(step)) {
+      // Only save the return destination when we're currently on a workflow step
+      if (!toolOnlySteps.includes(currentStep)) {
+        setPreviousWorkflowStep(currentStep);
+      }
+    }
+    setCurrentStep(step);
+  };
+
   const [documentData, setDocumentData] = useState<DocumentData>({
     file: null,
     parser: "",
@@ -477,44 +493,38 @@ export default function App() {
       setCurrentStep("study_selection");
     } else if (currentStep === "evaluation") {
       setCurrentStep("extraction");
-    } else if (currentStep === "executive") {
-      // Clear document data when going back from executive to start fresh
-      setDocumentData({
-        file: null,
-        parser: "",
-        extractedText: "",
-        annotatedOutput: "",
-        studyType: "",
-        selectedModel: "",
-        entities: [],
-        finalSummary: "",
-        uploadedFiles: [],
-      });
-      sessionCreationInProgressRef.current = false;
-      // Reset client session ID to start fresh metrics
-      import("./utils/session").then(({ resetSessionId }) => {
-        resetSessionId();
-      });
-      setCurrentStep("upload");
-    } else if (currentStep === "history") {
-      // Clear document data when going back from history to start fresh
-      setDocumentData({
-        file: null,
-        parser: "",
-        extractedText: "",
-        annotatedOutput: "",
-        studyType: "",
-        selectedModel: "",
-        entities: [],
-        finalSummary: "",
-        uploadedFiles: [],
-      });
-      sessionCreationInProgressRef.current = false;
-      // Reset client session ID to start fresh metrics
-      import("./utils/session").then(({ resetSessionId }) => {
-        resetSessionId();
-      });
-      setCurrentStep("upload");
+    } else if (
+      currentStep === "executive" ||
+      currentStep === "templates" ||
+      currentStep === "groups" ||
+      currentStep === "history"
+    ) {
+      // Return to the workflow step the user came from
+      if (
+        currentStep === "executive" ||
+        currentStep === "history"
+      ) {
+        // Clear document data and start fresh when leaving executive/history
+        setDocumentData({
+          file: null,
+          parser: "",
+          extractedText: "",
+          annotatedOutput: "",
+          studyType: "",
+          selectedModel: "",
+          entities: [],
+          finalSummary: "",
+          uploadedFiles: [],
+        });
+        sessionCreationInProgressRef.current = false;
+        import("./utils/session").then(({ resetSessionId }) => {
+          resetSessionId();
+        });
+        setCurrentStep("upload");
+      } else {
+        // templates / groups: just go back to where the user was
+        setCurrentStep(previousWorkflowStep);
+      }
     }
   };
 
@@ -872,9 +882,9 @@ export default function App() {
                   const avgScore =
                     evalResult.metrics.length > 0
                       ? evalResult.metrics.reduce(
-                          (sum: number, m: any) => sum + m.score,
-                          0
-                        ) / evalResult.metrics.length
+                        (sum: number, m: any) => sum + m.score,
+                        0
+                      ) / evalResult.metrics.length
                       : 0;
                   return {
                     ...evalResult,
@@ -966,9 +976,9 @@ export default function App() {
                       const avgScore =
                         evalResult.metrics.length > 0
                           ? evalResult.metrics.reduce(
-                              (sum: number, m: any) => sum + (m.score || 0),
-                              0
-                            ) / evalResult.metrics.length
+                            (sum: number, m: any) => sum + (m.score || 0),
+                            0
+                          ) / evalResult.metrics.length
                           : 0;
                       return {
                         ...evalResult,
@@ -1023,7 +1033,7 @@ export default function App() {
           selectedSourceModels: evalConfig.selected_source_models || [],
           customEvaluationSteps:
             evalConfig.custom_evaluation_steps &&
-            Object.keys(evalConfig.custom_evaluation_steps).length > 0
+              Object.keys(evalConfig.custom_evaluation_steps).length > 0
               ? evalConfig.custom_evaluation_steps
               : undefined, // Let EvaluationPage merge with its own defaults
         },
@@ -1045,7 +1055,7 @@ export default function App() {
           // Get ground truth from files_config first, fallback to evaluation results
           const groundTruth =
             filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
-              e.name
+            e.name
             ] ||
             entityEvaluations.find((ev: any) => ev.ground_truth)
               ?.ground_truth ||
@@ -1126,9 +1136,9 @@ export default function App() {
               const avgScore =
                 evalResult.metrics.length > 0
                   ? evalResult.metrics.reduce(
-                      (sum: number, m: any) => sum + m.score,
-                      0
-                    ) / evalResult.metrics.length
+                    (sum: number, m: any) => sum + m.score,
+                    0
+                  ) / evalResult.metrics.length
                   : 0;
               return {
                 ...evalResult,
@@ -1207,9 +1217,9 @@ export default function App() {
                     const avgScore =
                       evalResult.metrics.length > 0
                         ? evalResult.metrics.reduce(
-                            (sum: number, m: any) => sum + (m.score || 0),
-                            0
-                          ) / evalResult.metrics.length
+                          (sum: number, m: any) => sum + (m.score || 0),
+                          0
+                        ) / evalResult.metrics.length
                         : 0;
                     return {
                       ...evalResult,
@@ -1284,11 +1294,10 @@ export default function App() {
 
       // Determine the step to restore to
       // Skip "upload" step since restored sessions don't have actual File objects
+      const toolOnlySteps = ["login", "history", "upload", "templates", "groups", "executive"];
       const validLastStep =
         sessionData.last_step &&
-        sessionData.last_step !== "login" &&
-        sessionData.last_step !== "history" &&
-        sessionData.last_step !== "upload"; // Skip upload - files are already "uploaded"
+        !toolOnlySteps.includes(sessionData.last_step);
 
       if (validLastStep) {
         console.log("Restoring to last step:", sessionData.last_step);
@@ -1424,7 +1433,7 @@ export default function App() {
                 {currentStep !== "executive" && (
                   <RainbowButton
                     size="sm"
-                    onClick={() => setCurrentStep("executive")}
+                    onClick={() => navigateTo("executive")}
                     className="!rounded-md"
                   >
                     <Briefcase className="h-4 w-4 mr-2" />
@@ -1436,7 +1445,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("templates")}
+                    onClick={() => navigateTo("templates")}
                   >
                     <FileText className="h-4 w-4 mr-2" />
                     Templates
@@ -1447,7 +1456,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("groups")}
+                    onClick={() => navigateTo("groups")}
                   >
                     <Users className="h-4 w-4 mr-2" />
                     Groups
@@ -1458,7 +1467,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("history")}
+                    onClick={() => navigateTo("history")}
                   >
                     <Clock className="h-4 w-4 mr-2" />
                     History

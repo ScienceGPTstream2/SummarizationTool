@@ -32,6 +32,7 @@ import {
   GripVertical,
   ChevronDown,
   ChevronRight,
+  Folder,
 } from "lucide-react";
 import {
   Template,
@@ -40,6 +41,7 @@ import {
   TemplateEntity,
 } from "../../hooks/useTemplates";
 import { Group } from "../../hooks/useGroups";
+import { useFolders } from "../../hooks/useFolders";
 
 interface TemplateEditorProps {
   open: boolean;
@@ -48,6 +50,8 @@ interface TemplateEditorProps {
   groups: Group[];
   onSave: (data: CreateTemplateData | UpdateTemplateData) => Promise<void>;
   isCreating?: boolean;
+  /** Pre-selected folder when navigating from within a folder */
+  initialFolderId?: string | null;
 }
 
 export function TemplateEditor({
@@ -57,6 +61,7 @@ export function TemplateEditor({
   groups,
   onSave,
   isCreating = false,
+  initialFolderId,
 }: TemplateEditorProps) {
   const isEdit = !!template && !isCreating;
 
@@ -79,6 +84,22 @@ export function TemplateEditor({
     new Set([0])
   );
 
+  // Folder selection (create mode only)
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("__root__");
+  const { folders: availableFolders, fetchFolders } = useFolders();
+
+  // When scope or group changes in create mode, reload available folders
+  useEffect(() => {
+    if (isEdit) return;
+    fetchFolders(
+      scope,
+      null,
+      scope === "group" && ownerGroupId ? ownerGroupId : null
+    );
+    setSelectedFolderId("__root__"); // reset folder when scope changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, ownerGroupId, isEdit]);
+
   // Initialize form from template
   useEffect(() => {
     if (template) {
@@ -92,9 +113,9 @@ export function TemplateEditor({
       const templateEntities =
         template.entities?.length > 0
           ? template.entities.map((e) => ({
-              name: e.name,
-              prompt: e.prompt,
-            }))
+            name: e.name,
+            prompt: e.prompt,
+          }))
           : [{ name: "", prompt: "" }];
       setEntities(templateEntities);
       setTags(template.tags?.join(", ") || "");
@@ -105,6 +126,10 @@ export function TemplateEditor({
     }
     setChangeSummary("");
     setError(null);
+    // Initialise folder selection
+    if (!template) {
+      setSelectedFolderId(initialFolderId ?? "__root__");
+    }
   }, [template, open]);
 
   const resetForm = () => {
@@ -122,6 +147,7 @@ export function TemplateEditor({
     setChangeSummary("");
     setError(null);
     setExpandedEntities(new Set([0]));
+    setSelectedFolderId(initialFolderId ?? "__root__");
   };
 
   const addEntity = () => {
@@ -214,6 +240,7 @@ export function TemplateEditor({
           system_prompt: systemPrompt.trim() || undefined,
           summary_prompt: summaryPrompt.trim() || undefined,
           tags: parsedTags.length > 0 ? parsedTags : undefined,
+          folder_id: selectedFolderId === "__root__" ? null : selectedFolderId,
         };
         await onSave(data);
       }
@@ -391,6 +418,32 @@ export function TemplateEditor({
                             {groups.map((g) => (
                               <SelectItem key={g.id} value={g.id}>
                                 {g.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Folder picker — shown when folders exist for this scope */}
+                    {availableFolders.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="flex items-center gap-1.5">
+                          <Folder className="h-3.5 w-3.5 text-amber-500" />
+                          Folder
+                        </Label>
+                        <Select
+                          value={selectedFolderId}
+                          onValueChange={setSelectedFolderId}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="No folder (root)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__root__">📂 Root (no folder)</SelectItem>
+                            {availableFolders.map((f) => (
+                              <SelectItem key={f.id} value={f.id}>
+                                📁 {f.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
