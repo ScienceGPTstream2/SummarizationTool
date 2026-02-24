@@ -331,6 +331,21 @@ const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
       gfm: true,
     });
     const elements = await converter.toSection();
+
+    // OOXML spec requires TableCells to end with a Paragraph.
+    // Word auto-repairs this locally, but Protected View strict mode blocks it.
+    if (elements.length > 0) {
+      const lastElement = elements[elements.length - 1];
+      if (
+        lastElement instanceof Table ||
+        (lastElement &&
+          lastElement.constructor &&
+          lastElement.constructor.name === "Table")
+      ) {
+        elements.push(new Paragraph({ text: "" }));
+      }
+    }
+
     return elements.length > 0 ? elements : [new Paragraph({ text: "" })];
   } catch {
     // Fallback: if markdown-docx fails, just render as plain text
