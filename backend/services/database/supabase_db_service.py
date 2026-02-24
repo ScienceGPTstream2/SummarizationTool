@@ -370,6 +370,26 @@ class SupabaseDBService:
 
         return self.update_document(document_id, data)
 
+    def get_parse_cost_by_file_hash(self, file_hash: str) -> Optional[float]:
+        """Cross-session lookup: find any prior parse_cost stored for this file."""
+        try:
+            result = (
+                self.client.table("documents")
+                .select("parse_cost")
+                .eq("file_hash", file_hash)
+                .not_.is_("parse_cost", "null")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                val = result.data[0].get("parse_cost")
+                return float(val) if val and float(val) > 0 else None
+            return None
+        except Exception as e:
+            print(f"[DB] get_parse_cost_by_file_hash failed: {e}")
+            return None
+
     # ==========================================
     # Extraction Result Operations
     # ==========================================

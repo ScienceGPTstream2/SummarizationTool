@@ -68,7 +68,7 @@ class LlamaLLMClient:
         # Try to find in backend/core/ directory (where secrets.toml is)
         try:
             # Try relative to this file
-            core_dir = Path(__file__).resolve().parents[1] / "core"
+            core_dir = Path(__file__).resolve().parents[2] / "core"
             if core_dir.exists():
                 json_files = list(core_dir.glob("*.json"))
                 if json_files:
@@ -111,7 +111,8 @@ class LlamaLLMClient:
         location_override: Optional[str] = None,
         region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
-        request_timeout: int = 120,
+        request_timeout: int = 300,
+        max_retries: int = 5,
     ) -> Dict[str, Any]:
         # Use overrides if provided, otherwise fall back to instance variables
         used_project_id = project_id_override or self.project_id
@@ -137,11 +138,28 @@ class LlamaLLMClient:
                 "error": "Llama project ID, region, or service account missing.",
             }
 
-        # Get access token from service account
+        # Get access token from service account (with explicit timeout to catch VM firewall hangs)
         try:
-            access_token = await asyncio.to_thread(
-                self._get_access_token, used_service_account_path
+            _auth_start = time.time()
+            access_token = await asyncio.wait_for(
+                asyncio.to_thread(self._get_access_token, used_service_account_path),
+                timeout=20.0,
             )
+            print(
+                f"[LLMService] Token obtained in {time.time() - _auth_start:.2f}s"
+            )
+        except asyncio.TimeoutError:
+            print(
+                "[LLMService] CRITICAL: Token fetch timed out after 20s — "
+                "VM firewall may be blocking outbound HTTPS to oauth2.googleapis.com"
+            )
+            return {
+                "success": False,
+                "error": (
+                    "Authentication timed out (20s). Check VM outbound HTTPS access "
+                    "to oauth2.googleapis.com (port 443)."
+                ),
+            }
         except Exception as e:
             print(f"[LLMService] Failed to authenticate: {e}")
             return {
@@ -175,8 +193,7 @@ class LlamaLLMClient:
 
         print(f"[LLMService] Request payload: {json.dumps(payload, indent=2)}")
 
-        # Retry configuration
-        max_retries = 5
+        # Retry configuration (max_retries comes from method parameter)
         base_delay = 1.0  # Start with 1 second
         max_delay = 30.0  # Cap at 30 seconds
         retryable_status_codes = [429, 500, 503, 504]  # Rate limit and server errors
@@ -206,7 +223,7 @@ class LlamaLLMClient:
 
                 resp = await asyncio.to_thread(
                     lambda: requests.post(
-                        url, headers=headers, json=payload, timeout=request_timeout
+                        url, headers=headers, json=payload, timeout=(15, request_timeout)
                     )
                 )
                 duration = time.time() - start_time
@@ -295,6 +312,9 @@ class LlamaLLMClient:
                     }
 
             except requests.exceptions.RequestException as e:
+                print(
+                    f"[LLMService] RequestException type={type(e).__name__}: {str(e)}"
+                )
                 if attempt < max_retries - 1:
                     print(
                         f"[LLMService] Request exception, will retry. Error: {str(e)}"
@@ -305,7 +325,7 @@ class LlamaLLMClient:
                     print(f"[LLMService] Max retries reached after request exception")
                     return {
                         "success": False,
-                        "error": f"Request failed after {max_retries} attempts: {str(e)}",
+                        "error": f"Request failed ({type(e).__name__}) after {max_retries} attempts: {str(e)}",
                     }
 
         # Extract content safely (we should have a successful response at this point)
@@ -827,5 +847,49 @@ Text: {essential_markdown}"""
             location_override=location_override,
             region_override=region_override,
             service_account_path_override=service_account_path_override,
-            request_timeout=240,
+            request_timeout=300,
         )
+
+    async def warm_up(self) -> None:
+        """Send a minimal request to each Llama model region to prevent cold-start timeouts.
+
+        Vertex AI MaaS scales model instances to zero after ~5 minutes of inactivity.
+        The first request after idle takes 90-150s+ to cold-start. Sending a tiny
+        ping on app startup and every 4 minutes keeps instances warm so real requests
+        respond in 2-7s.
+        """
+        if self.disabled:
+            return
+
+        # One ping per unique region — warms all models in that region.
+        # Both regions are pinged IN PARALLEL so the total warm-up time is
+        # max(us-east5, us-central1) instead of the sum. This prevents a
+        # 300s sequential warm-up from causing the first region to go cold
+        # again before the second region finishes.
+        regions_to_warm = {
+            "us-east5": "meta/llama-4-maverick-17b-128e-instruct-maas",
+            "us-central1": "meta/llama-3.3-70b-instruct-maas",
+        }
+
+        async def _ping(region: str, model: str) -> None:
+            try:
+                print(f"[LlamaWarmUp] Pinging {model} in {region}...")
+                t0 = time.time()
+                result = await self._call_llama_api(
+                    model_name=model,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                    temperature=0.0,
+                    region_override=region,
+                    request_timeout=300,  # Allow full cold-start window
+                    max_retries=1,        # Single attempt — bail fast on 300s+ cold starts
+                )
+                elapsed = time.time() - t0
+                if result.get("success"):
+                    print(f"[LlamaWarmUp] ✅ {region} warm in {elapsed:.1f}s")
+                else:
+                    print(f"[LlamaWarmUp] ⚠️  {region} ping failed in {elapsed:.1f}s: {result.get('error')}")
+            except Exception as e:
+                print(f"[LlamaWarmUp] ⚠️  {region} ping error: {e}")
+
+        await asyncio.gather(*[_ping(region, model) for region, model in regions_to_warm.items()])

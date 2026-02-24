@@ -11,6 +11,7 @@ This is the main application launcher that:
 
 import uvicorn
 from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
 import os
 import toml
 
@@ -85,6 +86,11 @@ from api import (
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application"""
 
@@ -92,6 +98,7 @@ def create_app() -> FastAPI:
         title="Document Summarization API",
         description="Backend API for the Document Summarization Tool",
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     # Setup middleware

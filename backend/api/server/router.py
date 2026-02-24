@@ -484,6 +484,7 @@ async def get_session_metrics(http_request: Request):
                         "duration": call.duration,
                         "cost": round(call.cost, 6),
                         "timestamp": call.timestamp,
+                        "document_name": call.document_name,
                     }
                     for call in metrics.calls
                 ],

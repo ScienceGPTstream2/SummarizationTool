@@ -14,6 +14,7 @@ class CallMetric:
     duration: float
     cost: float
     timestamp: str
+    document_name: Optional[str] = None
 
 
 @dataclass
@@ -172,6 +173,7 @@ class CostTracker:
         completion_tokens: Optional[int],
         duration: Optional[float],
         page_count: Optional[int] = None,
+        document_name: Optional[str] = None,
     ) -> None:
         if not session_id:
             return
@@ -204,6 +206,7 @@ class CostTracker:
                 duration=duration,
                 cost=cost,
                 timestamp=datetime.utcnow().isoformat(),
+                document_name=document_name,
             )
         )
 

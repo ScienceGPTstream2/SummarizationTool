@@ -299,11 +299,46 @@ async def process_uploaded_file(
 
         try:
             from services.telemetry.cost_tracker import cost_tracker
+            from services.database.supabase_db_service import get_db_service
 
             session_id = (
                 http_request.headers.get("X-Session-Id") if http_request else None
             )
             metadata = result.get("metadata", {})
+
+            # Persist parse_cost to documents.parse_cost column and look up real filename
+            _parse_cost = cost_tracker.estimate_call_cost(
+                provider="azure",
+                model=result.get("processor_used", "unknown"),
+                prompt_tokens=0,
+                completion_tokens=0,
+                duration=conversion_duration,
+                page_count=metadata.get("page_count") or 0,
+            )
+            print(
+                f"[PARSE_COST] Fresh doc parse_cost={_parse_cost}, "
+                f"session_id={session_id}, file_hash={file_hash}"
+            )
+            _original_filename = None
+            if session_id:
+                _db = get_db_service()
+                _docs = _db.get_documents_by_session(session_id)
+                _doc = next(
+                    (d for d in _docs if d.get("file_hash") == file_hash), None
+                )
+                if _doc:
+                    _original_filename = _doc.get("filename")
+                    _db.update_document(_doc["id"], {"parse_cost": _parse_cost})
+                    print(
+                        f"[PARSE_COST] Persisted parse_cost={_parse_cost} "
+                        f"to doc {_doc['id']}"
+                    )
+                else:
+                    print(
+                        f"[PARSE_COST] WARNING: No doc row found for "
+                        f"file_hash={file_hash} in session={session_id}"
+                    )
+
             cost_tracker.record_call(
                 session_id=session_id,
                 provider="azure",
@@ -312,8 +347,10 @@ async def process_uploaded_file(
                 completion_tokens=0,
                 duration=conversion_duration,
                 page_count=metadata.get("page_count") or 0,
+                document_name=_original_filename or file_path.name,
             )
         except Exception as e:
+            _parse_cost = 0.0
             print(f"[COST_TRACKER] Failed to record document processing metrics: {e}")
 
         if not result["success"]:

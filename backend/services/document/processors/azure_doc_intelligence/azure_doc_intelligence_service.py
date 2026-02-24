@@ -345,6 +345,7 @@ class AzureDocIntelligenceService:
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
                 "conversion_time": conversion_time,
+                "parse_duration_seconds": conversion_time,
                 "content_length": len(markdown_content),
                 "page_count": len(result.pages) if result.pages else 0,
                 "tables_found": len(result.tables) if result.tables else 0,

@@ -32,6 +32,7 @@ interface SessionMetricsData {
     duration: number;
     cost: number;
     timestamp: string;
+    document_name?: string | null;
   }>;
 }
 
@@ -104,7 +105,44 @@ export function SessionMetrics() {
     providerRows.sort((a, b) => b.totalCost - a.totalCost);
     modelRows.sort((a, b) => b.totalCost - a.totalCost);
 
-    return { providerRows, modelRows };
+    const DOC_MODELS = new Set(["azure_doc_intelligence", "docling"]);
+    const docModelStats = new Map<
+      string,
+      {
+        provider: string;
+        docs: Array<{ name: string; duration: number; cost: number }>;
+        totalCost: number;
+        totalLatency: number;
+      }
+    >();
+    calls
+      .filter((call) => DOC_MODELS.has(call.model))
+      .forEach((call) => {
+        const key = call.model;
+        const entry = docModelStats.get(key) || {
+          provider: call.provider || "azure",
+          docs: [],
+          totalCost: 0,
+          totalLatency: 0,
+        };
+        entry.docs.push({
+          name: call.document_name || "Unknown document",
+          duration: call.duration || 0,
+          cost: call.cost || 0,
+        });
+        entry.totalCost += call.cost || 0;
+        entry.totalLatency += call.duration || 0;
+        docModelStats.set(key, entry);
+      });
+    const docRows = Array.from(docModelStats.entries()).map(([model, stats]) => ({
+      model,
+      provider: stats.provider,
+      docs: stats.docs,
+      totalCost: stats.totalCost,
+      avgLatency: stats.docs.length ? stats.totalLatency / stats.docs.length : 0,
+    }));
+
+    return { providerRows, modelRows, docRows };
   }, [metrics]);
 
   useEffect(() => {
@@ -295,6 +333,67 @@ export function SessionMetrics() {
               )}
             </CardContent>
           </Card>
+
+          {summaries.docRows.length > 0 && (
+            <Card className="border border-border">
+              <CardContent className="pt-4">
+                <h3 className="text-sm font-semibold mb-3">
+                  Document Processing
+                </h3>
+                <div className="w-full overflow-x-auto">
+                  <Table className="table-auto min-w-[620px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Processor</TableHead>
+                        <TableHead>Document</TableHead>
+                        <TableHead className="text-right">Latency</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {summaries.docRows.flatMap((row) => [
+                        ...row.docs.map((doc, i) => (
+                          <TableRow key={`${row.model}-doc-${i}`}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              {i === 0 ? row.model : ""}
+                            </TableCell>
+                            <TableCell className="break-words">
+                              {doc.name}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {doc.duration.toFixed(2)}s
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${doc.cost.toFixed(4)}
+                            </TableCell>
+                          </TableRow>
+                        )),
+                        ...(row.docs.length > 1
+                          ? [
+                              <TableRow
+                                key={`${row.model}-total`}
+                                className="border-t bg-muted/20"
+                              >
+                                <TableCell />
+                                <TableCell className="text-muted-foreground text-xs">
+                                  Total ({row.docs.length} docs)
+                                </TableCell>
+                                <TableCell className="text-right text-xs">
+                                  {row.avgLatency.toFixed(2)}s avg
+                                </TableCell>
+                                <TableCell className="text-right text-xs">
+                                  ${row.totalCost.toFixed(4)}
+                                </TableCell>
+                              </TableRow>,
+                            ]
+                          : []),
+                      ])}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </DialogContent>
     </Dialog>

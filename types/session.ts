@@ -18,6 +18,7 @@ export interface SessionConfiguration {
 export interface SessionDocument {
   file_hash: string;
   filename: string;
+  parse_cost?: number | null;
 }
 
 export interface ExtractionResult {
