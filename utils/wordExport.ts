@@ -336,7 +336,12 @@ const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
     // Word auto-repairs this locally, but Protected View strict mode blocks it.
     if (elements.length > 0) {
       const lastElement = elements[elements.length - 1];
-      if (lastElement instanceof Table || (lastElement && lastElement.constructor && lastElement.constructor.name === "Table")) {
+      if (
+        lastElement instanceof Table ||
+        (lastElement &&
+          lastElement.constructor &&
+          lastElement.constructor.name === "Table")
+      ) {
         elements.push(new Paragraph({ text: "" }));
       }
     }
@@ -1018,7 +1023,7 @@ export async function downloadEvaluationReport(
       const normalizedName = metricName.toLowerCase();
       const steps =
         documentData.evaluationConfig?.customEvaluationSteps?.[
-        normalizedName
+          normalizedName
         ] || DEFAULT_METRIC_STEPS[normalizedName];
 
       if (steps && steps.length > 0) {
