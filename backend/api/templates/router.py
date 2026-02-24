@@ -6,6 +6,7 @@ from typing import Optional, List, Any
 
 from core.dependencies import get_current_user
 from services.templates.template_service import get_template_service
+from services.templates.folder_service import get_folder_service
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -38,6 +39,7 @@ class CreateTemplateRequest(BaseModel):
     variables: Optional[List[VariableModel]] = None
     tags: Optional[List[str]] = None
     is_immutable: bool = False
+    folder_id: Optional[str] = None
 
 
 class UpdateTemplateRequest(BaseModel):
@@ -51,6 +53,7 @@ class UpdateTemplateRequest(BaseModel):
     tags: Optional[List[str]] = None
     is_immutable: Optional[bool] = None
     change_summary: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class SetImmutableRequest(BaseModel):
@@ -70,6 +73,28 @@ class ForkTemplateRequest(BaseModel):
 class ChangeScopeRequest(BaseModel):
     new_scope: str  # 'user', 'group', or 'global'
     owner_group_id: Optional[str] = None  # Required when new_scope='group'
+
+
+class CreateFolderRequest(BaseModel):
+    name: str
+    scope: str  # 'user', 'group', 'global'
+    parent_id: Optional[str] = None
+    owner_group_id: Optional[str] = None  # Required for group scope
+
+
+class RenameFolderRequest(BaseModel):
+    name: str
+
+
+class FolderResponse(BaseModel):
+    id: str
+    name: str
+    scope: str
+    owner_user_id: Optional[str]
+    owner_group_id: Optional[str]
+    parent_id: Optional[str]
+    created_by: Optional[str]
+    created_at: str
 
 
 class TemplateResponse(BaseModel):
@@ -93,6 +118,7 @@ class TemplateResponse(BaseModel):
     can_edit: Optional[bool] = None
     is_owner: Optional[bool] = None
     group_name: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class VersionResponse(BaseModel):
@@ -178,12 +204,105 @@ async def create_template(
             ),
             tags=request.tags,
             is_immutable=request.is_immutable,
+            folder_id=request.folder_id,
         )
         template["can_edit"] = True
         template["is_owner"] = True
         return template
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==========================================
+# Folder Endpoints  (must be before /{template_id} to avoid route conflict)
+# ==========================================
+
+
+@router.get("/folders", response_model=List[FolderResponse])
+async def list_folders(
+    scope: str = Query(..., description="Scope: user, group, or global"),
+    parent_id: Optional[str] = Query(None),
+    owner_group_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List folders the current user can see for a given scope."""
+    service = get_folder_service()
+    try:
+        folders = service.list_folders(
+            user_id=current_user["id"],
+            scope=scope,
+            parent_id=parent_id,
+            owner_group_id=owner_group_id,
+        )
+        return folders
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/folders", response_model=FolderResponse, status_code=201)
+async def create_folder(
+    request: CreateFolderRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new folder."""
+    service = get_folder_service()
+    try:
+        folder = service.create_folder(
+            user_id=current_user["id"],
+            name=request.name,
+            scope=request.scope,
+            parent_id=request.parent_id,
+            owner_group_id=request.owner_group_id,
+        )
+        return folder
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderResponse)
+async def rename_folder(
+    folder_id: str,
+    request: RenameFolderRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Rename a folder."""
+    service = get_folder_service()
+    try:
+        folder = service.rename_folder(
+            user_id=current_user["id"],
+            folder_id=folder_id,
+            new_name=request.name,
+        )
+        return folder
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/folders/{folder_id}", status_code=204)
+async def delete_folder(
+    folder_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a folder (must be empty)."""
+    service = get_folder_service()
+    try:
+        service.delete_folder(
+            user_id=current_user["id"],
+            folder_id=folder_id,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==========================================
+# Template by ID
+# ==========================================
 
 
 @router.get("/{template_id}", response_model=TemplateResponse)
@@ -453,3 +572,6 @@ async def remove_permission(
             status_code=403,
             detail="Not authorized to remove permissions",
         )
+
+
+# ==========================================
