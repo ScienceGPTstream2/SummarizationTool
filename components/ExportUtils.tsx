@@ -311,6 +311,16 @@ const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
       gfm: true,
     });
     const elements = await converter.toSection();
+
+    // OOXML spec requires TableCells to end with a Paragraph.
+    // Word auto-repairs this locally, but Protected View strict mode blocks it.
+    if (elements.length > 0) {
+      const lastElement = elements[elements.length - 1];
+      if (lastElement instanceof Table || (lastElement && lastElement.constructor && lastElement.constructor.name === "Table")) {
+        elements.push(new Paragraph({ text: "" }));
+      }
+    }
+
     return elements.length > 0 ? elements : [new Paragraph({ text: "" })];
   } catch {
     return [
@@ -663,14 +673,14 @@ export const generateMarkdownDocument = (
 | Entity | Extracted Information |
 |--------|----------------------|
 ${documentData.entities
-  .filter((e) => e.extracted)
-  .map((entity) => {
-    const meta = entity.duration
-      ? `<br><small>Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${entity.completionTokens} (out)</small>`
-      : "";
-    return `| **${entity.name}** | ${entity.extracted}${meta} |`;
-  })
-  .join("\n")}
+      .filter((e) => e.extracted)
+      .map((entity) => {
+        const meta = entity.duration
+          ? `<br><small>Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${entity.completionTokens} (out)</small>`
+          : "";
+        return `| **${entity.name}** | ${entity.extracted}${meta} |`;
+      })
+      .join("\n")}
 
 ## Final Summary
 
@@ -681,8 +691,8 @@ ${documentData.finalSummary}
 The following entities were configured for extraction:
 
 ${documentData.entities
-  .map(
-    (entity, index) => `
+      .map(
+        (entity, index) => `
 ### ${index + 1}. ${entity.name}
 
 **Prompt:**
@@ -695,8 +705,8 @@ ${entity.extracted || "No specific information found in the document."}
 ${entity.duration ? `\n<small>Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${entity.completionTokens} (out)</small>` : ""}
 
 `
-  )
-  .join("\n")}
+      )
+      .join("\n")}
 
 ---
 
