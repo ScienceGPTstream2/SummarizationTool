@@ -69,9 +69,7 @@ import {
   generateMarkdownDocument,
   downloadFile,
 } from "./ExportUtils";
-import {
-  loadStudyTypeTemplate,
-} from "./TemplateLoader";
+import { loadStudyTypeTemplate } from "./TemplateLoader";
 import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
@@ -124,12 +122,12 @@ interface Entity {
 
 type FileStatus = {
   status:
-  | "idle"
-  | "queued"
-  | "processing"
-  | "generating_summary"
-  | "completed"
-  | "error";
+    | "idle"
+    | "queued"
+    | "processing"
+    | "generating_summary"
+    | "completed"
+    | "error";
   currentEntityIndex: number;
   totalEntities: number;
   currentEntityName?: string;
@@ -260,7 +258,7 @@ export function EntityExtractionPage({
   );
   const [paragraphSystemPrompt, setParagraphSystemPrompt] = useState(
     currentFile?.paragraphSystemPrompt ||
-    "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy."
+      "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy."
   );
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -473,10 +471,10 @@ export function EntityExtractionPage({
       setSummaryPrompt(file.summaryPrompt || "");
       setShowResults(
         !!file.finalSummary ||
-        !!(
-          file.summariesByModel &&
-          Object.keys(file.summariesByModel).length > 0
-        )
+          !!(
+            file.summariesByModel &&
+            Object.keys(file.summariesByModel).length > 0
+          )
       );
       // Reset extraction progress for view
       setExtractingEntities(new Set());
@@ -647,13 +645,13 @@ export function EntityExtractionPage({
           prev.map((f) =>
             f.fileId === fileId
               ? {
-                ...f,
-                paragraphSummaryModel: paragraphModelId,
-                paragraphEvaluation: {
-                  groundTruth: data.ground_truth,
-                  humanScore: f.paragraphEvaluation?.humanScore ?? null,
-                },
-              }
+                  ...f,
+                  paragraphSummaryModel: paragraphModelId,
+                  paragraphEvaluation: {
+                    groundTruth: data.ground_truth,
+                    humanScore: f.paragraphEvaluation?.humanScore ?? null,
+                  },
+                }
               : f
           )
         );
@@ -662,14 +660,14 @@ export function EntityExtractionPage({
           uploadedFiles: (prev.uploadedFiles || []).map((f) =>
             f.fileId === fileId
               ? {
-                ...f,
-                paragraphSummaryModel: paragraphModelId,
-                paragraphEvaluation: {
-                  groundTruth: data.ground_truth,
-                  humanScore:
-                    (f as any).paragraphEvaluation?.humanScore ?? null,
-                },
-              }
+                  ...f,
+                  paragraphSummaryModel: paragraphModelId,
+                  paragraphEvaluation: {
+                    groundTruth: data.ground_truth,
+                    humanScore:
+                      (f as any).paragraphEvaluation?.humanScore ?? null,
+                  },
+                }
               : f
           ),
         }));
@@ -960,7 +958,6 @@ export function EntityExtractionPage({
 
   // studyTypes removed — TemplatePicker handles both built-in and user templates
 
-
   // Get available models from backend API (includes all configured Azure and Gemini models)
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   useEffect(() => {
@@ -1190,15 +1187,15 @@ export function EntityExtractionPage({
             selected_models:
               availableModels.length > 0
                 ? availableModels
-                  .filter(
-                    (m) =>
-                      currentFile.selectedModels?.includes(m.id) ||
-                      m.id === selectedModel
-                  )
-                  .map((m) => m.id)
+                    .filter(
+                      (m) =>
+                        currentFile.selectedModels?.includes(m.id) ||
+                        m.id === selectedModel
+                    )
+                    .map((m) => m.id)
                 : (currentFile.selectedModels || [selectedModel]).filter(
-                  Boolean
-                ),
+                    Boolean
+                  ),
             entities: currentEntities.map((e) => ({
               name: e.name,
               prompt: e.prompt,
@@ -1264,7 +1261,10 @@ export function EntityExtractionPage({
     }
   };
 
-  const handleStudyTypeChange = (value: string, resolved?: ResolvedTemplate) => {
+  const handleStudyTypeChange = (
+    value: string,
+    resolved?: ResolvedTemplate
+  ) => {
     setSelectedStudyType(value);
     // Use resolved template from TemplatePicker or fall back to built-in loader
     const { entities: templateEntities, summaryPrompt: templateSummaryPrompt } =
@@ -1282,11 +1282,11 @@ export function EntityExtractionPage({
       prev.map((f) =>
         f.fileId === selectedFileId
           ? {
-            ...f,
-            studyType: value,
-            entities: templateEntities,
-            summaryPrompt: templateSummaryPrompt,
-          }
+              ...f,
+              studyType: value,
+              entities: templateEntities,
+              summaryPrompt: templateSummaryPrompt,
+            }
           : f
       )
     );
@@ -1540,7 +1540,7 @@ export function EntityExtractionPage({
           conversionId,
           selectedModelIds,
           currentFile.processingResult?.processorUsed ||
-          documentData.processorUsed,
+            documentData.processorUsed,
           signal,
           sessionIdRef.current || undefined
         );
@@ -1685,11 +1685,11 @@ export function EntityExtractionPage({
         prev.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              entities: entities.map((e, i) =>
-                i === index ? updatedEntity : e
-              ),
-            }
+                ...f,
+                entities: entities.map((e, i) =>
+                  i === index ? updatedEntity : e
+                ),
+              }
             : f
         )
       );
@@ -1700,11 +1700,11 @@ export function EntityExtractionPage({
         uploadedFiles: files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              entities: entities.map((e, i) =>
-                i === index ? updatedEntity : e
-              ),
-            }
+                ...f,
+                entities: entities.map((e, i) =>
+                  i === index ? updatedEntity : e
+                ),
+              }
             : f
         ),
       });
@@ -1789,16 +1789,16 @@ export function EntityExtractionPage({
       prev.map((f) =>
         f.fileId === fileId
           ? {
-            ...f,
-            finalSummary: f.finalSummary || summary,
-            summariesByModel: {
-              ...(f.summariesByModel || {}),
-              [modelId]: summary,
-            },
-            ...(cost != null && {
-              paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
-            }),
-          }
+              ...f,
+              finalSummary: f.finalSummary || summary,
+              summariesByModel: {
+                ...(f.summariesByModel || {}),
+                [modelId]: summary,
+              },
+              ...(cost != null && {
+                paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
+              }),
+            }
           : f
       )
     );
@@ -1807,16 +1807,16 @@ export function EntityExtractionPage({
       uploadedFiles: prev.uploadedFiles?.map((f) =>
         f.fileId === fileId
           ? {
-            ...f,
-            finalSummary: f.finalSummary || summary,
-            summariesByModel: {
-              ...(f.summariesByModel || {}),
-              [modelId]: summary,
-            },
-            ...(cost != null && {
-              paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
-            }),
-          }
+              ...f,
+              finalSummary: f.finalSummary || summary,
+              summariesByModel: {
+                ...(f.summariesByModel || {}),
+                [modelId]: summary,
+              },
+              ...(cost != null && {
+                paragraphSummaryCost: (f.paragraphSummaryCost || 0) + cost,
+              }),
+            }
           : f
       ),
     }));
@@ -1909,11 +1909,11 @@ export function EntityExtractionPage({
         prev.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              finalSummary: summary,
-              summaryPrompt,
-              paragraphSystemPrompt,
-            }
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+              }
             : f
         )
       );
@@ -1922,11 +1922,11 @@ export function EntityExtractionPage({
         uploadedFiles: prev.uploadedFiles?.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              finalSummary: summary,
-              summaryPrompt,
-              paragraphSystemPrompt,
-            }
+                ...f,
+                finalSummary: summary,
+                summaryPrompt,
+                paragraphSystemPrompt,
+              }
             : f
         ),
       }));
@@ -2109,12 +2109,12 @@ export function EntityExtractionPage({
       const updatedFilesWithEntities = files.map((f) =>
         f.fileId === fileId
           ? {
-            ...f,
-            studyType: selectedStudyType,
-            selectedModel: selectedModel,
-            entities: updatedEntities,
-            summaryPrompt: summaryPrompt,
-          }
+              ...f,
+              studyType: selectedStudyType,
+              selectedModel: selectedModel,
+              entities: updatedEntities,
+              summaryPrompt: summaryPrompt,
+            }
           : f
       );
       setFiles(updatedFilesWithEntities);
@@ -2129,12 +2129,12 @@ export function EntityExtractionPage({
         const updatedFiles = files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              studyType: selectedStudyType,
-              selectedModel: selectedModel,
-              entities: updatedEntities,
-              summaryPrompt: summaryPrompt,
-            }
+                ...f,
+                studyType: selectedStudyType,
+                selectedModel: selectedModel,
+                entities: updatedEntities,
+                summaryPrompt: summaryPrompt,
+              }
             : f
         );
         setFiles(updatedFiles);
@@ -2151,12 +2151,12 @@ export function EntityExtractionPage({
         const updatedFiles = files.map((f) =>
           f.fileId === selectedFileId
             ? {
-              ...f,
-              studyType: selectedStudyType,
-              selectedModel: selectedModel,
-              entities: updatedEntities,
-              summaryPrompt: summaryPrompt,
-            }
+                ...f,
+                studyType: selectedStudyType,
+                selectedModel: selectedModel,
+                entities: updatedEntities,
+                summaryPrompt: summaryPrompt,
+              }
             : f
         );
         setFiles(updatedFiles);
@@ -2389,13 +2389,13 @@ export function EntityExtractionPage({
                             </span>
                             {fileProcessingStatus[file.fileId]
                               ?.statusMessage && (
-                                <span className="text-xs text-amber-500">
-                                  {
-                                    fileProcessingStatus[file.fileId]
-                                      ?.statusMessage
-                                  }
-                                </span>
-                              )}
+                              <span className="text-xs text-amber-500">
+                                {
+                                  fileProcessingStatus[file.fileId]
+                                    ?.statusMessage
+                                }
+                              </span>
+                            )}
                           </div>
                         ) : isGenerating ? (
                           <div className="flex flex-col">
@@ -2404,13 +2404,13 @@ export function EntityExtractionPage({
                             </span>
                             {fileProcessingStatus[file.fileId]
                               ?.statusMessage && (
-                                <span className="text-xs text-amber-500">
-                                  {
-                                    fileProcessingStatus[file.fileId]
-                                      ?.statusMessage
-                                  }
-                                </span>
-                              )}
+                              <span className="text-xs text-amber-500">
+                                {
+                                  fileProcessingStatus[file.fileId]
+                                    ?.statusMessage
+                                }
+                              </span>
+                            )}
                           </div>
                         ) : isCompleted ? (
                           <span className="text-xs text-green-600">
@@ -2447,7 +2447,8 @@ export function EntityExtractionPage({
             <CardHeader>
               <CardTitle>Template</CardTitle>
               <CardDescription>
-                Active extraction template — change to load a different set of entities
+                Active extraction template — change to load a different set of
+                entities
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -2512,8 +2513,8 @@ export function EntityExtractionPage({
                     const filteredModels =
                       preSelectedModels.length > 0
                         ? availableModels.filter((m) =>
-                          preSelectedModels.includes(m.id)
-                        )
+                            preSelectedModels.includes(m.id)
+                          )
                         : availableModels;
 
                     return filteredModels.map((model) => (
@@ -2608,12 +2609,13 @@ export function EntityExtractionPage({
                     <div
                       key={index}
                       id={`entity - card - ${index} `}
-                      className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${isExtracting
+                      className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${
+                        isExtracting
                           ? "border-blue-300 bg-blue-50/40 shadow-md"
                           : isCompleted
                             ? "border-emerald-200 bg-emerald-50/30"
                             : "border-gray-200 bg-white"
-                        } `}
+                      } `}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -2672,7 +2674,7 @@ export function EntityExtractionPage({
                             }
                           >
                             {isExtracting &&
-                              extractingEntities.has(entity.name) ? (
+                            extractingEntities.has(entity.name) ? (
                               <Sparkles className="h-3.5 w-3.5 animate-spin" />
                             ) : entity.extracted ? (
                               <RefreshCw className="h-3.5 w-3.5" />
@@ -2848,16 +2850,17 @@ export function EntityExtractionPage({
                                             const refColor = `hsl(${(refIdx * 60) % 360}, 70%, 50%)`;
                                             const isActive =
                                               focusedReferenceByEntity[
-                                              index
+                                                index
                                               ] === refIdx;
 
                                             return (
                                               <div
                                                 key={refIdx}
-                                                className={`text - xs bg - white p - 3 rounded border - 2 transition - all cursor - pointer ${isActive
+                                                className={`text - xs bg - white p - 3 rounded border - 2 transition - all cursor - pointer ${
+                                                  isActive
                                                     ? "border-blue-500 shadow-sm bg-blue-50/60"
                                                     : "border-gray-200 hover:border-blue-400"
-                                                  } `}
+                                                } `}
                                                 style={{
                                                   borderLeftColor: refColor,
                                                   borderLeftWidth: "4px",
@@ -2906,36 +2909,36 @@ export function EntityExtractionPage({
                                     {(entity.duration != null ||
                                       entity.promptTokens != null ||
                                       entity.completionTokens != null) && (
-                                        <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm flex flex-wrap gap-6">
-                                          <div className="flex items-center gap-2">
-                                            <Hash className="h-4 w-4 text-blue-600" />
-                                            <div>
-                                              <Label className="text-xs text-gray-500 uppercase tracking-wide">
-                                                Tokens
-                                              </Label>
-                                              <div className="text-base font-semibold text-gray-900">
-                                                {entity.promptTokens ?? "-"} in /{" "}
-                                                {entity.completionTokens ?? "-"}{" "}
-                                                out
-                                              </div>
-                                            </div>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <Timer className="h-4 w-4 text-blue-600" />
-                                            <div>
-                                              <Label className="text-xs text-gray-500 uppercase tracking-wide">
-                                                Time
-                                              </Label>
-                                              <div className="text-base font-semibold text-gray-900">
-                                                {entity.duration != null
-                                                  ? entity.duration.toFixed(2)
-                                                  : "-"}
-                                                s
-                                              </div>
+                                      <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm flex flex-wrap gap-6">
+                                        <div className="flex items-center gap-2">
+                                          <Hash className="h-4 w-4 text-blue-600" />
+                                          <div>
+                                            <Label className="text-xs text-gray-500 uppercase tracking-wide">
+                                              Tokens
+                                            </Label>
+                                            <div className="text-base font-semibold text-gray-900">
+                                              {entity.promptTokens ?? "-"} in /{" "}
+                                              {entity.completionTokens ?? "-"}{" "}
+                                              out
                                             </div>
                                           </div>
                                         </div>
-                                      )}
+                                        <div className="flex items-center gap-2">
+                                          <Timer className="h-4 w-4 text-blue-600" />
+                                          <div>
+                                            <Label className="text-xs text-gray-500 uppercase tracking-wide">
+                                              Time
+                                            </Label>
+                                            <div className="text-base font-semibold text-gray-900">
+                                              {entity.duration != null
+                                                ? entity.duration.toFixed(2)
+                                                : "-"}
+                                              s
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                             </div>
@@ -2955,7 +2958,7 @@ export function EntityExtractionPage({
                               </span>
                             </div>
                             {documentData.fileId &&
-                              documentData.conversionId ? (
+                            documentData.conversionId ? (
                               <div id={`pdf - viewer - ${index} `}>
                                 <EntityPDFViewerBeta
                                   key={`${currentFile.fileId} -${index} `}
@@ -3175,10 +3178,11 @@ export function EntityExtractionPage({
                           !selectedModel ||
                           availableModels.length === 0
                         }
-                        className={`flex-1 transition-all duration-300 ${isExtracting || isGeneratingParagraph
+                        className={`flex-1 transition-all duration-300 ${
+                          isExtracting || isGeneratingParagraph
                             ? "bg-blue-50 border-blue-300 shadow-lg"
                             : ""
-                          }`}
+                        }`}
                         size="lg"
                       >
                         {isExtracting || isGeneratingParagraph ? (
@@ -3222,7 +3226,7 @@ export function EntityExtractionPage({
                                   return "Run Entity Extraction & Generate Paragraph";
                                 const hasCurrentSummary =
                                   currentFile?.summariesByModel?.[
-                                  selectedModel
+                                    selectedModel
                                   ];
                                 if (hasCurrentSummary)
                                   return `Regenerate Paragraph with ${availableModels.find((m) => m.id === selectedModel)?.name || selectedModel}`;
@@ -3340,7 +3344,7 @@ export function EntityExtractionPage({
                                                 {/* References */}
                                                 {result.references &&
                                                   result.references.length >
-                                                  0 && (
+                                                    0 && (
                                                     <div className="pl-4 border-l-2 border-gray-200">
                                                       <p className="text-xs font-semibold text-gray-500 mb-2">
                                                         Sources:
@@ -3440,16 +3444,16 @@ export function EntityExtractionPage({
                                       {perModelSummary
                                         ? modelName
                                         : availableModels.find(
-                                          (m) =>
-                                            m.id ===
-                                            Object.keys(
-                                              currentFile.summariesByModel
-                                            )[0]
-                                        )?.name ||
-                                        Object.keys(
-                                          currentFile.summariesByModel
-                                        )[0] ||
-                                        "Unknown"}
+                                            (m) =>
+                                              m.id ===
+                                              Object.keys(
+                                                currentFile.summariesByModel
+                                              )[0]
+                                          )?.name ||
+                                          Object.keys(
+                                            currentFile.summariesByModel
+                                          )[0] ||
+                                          "Unknown"}
                                     </span>
                                     {!perModelSummary &&
                                       currentFile.finalSummary && (
@@ -3466,7 +3470,7 @@ export function EntityExtractionPage({
                         } else if (
                           isGeneratingParagraph ||
                           fileProcessingStatus[selectedFileId]?.status ===
-                          "generating_summary"
+                            "generating_summary"
                         ) {
                           return (
                             <div className="flex flex-col items-center justify-center h-full text-purple-600 animate-pulse">

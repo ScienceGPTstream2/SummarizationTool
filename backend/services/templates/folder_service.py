@@ -22,7 +22,9 @@ class FolderService:
     # Permission helpers
     # ------------------------------------------------------------------
 
-    def _can_manage_folder(self, user_id: str, scope: str, owner_group_id: Optional[str] = None) -> bool:
+    def _can_manage_folder(
+        self, user_id: str, scope: str, owner_group_id: Optional[str] = None
+    ) -> bool:
         """
         Returns True if user_id is allowed to create/modify/delete folders
         in the given scope.
@@ -76,11 +78,7 @@ class FolderService:
                            filtered by parent_id.
         For 'global' scope: returns all global folders at the requested level.
         """
-        query = (
-            self.db.client.table("template_folders")
-            .select("*")
-            .eq("scope", scope)
-        )
+        query = self.db.client.table("template_folders").select("*").eq("scope", scope)
 
         if scope == "user":
             query = query.eq("owner_user_id", user_id)
@@ -116,7 +114,9 @@ class FolderService:
             raise ValueError("Folder name cannot be empty")
 
         if not self._can_manage_folder(user_id, scope, owner_group_id):
-            raise PermissionError(f"You do not have permission to create folders in {scope} scope")
+            raise PermissionError(
+                f"You do not have permission to create folders in {scope} scope"
+            )
 
         # Validate parent belongs to the same scope/owner
         if parent_id:
@@ -159,10 +159,14 @@ class FolderService:
 
         folder = self._get_folder_owner(folder_id)
 
-        if not self._can_manage_folder(user_id, folder["scope"], folder.get("owner_group_id")):
+        if not self._can_manage_folder(
+            user_id, folder["scope"], folder.get("owner_group_id")
+        ):
             # Also allow the original creator
             if folder.get("created_by") != user_id:
-                raise PermissionError("You do not have permission to rename this folder")
+                raise PermissionError(
+                    "You do not have permission to rename this folder"
+                )
 
         result = (
             self.db.client.table("template_folders")
@@ -186,9 +190,13 @@ class FolderService:
         """
         folder = self._get_folder_owner(folder_id)
 
-        if not self._can_manage_folder(user_id, folder["scope"], folder.get("owner_group_id")):
+        if not self._can_manage_folder(
+            user_id, folder["scope"], folder.get("owner_group_id")
+        ):
             if folder.get("created_by") != user_id:
-                raise PermissionError("You do not have permission to delete this folder")
+                raise PermissionError(
+                    "You do not have permission to delete this folder"
+                )
 
         # Check if folder still has templates
         templates_result = (
@@ -198,7 +206,9 @@ class FolderService:
             .execute()
         )
         if templates_result.count and templates_result.count > 0:
-            raise ValueError("Cannot delete a folder that still contains templates. Move or delete them first.")
+            raise ValueError(
+                "Cannot delete a folder that still contains templates. Move or delete them first."
+            )
 
         # Check if folder still has subfolders
         subfolders_result = (

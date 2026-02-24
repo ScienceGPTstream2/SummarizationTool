@@ -67,12 +67,11 @@ import { FolderCard } from "./FolderCard";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-
 // Stack entry for breadcrumb navigation
 interface BreadcrumbEntry {
-  id: string | null;   // null = root
+  id: string | null; // null = root
   name: string;
-  groupId?: string;    // only set when inside a group (group scope)
+  groupId?: string; // only set when inside a group (group scope)
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -89,7 +88,10 @@ interface TemplateListProps {
   onChangeScope?: (template: Template) => void;
   onCreate: (folderId?: string | null) => void;
   onUseBuiltIn: (studyTypeId: string) => void;
-  onMoveTemplate?: (template: Template, folderId: string | null) => Promise<void>;
+  onMoveTemplate?: (
+    template: Template,
+    folderId: string | null
+  ) => Promise<void>;
   activeTab: string;
   onTabChange: (tab: string) => void;
   searchQuery: string;
@@ -102,19 +104,27 @@ interface TemplateListProps {
 
 const scopeIcon = (scope: string) => {
   switch (scope) {
-    case "user": return <User className="h-3 w-3" />;
-    case "group": return <Users className="h-3 w-3" />;
-    case "global": return <Globe className="h-3 w-3" />;
-    default: return <FileText className="h-3 w-3" />;
+    case "user":
+      return <User className="h-3 w-3" />;
+    case "group":
+      return <Users className="h-3 w-3" />;
+    case "global":
+      return <Globe className="h-3 w-3" />;
+    default:
+      return <FileText className="h-3 w-3" />;
   }
 };
 
 const scopeColor = (scope: string) => {
   switch (scope) {
-    case "user": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    case "group": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-    case "global": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
-    default: return "";
+    case "user":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+    case "group":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
+    case "global":
+      return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
+    default:
+      return "";
   }
 };
 
@@ -164,8 +174,15 @@ export function TemplateList({
   const inGroupRoot = activeTab === "group" && breadcrumb.length === 1;
 
   // ── Folders hook ─────────────────────────────────────────────────────────
-  const { folders, clearFolders, fetchFolders, createFolder, renameFolder, deleteFolder, loading: foldersLoading } =
-    useFolders();
+  const {
+    folders,
+    clearFolders,
+    fetchFolders,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    loading: foldersLoading,
+  } = useFolders();
 
   // ── New-folder dialog ────────────────────────────────────────────────────
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -191,7 +208,7 @@ export function TemplateList({
     fetchFolders(
       activeTab === "group" ? "group" : activeTab,
       currentFolderId,
-      activeGroupId,
+      activeGroupId
     );
   }, [activeTab, currentFolderId, activeGroupId, fetchFolders]);
 
@@ -236,7 +253,7 @@ export function TemplateList({
       newFolderName.trim(),
       activeTab === "group" ? "group" : activeTab,
       currentFolderId,
-      activeGroupId,
+      activeGroupId
     );
     setNewFolderBusy(false);
     setNewFolderName("");
@@ -245,7 +262,7 @@ export function TemplateList({
     fetchFolders(
       activeTab === "group" ? "group" : activeTab,
       currentFolderId,
-      activeGroupId,
+      activeGroupId
     );
   };
 
@@ -265,7 +282,12 @@ export function TemplateList({
     if (activeTab !== "all") {
       if (t.scope !== activeTab) return false;
       // Group scope: only show templates belonging to the active group
-      if (activeTab === "group" && activeGroupId && t.owner_group_id !== activeGroupId) return false;
+      if (
+        activeTab === "group" &&
+        activeGroupId &&
+        t.owner_group_id !== activeGroupId
+      )
+        return false;
     }
 
     // Folder filter (only when not searching)
@@ -318,7 +340,11 @@ export function TemplateList({
               onClick={() => navigateTo(0)}
             >
               <Home className="h-3.5 w-3.5" />
-              {activeTab === "user" ? "My Templates" : activeTab === "global" ? "Global" : "Root"}
+              {activeTab === "user"
+                ? "My Templates"
+                : activeTab === "global"
+                  ? "Global"
+                  : "Root"}
             </button>
           </>
         )}
@@ -329,9 +355,14 @@ export function TemplateList({
             <span key={idx} className="flex items-center gap-1">
               <ChevronRight className="h-3.5 w-3.5" />
               {isLast ? (
-                <span className="text-foreground font-medium">{entry.name}</span>
+                <span className="text-foreground font-medium">
+                  {entry.name}
+                </span>
               ) : (
-                <button className="hover:text-foreground" onClick={() => navigateTo(idx)}>
+                <button
+                  className="hover:text-foreground"
+                  onClick={() => navigateTo(idx)}
+                >
                   {entry.name}
                 </button>
               )}
@@ -429,20 +460,23 @@ export function TemplateList({
             </Card>
           ))}
         </div>
-
       ) : activeTab === "group" && !activeGroupId ? (
         /* ── Group tab: top-level — show each group as a folder ── */
         groups.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-12 text-center">
               <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">You are not a member of any groups.</p>
+              <p className="text-muted-foreground">
+                You are not a member of any groups.
+              </p>
             </CardContent>
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {groups.map((group) => {
-              const count = templates.filter((t) => t.owner_group_id === group.id).length;
+              const count = templates.filter(
+                (t) => t.owner_group_id === group.id
+              ).length;
               return (
                 <Card
                   key={group.id}
@@ -454,8 +488,12 @@ export function TemplateList({
                       <Users className="h-5 w-5 text-purple-600" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{group.name}</p>
-                      <p className="text-xs text-muted-foreground">{count} template{count !== 1 ? "s" : ""}</p>
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        {group.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {count} template{count !== 1 ? "s" : ""}
+                      </p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto shrink-0" />
                   </CardContent>
@@ -464,7 +502,6 @@ export function TemplateList({
             })}
           </div>
         )
-
       ) : loading || foldersLoading ? (
         /* ── Loading ── */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -494,10 +531,15 @@ export function TemplateList({
                   key={folder.id}
                   folder={folder}
                   onClick={enterFolder}
-                  onRename={async (f, name) => { await renameFolder(f.id, name); }}
+                  onRename={async (f, name) => {
+                    await renameFolder(f.id, name);
+                  }}
                   onDelete={async (f) => {
                     const ok = await deleteFolder(f.id);
-                    if (!ok) alert("Could not delete folder. Make sure it is empty first.");
+                    if (!ok)
+                      alert(
+                        "Could not delete folder. Make sure it is empty first."
+                      );
                   }}
                 />
               ))}
@@ -505,11 +547,15 @@ export function TemplateList({
           )}
 
           {/* Separator between folders and templates (only when both exist) */}
-          {showFolderNav && folders.length > 0 && filteredTemplates.length > 0 && (
-            <div className="border-t pt-2">
-              <p className="text-xs text-muted-foreground mb-3">Templates in this folder</p>
-            </div>
-          )}
+          {showFolderNav &&
+            folders.length > 0 &&
+            filteredTemplates.length > 0 && (
+              <div className="border-t pt-2">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Templates in this folder
+                </p>
+              </div>
+            )}
 
           {/* Template grid or empty state */}
           {filteredTemplates.length === 0 && folders.length === 0 ? (
@@ -517,12 +563,18 @@ export function TemplateList({
               <CardContent className="py-12 text-center">
                 <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
                 <p className="text-muted-foreground mb-2">
-                  {searchQuery ? "No templates match your search" : "No templates here yet"}
+                  {searchQuery
+                    ? "No templates match your search"
+                    : "No templates here yet"}
                 </p>
                 {!searchQuery && (
                   <div className="flex items-center justify-center gap-2 flex-wrap">
                     {showFolderNav && !inGroupRoot && (
-                      <Button variant="outline" size="sm" onClick={() => setNewFolderOpen(true)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setNewFolderOpen(true)}
+                      >
                         <FolderPlus className="h-4 w-4 mr-2" />
                         New Folder
                       </Button>
@@ -567,7 +619,9 @@ export function TemplateList({
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>New Folder</DialogTitle>
-            <DialogDescription>Create a subfolder to organise your templates.</DialogDescription>
+            <DialogDescription>
+              Create a subfolder to organise your templates.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
             <Label htmlFor="folder-name">Folder name</Label>
@@ -584,10 +638,17 @@ export function TemplateList({
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setNewFolderOpen(false)} disabled={newFolderBusy}>
+            <Button
+              variant="outline"
+              onClick={() => setNewFolderOpen(false)}
+              disabled={newFolderBusy}
+            >
               Cancel
             </Button>
-            <Button onClick={handleCreateFolder} disabled={!newFolderName.trim() || newFolderBusy}>
+            <Button
+              onClick={handleCreateFolder}
+              disabled={!newFolderName.trim() || newFolderBusy}
+            >
               {newFolderBusy ? "Creating…" : "Create"}
             </Button>
           </DialogFooter>
@@ -596,7 +657,10 @@ export function TemplateList({
 
       {/* ── Move Template Dialog ── */}
       {moveTemplate && (
-        <Dialog open={!!moveTemplate} onOpenChange={(v) => !v && setMoveTemplate(null)}>
+        <Dialog
+          open={!!moveTemplate}
+          onOpenChange={(v) => !v && setMoveTemplate(null)}
+        >
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle>Move Template</DialogTitle>
@@ -692,27 +756,39 @@ function TemplateCard({
             <DropdownMenuContent align="end">
               {template.can_edit && (
                 <DropdownMenuItem
-                  onClick={(e) => { e.stopPropagation(); onEdit(template); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(template);
+                  }}
                 >
                   <Edit className="h-4 w-4 mr-2" />
                   Edit
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
-                onClick={(e) => { e.stopPropagation(); onFork(template); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFork(template);
+                }}
               >
                 <GitFork className="h-4 w-4 mr-2" />
                 Fork
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={(e) => { e.stopPropagation(); onViewHistory(template); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewHistory(template);
+                }}
               >
                 <Clock className="h-4 w-4 mr-2" />
                 History
               </DropdownMenuItem>
               {showMove && template.can_edit && (
                 <DropdownMenuItem
-                  onClick={(e) => { e.stopPropagation(); onMove(template); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMove(template);
+                  }}
                 >
                   <MoveRight className="h-4 w-4 mr-2" />
                   Move to Folder
@@ -720,7 +796,10 @@ function TemplateCard({
               )}
               {template.is_owner && onChangeScope && (
                 <DropdownMenuItem
-                  onClick={(e) => { e.stopPropagation(); onChangeScope(template); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChangeScope(template);
+                  }}
                 >
                   <Share2 className="h-4 w-4 mr-2" />
                   Publish to…
@@ -729,18 +808,30 @@ function TemplateCard({
               {template.is_owner && (
                 <>
                   <DropdownMenuItem
-                    onClick={(e) => { e.stopPropagation(); onToggleImmutable(template); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleImmutable(template);
+                    }}
                   >
                     {template.is_immutable ? (
-                      <><Unlock className="h-4 w-4 mr-2" />Unlock</>
+                      <>
+                        <Unlock className="h-4 w-4 mr-2" />
+                        Unlock
+                      </>
                     ) : (
-                      <><Lock className="h-4 w-4 mr-2" />Lock</>
+                      <>
+                        <Lock className="h-4 w-4 mr-2" />
+                        Lock
+                      </>
                     )}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive"
-                    onClick={(e) => { e.stopPropagation(); onDelete(template); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(template);
+                    }}
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete

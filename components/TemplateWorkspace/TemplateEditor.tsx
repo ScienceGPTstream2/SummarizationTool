@@ -113,9 +113,9 @@ export function TemplateEditor({
       const templateEntities =
         template.entities?.length > 0
           ? template.entities.map((e) => ({
-            name: e.name,
-            prompt: e.prompt,
-          }))
+              name: e.name,
+              prompt: e.prompt,
+            }))
           : [{ name: "", prompt: "" }];
       setEntities(templateEntities);
       setTags(template.tags?.join(", ") || "");
@@ -440,7 +440,9 @@ export function TemplateEditor({
                             <SelectValue placeholder="No folder (root)" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__root__">📂 Root (no folder)</SelectItem>
+                            <SelectItem value="__root__">
+                              📂 Root (no folder)
+                            </SelectItem>
                             {availableFolders.map((f) => (
                               <SelectItem key={f.id} value={f.id}>
                                 📁 {f.name}

@@ -186,7 +186,10 @@ export function TemplateWorkspacePage({ onBack }: TemplateWorkspacePageProps) {
     }
   };
 
-  const handleMoveTemplate = async (template: Template, targetFolderId: string | null) => {
+  const handleMoveTemplate = async (
+    template: Template,
+    targetFolderId: string | null
+  ) => {
     try {
       await updateTemplate(template.id, { folder_id: targetFolderId });
     } catch (err: any) {

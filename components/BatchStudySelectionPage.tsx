@@ -38,9 +38,7 @@ import {
   Square,
 } from "lucide-react";
 import { DocumentData } from "../App";
-import {
-  loadStudyTypeTemplate,
-} from "./TemplateLoader";
+import { loadStudyTypeTemplate } from "./TemplateLoader";
 import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
 import { settingsManager, ModelConfig } from "./SettingsManager";
 import { Input } from "./ui/input";
@@ -90,7 +88,6 @@ export function BatchStudySelectionPage({
   const [tempConfig, setTempConfig] = useState<FileConfig | null>(null);
 
   // studyTypes constant removed — TemplatePicker handles both built-in and user templates
-
 
   useEffect(() => {
     // Load models asynchronously in background without blocking UI
@@ -176,7 +173,11 @@ export function BatchStudySelectionPage({
     }
   }, [selectedModels]);
 
-  const handleStudyTypeChange = (fileId: string, studyType: string, resolved?: ResolvedTemplate) => {
+  const handleStudyTypeChange = (
+    fileId: string,
+    studyType: string,
+    resolved?: ResolvedTemplate
+  ) => {
     // Save current config before switching
     const currentConfig = fileConfigs[fileId];
     if (currentConfig) {
