@@ -684,13 +684,24 @@ export default function App() {
                   r.document_id === doc.id
               )?.extracted_text || "",
 
-            // Restore paragraph summary model_id for human score saving
-            paragraphSummaryModel:
-              sessionData.extraction_results?.find(
-                (r: any) =>
-                  r.entity_name === "__paragraph_summary__" &&
-                  r.document_id === doc.id
-              )?.model_id || "",
+            // Restore chosen paragraph summary model (prioritize the one with a saved score)
+            paragraphSummaryModel: (() => {
+              const scoredEval = sessionData.evaluation_results?.find(
+                (ev: any) =>
+                  ev.entity_name === "__paragraph_summary__" &&
+                  ev.document_id === doc.id &&
+                  ev.human_score != null
+              );
+              if (scoredEval) return scoredEval.model_id;
+
+              return (
+                sessionData.extraction_results?.find(
+                  (r: any) =>
+                    r.entity_name === "__paragraph_summary__" &&
+                    r.document_id === doc.id
+                )?.model_id || ""
+              );
+            })(),
 
             // Restore paragraph generation LLM cost
             paragraphSummaryCost:
@@ -702,12 +713,25 @@ export default function App() {
 
             // Restore paragraph evaluation record (ground truth + human score)
             paragraphEvaluation: (() => {
-              const paragEval = sessionData.evaluation_results?.find(
+              // Priority 1: find an evaluation that already has a human score
+              let paragEval = sessionData.evaluation_results?.find(
                 (ev: any) =>
                   ev.entity_name === "__paragraph_summary__" &&
-                  ev.document_id === doc.id
+                  ev.document_id === doc.id &&
+                  ev.human_score != null
               );
+
+              // Priority 2: fallback to any paragraph evaluation found
+              if (!paragEval) {
+                paragEval = sessionData.evaluation_results?.find(
+                  (ev: any) =>
+                    ev.entity_name === "__paragraph_summary__" &&
+                    ev.document_id === doc.id
+                );
+              }
+
               if (!paragEval) return undefined;
+
               return {
                 groundTruth: paragEval.ground_truth || "",
                 humanScore:

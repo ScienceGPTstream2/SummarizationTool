@@ -1,5 +1,51 @@
-import { asBlob } from "html-docx-js-typescript";
+import {
+  Document,
+  Packer,
+  Paragraph,
+  Table,
+  TableCell,
+  TableRow,
+  WidthType,
+  VerticalAlign,
+  AlignmentType,
+  BorderStyle,
+  TextRun,
+  ShadingType,
+  FileChild,
+} from "docx";
+import { MarkdownDocx } from "markdown-docx";
 import { DocumentData } from "../App";
+
+// Professional color palette (matching wordExport.ts)
+const COLORS = {
+  primary: "1F4E79",
+  sectionBg: "D6E4F0",
+  sectionText: "1F4E79",
+  subsectionText: "2E75B6",
+  headerBg: "E9EFF7",
+  headerText: "1F4E79",
+  labelBg: "F2F7FB",
+  labelText: "44546A",
+  borderColor: "B4C6E7",
+  bodyText: "333333",
+};
+
+const TABLE_BORDERS = {
+  top: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  bottom: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  left: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  right: { style: BorderStyle.SINGLE, size: 1, color: COLORS.borderColor },
+  insideHorizontal: {
+    style: BorderStyle.SINGLE,
+    size: 1,
+    color: COLORS.borderColor,
+  },
+  insideVertical: {
+    style: BorderStyle.SINGLE,
+    size: 1,
+    color: COLORS.borderColor,
+  },
+};
 
 // Get parser name from ID
 const getParserName = (parserId: string): string => {
@@ -16,6 +62,14 @@ const getParserName = (parserId: string): string => {
 
 // Get model name from ID
 const getModelName = (modelId: string): string => {
+  if (!modelId) return "Unknown";
+  if (modelId.includes("@")) {
+    const baseName = modelId.split("@")[0];
+    return baseName
+      .split("-")
+      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
   const modelNames: Record<string, string> = {
     "gpt-4o": "GPT-4o",
     "gpt-4-turbo": "GPT-4 Turbo",
@@ -46,23 +100,270 @@ const getStudyTypeName = (studyTypeId: string): string => {
   return studyTypeNames[studyTypeId] || studyTypeId;
 };
 
-/**
- * Escape text for safe HTML embedding (only for plain text, NOT for content that's already HTML).
- */
-const escapeHtml = (text: string): string => {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const createSectionHeading = (
+  text: string,
+  options?: { pageBreakBefore?: boolean }
+): Paragraph =>
+  new Paragraph({
+    children: [
+      new TextRun({
+        text,
+        bold: true,
+        size: 28,
+        color: COLORS.sectionText,
+        font: "Calibri",
+      }),
+    ],
+    spacing: { before: options?.pageBreakBefore ? 0 : 360, after: 200 },
+    border: {
+      bottom: {
+        style: BorderStyle.SINGLE,
+        size: 6,
+        color: COLORS.sectionBg,
+        space: 4,
+      },
+    },
+    pageBreakBefore: options?.pageBreakBefore || false,
+  });
+
+const createSubsectionHeading = (text: string): Paragraph =>
+  new Paragraph({
+    children: [
+      new TextRun({
+        text,
+        bold: true,
+        size: 24,
+        color: COLORS.subsectionText,
+        font: "Calibri",
+      }),
+    ],
+    spacing: { before: 200, after: 100 },
+  });
+
+const createConfigLabelCell = (text: string): TableCell =>
+  new TableCell({
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text,
+            bold: true,
+            color: COLORS.labelText,
+            font: "Calibri",
+          }),
+        ],
+      }),
+    ],
+    shading: { fill: COLORS.labelBg, type: ShadingType.CLEAR },
+    width: { size: 30, type: WidthType.PERCENTAGE },
+  });
+
+const createConfigValueCell = (text: string): TableCell =>
+  new TableCell({
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({ text, color: COLORS.bodyText, font: "Calibri" }),
+        ],
+      }),
+    ],
+    width: { size: 70, type: WidthType.PERCENTAGE },
+  });
+
+const createHeaderCell = (text: string, widthPercent?: number): TableCell =>
+  new TableCell({
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text,
+            size: 18,
+            bold: true,
+            color: COLORS.headerText,
+            font: "Calibri",
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+      }),
+    ],
+    shading: { fill: COLORS.headerBg, type: ShadingType.CLEAR },
+    verticalAlign: VerticalAlign.CENTER,
+    ...(widthPercent
+      ? { width: { size: widthPercent, type: WidthType.PERCENTAGE } }
+      : {}),
+  });
+
+// ────────── markdown → docx conversion ──────────
+
+/** Decode common HTML entities in text. */
+const decodeHtmlEntities = (text: string): string =>
+  text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+
+/** Parse a single HTML table string into markdown. */
+const convertOneHtmlTable = (tableHtml: string): string => {
+  const rows: string[][] = [];
+  let caption = "";
+
+  const captionMatch = tableHtml.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i);
+  if (captionMatch) {
+    caption = decodeHtmlEntities(
+      captionMatch[1].replace(/<[^>]+>/g, "").trim()
+    );
+  }
+
+  const rowMatches = tableHtml.match(
+    /<tr[^>]*>[\s\S]*?(?:<\/tr>|(?=<tr[^>]*>)|$)/gi
+  );
+  if (!rowMatches) return tableHtml;
+
+  let hasHeader = false;
+
+  rowMatches.forEach((rowHtml) => {
+    const cells: string[] = [];
+    const cellRegex =
+      /<(th|td)\b([^>]*)>([\s\S]*?)(?:<\/\1>|(?=<(?:th|td|tr)\b)|$)/gi;
+    let cellMatch;
+
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      const tag = cellMatch[1].toLowerCase();
+      const attrs = cellMatch[2] || "";
+      const colspanMatch = attrs.match(/colspan\s*=\s*"?(\d+)"?/i);
+      const colspan = colspanMatch ? parseInt(colspanMatch[1], 10) : 1;
+      const cellText = decodeHtmlEntities(
+        cellMatch[3].replace(/<[^>]+>/g, "").trim()
+      );
+
+      if (tag === "th") hasHeader = true;
+
+      cells.push(cellText);
+      for (let i = 1; i < colspan; i++) {
+        cells.push("");
+      }
+    }
+
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  });
+
+  if (rows.length === 0) return tableHtml;
+
+  const maxCols = Math.max(...rows.map((r) => r.length));
+  rows.forEach((row) => {
+    while (row.length < maxCols) row.push("");
+  });
+
+  let md = "";
+  if (caption) md += `**${caption}**\n\n`;
+
+  if (hasHeader && rows.length > 0) {
+    md += "| " + rows[0].join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.slice(1).forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  } else {
+    md += "| " + rows[0].map((_, i) => `Col ${i + 1}`).join(" | ") + " |\n";
+    md += "| " + rows[0].map(() => "---").join(" | ") + " |\n";
+    rows.forEach((row) => {
+      md += "| " + row.join(" | ") + " |\n";
+    });
+  }
+
+  return md;
+};
+
+/** Convert HTML tables to markdown tables so markdown-docx can render them. */
+const htmlTablesToMarkdown = (text: string): string => {
+  if (!text.includes("<table")) return text;
+
+  let result = text.replace(/<table[^>]*>[\s\S]*?<\/table>/gi, (match) =>
+    convertOneHtmlTable(match)
+  );
+
+  if (result.includes("<table")) {
+    result = result.replace(/<table[^>]*>[\s\S]*$/gi, (match) =>
+      convertOneHtmlTable(match)
+    );
+  }
+
+  return result;
 };
 
 /**
- * Build the full HTML document for the Word export.
- * The extracted content is inserted as-is (it may contain HTML tables).
+ * Convert markdown text into an array of docx FileChild elements using markdown-docx.
+ * Supports: tables (markdown & HTML), bold, italic, lists, code blocks, headings, links, etc.
+ * Falls back to a plain text paragraph if input is empty.
  */
-const buildHtmlDocument = (documentData: DocumentData): string => {
+const markdownToDocxElements = async (text: string): Promise<FileChild[]> => {
+  if (!text) return [new Paragraph({ text: "" })];
+
+  try {
+    const normalizedText = htmlTablesToMarkdown(text);
+    const converter = new MarkdownDocx(normalizedText, {
+      ignoreImage: true,
+      gfm: true,
+    });
+    const elements = await converter.toSection();
+    return elements.length > 0 ? elements : [new Paragraph({ text: "" })];
+  } catch {
+    return [
+      new Paragraph({
+        children: [new TextRun({ text, size: 16, font: "Calibri" })],
+      }),
+    ];
+  }
+};
+
+// ────────── Export interface ──────────
+
+export interface EntityExportOptions {
+  /** The currently selected model ID so export shows model-specific results */
+  selectedModel?: string;
+  /** The summary / paragraph prompt used for final summary generation */
+  summaryPrompt?: string;
+  /** The paragraph system prompt */
+  paragraphSystemPrompt?: string;
+}
+
+/**
+ * Generate a Word document for Entity Extraction results.
+ * Uses the docx library for proper table rendering of markdown content.
+ */
+export const generateWordDocument = async (
+  documentData: DocumentData,
+  options?: EntityExportOptions
+): Promise<Blob> => {
+  const selectedModel =
+    options?.selectedModel || documentData.selectedModel || "";
+
+  // ── Resolve model-specific extracted text for each entity ──
+  const resolvedEntities = documentData.entities.map((entity) => {
+    // Prefer extractionsByModel for the selected model
+    const modelExtraction = selectedModel
+      ? entity.extractionsByModel?.[selectedModel]
+      : undefined;
+    const extracted = modelExtraction?.extracted ?? entity.extracted ?? "";
+    const duration = modelExtraction?.duration ?? entity.duration;
+    const promptTokens = modelExtraction?.promptTokens ?? entity.promptTokens;
+    const completionTokens =
+      modelExtraction?.completionTokens ?? entity.completionTokens;
+    return { ...entity, extracted, duration, promptTokens, completionTokens };
+  });
+
+  // ── Resolve model-specific final summary ──
+  const fileData = documentData as any;
+  const finalSummary =
+    (selectedModel && fileData.summariesByModel?.[selectedModel]) ||
+    documentData.finalSummary ||
+    "";
+
   const currentDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -71,184 +372,268 @@ const buildHtmlDocument = (documentData: DocumentData): string => {
     minute: "2-digit",
   });
 
-  // Build entity rows
-  const entityRows = documentData.entities
-    .map((entity) => {
-      const extracted = entity.extracted || "No result";
-      const meta = entity.duration
-        ? `<p style="color: #808080; font-size: 9pt; margin-top: 4px;">Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens} (in) / ${entity.completionTokens} (out)</p>`
-        : "";
+  const sections: (Paragraph | Table)[] = [];
 
-      return `
-      <tr>
-        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; font-weight: 500;">
-          ${escapeHtml(entity.name)}
-        </td>
-        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; font-size: 9pt;">
-          ${escapeHtml(entity.prompt.substring(0, 200) + (entity.prompt.length > 200 ? "..." : ""))}
-        </td>
-        <td style="padding: 6px 8px; border: 1px solid #ccc; vertical-align: top;">
-          ${extracted}
-          ${meta}
-        </td>
-      </tr>`;
+  // ══════ TITLE ══════
+  sections.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: "AI Document Summarization Report",
+          bold: true,
+          size: 36,
+          color: COLORS.primary,
+          font: "Calibri",
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 100 },
     })
-    .join("\n");
+  );
+  sections.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Generated on: ${currentDate}`,
+          size: 20,
+          color: "888888",
+          font: "Calibri",
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400 },
+    })
+  );
 
-  // Build complete entity prompts section
-  const entityPrompts = documentData.entities
-    .map(
-      (entity, index) => `
-      <h3>${index + 1}. ${escapeHtml(entity.name)}</h3>
-      <pre style="background: #f5f5f5; padding: 8px; border: 1px solid #ddd; white-space: pre-wrap; word-wrap: break-word; font-size: 9pt;">${escapeHtml(entity.prompt)}</pre>
-    `
-    )
-    .join("\n");
+  // ══════ PIPELINE CONFIGURATION ══════
+  sections.push(createSectionHeading("Pipeline Configuration"));
 
-  // Final summary - insert as-is since it may contain HTML
-  const finalSummary = documentData.finalSummary || "";
+  sections.push(
+    new Table({
+      rows: [
+        new TableRow({
+          children: [
+            createConfigLabelCell("Document"),
+            createConfigValueCell(
+              documentData.file?.name || "Unknown document"
+            ),
+          ],
+        }),
+        new TableRow({
+          children: [
+            createConfigLabelCell("Parser Used"),
+            createConfigValueCell(getParserName(documentData.parser)),
+          ],
+        }),
+        new TableRow({
+          children: [
+            createConfigLabelCell("Study Type"),
+            createConfigValueCell(getStudyTypeName(documentData.studyType)),
+          ],
+        }),
+        new TableRow({
+          children: [
+            createConfigLabelCell("AI Model"),
+            createConfigValueCell(getModelName(selectedModel)),
+          ],
+        }),
+      ],
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: TABLE_BORDERS,
+    })
+  );
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body {
-      font-family: Calibri, Arial, sans-serif;
-      font-size: 11pt;
-      color: #333;
-      line-height: 1.4;
-    }
-    h1 {
-      text-align: center;
-      color: #1F4E79;
-      font-size: 18pt;
-      margin-bottom: 4px;
-    }
-    h2 {
-      color: #1F4E79;
-      font-size: 14pt;
-      border-bottom: 2px solid #D6E4F0;
-      padding-bottom: 4px;
-      margin-top: 20px;
-    }
-    h3 {
-      color: #2E75B6;
-      font-size: 12pt;
-      margin-top: 14px;
-    }
-    .subtitle {
-      text-align: center;
-      color: #888;
-      font-size: 10pt;
-      margin-bottom: 20px;
-    }
-    .config-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-    }
-    .config-table td {
-      padding: 6px 10px;
-      border: 1px solid #B4C6E7;
-    }
-    .config-label {
-      background: #F2F7FB;
-      color: #44546A;
-      font-weight: bold;
-      width: 30%;
-    }
-    .entity-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-    }
-    .entity-table th {
-      background: #E9EFF7;
-      color: #1F4E79;
-      padding: 8px;
-      border: 1px solid #B4C6E7;
-      text-align: center;
-      font-size: 10pt;
-    }
-    .entity-table td {
-      border: 1px solid #ccc;
-      padding: 6px 8px;
-      vertical-align: top;
-      font-size: 10pt;
-    }
-    /* Style for any HTML tables inside extracted content */
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 8px 0;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 4px 6px;
-      font-size: 9pt;
-    }
-    th {
-      background: #f0f0f0;
-      font-weight: 500;
-    }
-    caption {
-      font-weight: 500;
-      margin-bottom: 4px;
-      text-align: left;
-    }
-  </style>
-</head>
-<body>
-  <h1>AI Document Summarization Report</h1>
-  <p class="subtitle">Generated on: ${escapeHtml(currentDate)}</p>
+  // ══════ ENTITY EXTRACTION RESULTS ══════
+  sections.push(createSectionHeading("Entity Extraction Configuration"));
 
-  <h2>Pipeline Configuration</h2>
-  <table class="config-table">
-    <tr>
-      <td class="config-label">Document</td>
-      <td>${escapeHtml(documentData.file?.name || "Unknown document")}</td>
-    </tr>
-    <tr>
-      <td class="config-label">Parser Used</td>
-      <td>${escapeHtml(getParserName(documentData.parser))}</td>
-    </tr>
-    <tr>
-      <td class="config-label">Study Type</td>
-      <td>${escapeHtml(getStudyTypeName(documentData.studyType))}</td>
-    </tr>
-    <tr>
-      <td class="config-label">AI Model</td>
-      <td>${escapeHtml(getModelName(documentData.selectedModel))}</td>
-    </tr>
-  </table>
+  // Build header row
+  const entityTableRows: TableRow[] = [
+    new TableRow({
+      children: [
+        createHeaderCell("Entity", 15),
+        createHeaderCell("Extraction Prompt", 40),
+        createHeaderCell("Extracted Result", 45),
+      ],
+    }),
+  ];
 
-  <h2>Entity Extraction Configuration</h2>
-  <table class="entity-table">
-    <tr>
-      <th style="width: 25%;">Entity</th>
-      <th style="width: 50%;">Extraction Prompt</th>
-      <th style="width: 25%;">Extracted Result</th>
-    </tr>
-    ${entityRows}
-  </table>
+  // Build data rows — convert extracted markdown → docx elements for proper table rendering
+  for (const entity of resolvedEntities) {
+    const extractedElements = (await markdownToDocxElements(
+      entity.extracted || "No result"
+    )) as (Paragraph | Table)[];
 
-  <h2>Final Summary</h2>
-  <div>${finalSummary}</div>
+    // Add metadata line if available
+    if (entity.duration) {
+      extractedElements.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens ?? 0} (in) / ${entity.completionTokens ?? 0} (out)`,
+              size: 14,
+              color: "808080",
+              font: "Calibri",
+              italics: true,
+            }),
+          ],
+          spacing: { before: 60 },
+        })
+      );
+    }
 
-  <h2>Complete Entity Prompts</h2>
-  ${entityPrompts}
-</body>
-</html>`;
-};
+    entityTableRows.push(
+      new TableRow({
+        children: [
+          // Entity name
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: entity.name,
+                    bold: true,
+                    size: 18,
+                    font: "Calibri",
+                  }),
+                ],
+              }),
+            ],
+            verticalAlign: VerticalAlign.TOP,
+            width: { size: 15, type: WidthType.PERCENTAGE },
+          }),
+          // Full extraction prompt (NOT truncated)
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: entity.prompt || "",
+                    size: 16,
+                    font: "Calibri",
+                  }),
+                ],
+              }),
+            ],
+            verticalAlign: VerticalAlign.TOP,
+            width: { size: 40, type: WidthType.PERCENTAGE },
+          }),
+          // Extracted result (rendered from markdown)
+          new TableCell({
+            children: extractedElements,
+            verticalAlign: VerticalAlign.TOP,
+            width: { size: 45, type: WidthType.PERCENTAGE },
+          }),
+        ],
+      })
+    );
+  }
 
-export const generateWordDocument = async (
-  documentData: DocumentData
-): Promise<Blob> => {
-  const htmlContent = buildHtmlDocument(documentData);
-  const blob = (await asBlob(htmlContent)) as Blob;
-  return blob;
+  sections.push(
+    new Table({
+      rows: entityTableRows,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: TABLE_BORDERS,
+    })
+  );
+
+  // ══════ SUMMARY PROMPT (if available) ══════
+  const summaryPrompt =
+    options?.summaryPrompt || (documentData as any).summaryPrompt || "";
+  const paragraphSystemPrompt =
+    options?.paragraphSystemPrompt ||
+    (documentData as any).paragraphSystemPrompt ||
+    "";
+
+  if (summaryPrompt || paragraphSystemPrompt) {
+    sections.push(
+      createSectionHeading("Summary Generation Configuration", {
+        pageBreakBefore: true,
+      })
+    );
+
+    if (paragraphSystemPrompt) {
+      sections.push(createSubsectionHeading("System Prompt"));
+      sections.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: paragraphSystemPrompt,
+              size: 18,
+              font: "Calibri",
+              color: COLORS.bodyText,
+            }),
+          ],
+          spacing: { after: 200 },
+        })
+      );
+    }
+
+    if (summaryPrompt) {
+      sections.push(createSubsectionHeading("Summary Prompt"));
+      sections.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: summaryPrompt,
+              size: 18,
+              font: "Calibri",
+              color: COLORS.bodyText,
+            }),
+          ],
+          spacing: { after: 200 },
+        })
+      );
+    }
+  }
+
+  // ══════ FINAL SUMMARY ══════
+  if (finalSummary) {
+    sections.push(
+      createSectionHeading("Final Summary", {
+        pageBreakBefore: !summaryPrompt && !paragraphSystemPrompt,
+      })
+    );
+
+    const summaryElements = (await markdownToDocxElements(finalSummary)) as (
+      | Paragraph
+      | Table
+    )[];
+    sections.push(...summaryElements);
+  }
+
+  // ══════ COMPLETE ENTITY PROMPTS ══════
+  sections.push(
+    createSectionHeading("Complete Entity Prompts", { pageBreakBefore: true })
+  );
+
+  for (let i = 0; i < resolvedEntities.length; i++) {
+    const entity = resolvedEntities[i];
+    sections.push(createSubsectionHeading(`${i + 1}. ${entity.name}`));
+    sections.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: entity.prompt || "",
+            size: 16,
+            font: "Calibri",
+            color: COLORS.bodyText,
+          }),
+        ],
+        spacing: { after: 200 },
+      })
+    );
+  }
+
+  // ══════ ASSEMBLE DOCUMENT ══════
+  const doc = new Document({
+    sections: [
+      {
+        children: sections as FileChild[],
+      },
+    ],
+  });
+
+  return await Packer.toBlob(doc);
 };
 
 export const generateMarkdownDocument = (

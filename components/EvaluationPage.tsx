@@ -871,48 +871,62 @@ export function EvaluationPage({
               return file;
             }
 
-            return {
-              ...file,
-              evaluationEntities: (file.evaluationEntities || []).map(
-                (entity: any) => {
-                  if (entity.name !== params.entityName) return entity;
+            const updatedFile = { ...file };
 
-                  // Update extractionsByModel
-                  const updatedExtractionsByModel = {
-                    ...entity.extractionsByModel,
-                  };
-                  if (updatedExtractionsByModel[params.sourceModel]) {
-                    const extraction = {
-                      ...updatedExtractionsByModel[params.sourceModel],
-                    };
+            // Special case: paragraph evaluation — update paragraphEvaluation.humanScore
+            // This is what BatchResultsPage reads from
+            if (
+              params.entityName === "__paragraph_summary__" &&
+              updatedFile.paragraphEvaluation
+            ) {
+              updatedFile.paragraphEvaluation = {
+                ...updatedFile.paragraphEvaluation,
+                humanScore: params.humanScore,
+              };
+            }
 
-                    // Update human_score in the specific judge's evaluation result
-                    if (params.judgeModel && extraction.evaluationResults) {
-                      extraction.evaluationResults =
-                        extraction.evaluationResults.map((evalResult: any) => {
-                          if (evalResult.model === params.judgeModel) {
-                            return {
-                              ...evalResult,
-                              human_score: normalizedScore,
-                            };
-                          }
-                          return evalResult;
-                        });
-                    } else {
-                      // Fallback: update at extraction level
-                      extraction.humanScore = normalizedScore;
-                    }
+            // Also update evaluationEntities for regular entity evaluations
+            updatedFile.evaluationEntities = (
+              file.evaluationEntities || []
+            ).map((entity: any) => {
+              if (entity.name !== params.entityName) return entity;
 
-                    updatedExtractionsByModel[params.sourceModel] = extraction;
-                  }
+              // Update extractionsByModel
+              const updatedExtractionsByModel = {
+                ...entity.extractionsByModel,
+              };
+              if (updatedExtractionsByModel[params.sourceModel]) {
+                const extraction = {
+                  ...updatedExtractionsByModel[params.sourceModel],
+                };
 
-                  return {
-                    ...entity,
-                    extractionsByModel: updatedExtractionsByModel,
-                  };
+                // Update human_score in the specific judge's evaluation result
+                if (params.judgeModel && extraction.evaluationResults) {
+                  extraction.evaluationResults =
+                    extraction.evaluationResults.map((evalResult: any) => {
+                      if (evalResult.model === params.judgeModel) {
+                        return {
+                          ...evalResult,
+                          human_score: normalizedScore,
+                        };
+                      }
+                      return evalResult;
+                    });
+                } else {
+                  // Fallback: update at extraction level
+                  extraction.humanScore = normalizedScore;
                 }
-              ),
-            };
+
+                updatedExtractionsByModel[params.sourceModel] = extraction;
+              }
+
+              return {
+                ...entity,
+                extractionsByModel: updatedExtractionsByModel,
+              };
+            });
+
+            return updatedFile;
           }),
         }));
       } else {
