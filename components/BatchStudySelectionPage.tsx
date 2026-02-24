@@ -8,13 +8,6 @@ import {
   CardTitle,
 } from "./ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -47,8 +40,8 @@ import {
 import { DocumentData } from "../App";
 import {
   loadStudyTypeTemplate,
-  getAvailableStudyTypes,
 } from "./TemplateLoader";
+import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
 import { settingsManager, ModelConfig } from "./SettingsManager";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -96,7 +89,8 @@ export function BatchStudySelectionPage({
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<FileConfig | null>(null);
 
-  const studyTypes = getAvailableStudyTypes();
+  // studyTypes constant removed — TemplatePicker handles both built-in and user templates
+
 
   useEffect(() => {
     // Load models asynchronously in background without blocking UI
@@ -182,7 +176,7 @@ export function BatchStudySelectionPage({
     }
   }, [selectedModels]);
 
-  const handleStudyTypeChange = (fileId: string, studyType: string) => {
+  const handleStudyTypeChange = (fileId: string, studyType: string, resolved?: ResolvedTemplate) => {
     // Save current config before switching
     const currentConfig = fileConfigs[fileId];
     if (currentConfig) {
@@ -209,8 +203,8 @@ export function BatchStudySelectionPage({
         syncSessionConfigs(documentData.sessionId, newConfigs);
       }
     } else {
-      // Load from template
-      const template = loadStudyTypeTemplate(studyType);
+      // Use pre-resolved template from TemplatePicker, or fall back to built-in loader
+      const template = resolved ?? loadStudyTypeTemplate(studyType);
       const newConfigs = {
         ...fileConfigs,
         [fileId]: {
@@ -924,23 +918,14 @@ export function BatchStudySelectionPage({
                 </div>
 
                 <div className="flex items-center gap-3 flex-1 md:justify-end">
-                  <Select
+                  <TemplatePicker
                     value={fileConfigs[file.fileId]?.studyType || ""}
-                    onValueChange={(val) =>
-                      handleStudyTypeChange(file.fileId, val)
+                    onSelect={(id, resolved) =>
+                      handleStudyTypeChange(file.fileId, id, resolved)
                     }
-                  >
-                    <SelectTrigger className="w-full md:w-[250px]">
-                      <SelectValue placeholder="Select Study Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {studyTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.id}>
-                          {type.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    triggerClassName="w-full md:w-[280px]"
+                    placeholder="Select Template"
+                  />
 
                   {fileConfigs[file.fileId] && (
                     <Button
