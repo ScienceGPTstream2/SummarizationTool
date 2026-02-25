@@ -367,7 +367,11 @@ export async function downloadExcelReport(documentData: DocumentData) {
   // 3. Generate File
   const buffer = await workbook.xlsx.writeBuffer();
   const now = new Date();
-  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
-
-  saveAs(new Blob([buffer]), `Evaluation_Report_${timestamp}.xlsx`);
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  saveAs(
+    new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    `Evaluation_Report_${timestamp}.xlsx`
+  );
 }

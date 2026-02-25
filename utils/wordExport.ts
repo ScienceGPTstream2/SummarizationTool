@@ -683,23 +683,44 @@ export async function downloadEvaluationReport(
         row.actualOutput
       )) as (Paragraph | Table)[];
 
-      // Try to center text horizontally within docx elements
-      const applyCenterAlignment = (elements: any[]) => {
-        elements.forEach((el) => {
-          try {
-            if (el && typeof el === "object") {
-              if (el.options) {
-                el.options.alignment = AlignmentType.CENTER;
-              }
-              // Docx Paragraph internal structure might have alignment property
-              if (!el.options) {
-                (el as any).alignment = AlignmentType.CENTER;
-              }
-            }
-          } catch (e) {
-            // Ignore if we can't mutate
+      // Center the extracted elements by recursively traversing the entire object tree
+      const applyCenterAlignment = (obj: any, visited = new Set()) => {
+        if (!obj || typeof obj !== "object") return;
+        if (visited.has(obj)) return;
+        visited.add(obj);
+
+        try {
+          // If it's an array, iterate through it
+          if (Array.isArray(obj)) {
+            obj.forEach((item) => applyCenterAlignment(item, visited));
+            return;
           }
-        });
+
+          // Apply alignment where possible
+          if (obj.options) {
+            obj.options.alignment = AlignmentType.CENTER;
+          }
+          if (obj.constructor && obj.constructor.name === "Paragraph") {
+            (obj as any).alignment = AlignmentType.CENTER;
+          }
+
+          // Recursively search all properties of the object for more arrays/objects
+          for (const key of Object.keys(obj)) {
+            if (
+              key === "root" ||
+              key === "options" ||
+              key === "children" ||
+              key === "rows" ||
+              key === "cells"
+            ) {
+              applyCenterAlignment(obj[key], visited);
+            } else if (Array.isArray(obj[key])) {
+              applyCenterAlignment(obj[key], visited);
+            }
+          }
+        } catch (e) {
+          // Ignore mutability errors
+        }
       };
 
       applyCenterAlignment(groundTruthElements);
@@ -1099,6 +1120,9 @@ export async function downloadEvaluationReport(
 
   // ====== BUILD DOCUMENT ======
   const doc = new Document({
+    creator: "Science GPT Summarization Tool",
+    title: "LLM Evaluation Report",
+    description: "Exported LLM Evaluation Results",
     sections: [
       {
         properties: {
@@ -1115,6 +1139,10 @@ export async function downloadEvaluationReport(
 
   const blob = await Packer.toBlob(doc);
   const now = new Date();
-  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
-  saveAs(blob, `Evaluation_Report_${timestamp}.docx`);
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const docxBlob = new Blob([blob], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+  saveAs(docxBlob, `Evaluation_Report_${timestamp}.docx`);
 }
