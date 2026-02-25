@@ -407,7 +407,12 @@ export async function downloadEvaluationReport(
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
     const ingestionTool =
-      fileItem.processorUsed || documentData.processorUsed || "";
+      (fileItem as any).selectedParser ||
+      (documentData as any).selectedParser ||
+      (documentData as any).parser ||
+      fileItem.processorUsed ||
+      documentData.processorUsed ||
+      "";
     const entities = fileItem.entities || [];
 
     for (const entity of entities) {
@@ -617,165 +622,212 @@ export async function downloadEvaluationReport(
 
   sections.push(configTable);
 
-  // ====== MAIN RESULTS TABLE ======
+  // ====== EVALUATION RESULTS ======
   sections.push(createSectionHeading("Evaluation Results"));
 
-  // Build header row
-  const headerCells = [
-    createHeaderCell("Study Name"),
-    createHeaderCell("LLM (Source)"),
-    createHeaderCell("Entity"),
-    createHeaderCell("Ground Truth"),
-    createHeaderCell("LLM Output"),
-    createHeaderCell("Judge"),
-  ];
-
-  // Add metric columns dynamically
-  if (hasCorrectness) headerCells.push(createHeaderCell("Correctness"));
-  if (hasCompleteness) headerCells.push(createHeaderCell("Completeness"));
-  if (hasRelevance) headerCells.push(createHeaderCell("Relevance"));
-  if (hasSafety) headerCells.push(createHeaderCell("Safety"));
-
-  const tableRows: TableRow[] = [new TableRow({ children: headerCells })];
-
-  // Build data rows
+  // Group rows by entity
+  const entityGroups = new Map<string, FlatRow[]>();
   for (const row of allRows) {
-    // Convert markdown content to docx elements (async)
-    const groundTruthElements = (await markdownToDocxElements(
-      row.groundTruth
-    )) as (Paragraph | Table)[];
-    const actualOutputElements = (await markdownToDocxElements(
-      row.actualOutput
-    )) as (Paragraph | Table)[];
-
-    const rowCells = [
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: row.studyName, size: 16 })],
-          }),
-        ],
-        verticalAlign: VerticalAlign.TOP,
-      }),
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: row.llmSource, size: 16 })],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        verticalAlign: VerticalAlign.CENTER,
-      }),
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: row.entity, size: 16 })],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        verticalAlign: VerticalAlign.CENTER,
-      }),
-      new TableCell({
-        children: groundTruthElements,
-        verticalAlign: VerticalAlign.TOP,
-      }),
-      new TableCell({
-        children: actualOutputElements,
-        verticalAlign: VerticalAlign.TOP,
-      }),
-      new TableCell({
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: row.judge || "—", size: 16 })],
-            alignment: AlignmentType.CENTER,
-          }),
-        ],
-        verticalAlign: VerticalAlign.CENTER,
-      }),
-    ];
-
-    // Add metric scores with color coding
-    const getScoreTextRun = (score: string) => {
-      const numericScore = parseInt(score.replace("%", ""));
-      let color = "666666"; // Light gray (default)
-      if (!isNaN(numericScore)) {
-        if (numericScore >= 80)
-          color = "28A745"; // Green
-        else if (numericScore >= 60)
-          color = "FFC107"; // Amber
-        else color = "DC3545"; // Red
-      }
-      return new TextRun({
-        text: score || "—",
-        size: 16,
-        bold: !!score,
-        color,
-      });
-    };
-
-    if (hasCorrectness) {
-      rowCells.push(
-        new TableCell({
-          children: [
-            new Paragraph({
-              children: [getScoreTextRun(row.correctness)],
-              alignment: AlignmentType.CENTER,
-            }),
-          ],
-          verticalAlign: VerticalAlign.CENTER,
-        })
-      );
-    }
-    if (hasCompleteness) {
-      rowCells.push(
-        new TableCell({
-          children: [
-            new Paragraph({
-              children: [getScoreTextRun(row.completeness)],
-              alignment: AlignmentType.CENTER,
-            }),
-          ],
-          verticalAlign: VerticalAlign.CENTER,
-        })
-      );
-    }
-    if (hasRelevance) {
-      rowCells.push(
-        new TableCell({
-          children: [
-            new Paragraph({
-              children: [getScoreTextRun(row.relevance)],
-              alignment: AlignmentType.CENTER,
-            }),
-          ],
-          verticalAlign: VerticalAlign.CENTER,
-        })
-      );
-    }
-    if (hasSafety) {
-      rowCells.push(
-        new TableCell({
-          children: [
-            new Paragraph({
-              children: [getScoreTextRun(row.safety)],
-              alignment: AlignmentType.CENTER,
-            }),
-          ],
-          verticalAlign: VerticalAlign.CENTER,
-        })
-      );
-    }
-
-    tableRows.push(new TableRow({ children: rowCells }));
+    if (!entityGroups.has(row.entity)) entityGroups.set(row.entity, []);
+    entityGroups.get(row.entity)!.push(row);
   }
 
-  const mainTable = new Table({
-    rows: tableRows,
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: TABLE_BORDERS,
-  });
+  for (const [entityName, rows] of entityGroups) {
+    // 1. Entity Subheading
+    sections.push(createSubsectionHeading(`Entity: ${entityName}`));
 
-  sections.push(mainTable);
+    // 2. Extraction Prompt
+    const promptText = rows[0].promptTemplate || "No prompt provided";
+    sections.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Extraction Prompt: ",
+            bold: true,
+            color: COLORS.bodyText,
+            font: "Calibri",
+            size: 20,
+          }),
+          new TextRun({
+            text: promptText,
+            color: COLORS.bodyText,
+            font: "Calibri",
+            size: 20,
+          }),
+        ],
+        spacing: { after: 200 },
+      })
+    );
+
+    // 3. Table for this entity
+    const headerCells = [
+      createHeaderCell("Study Name"),
+      createHeaderCell("LLM (Source)"),
+      createHeaderCell("Ground Truth"),
+      createHeaderCell("LLM Output"),
+      createHeaderCell("Judge"),
+    ];
+
+    if (hasCorrectness) headerCells.push(createHeaderCell("Correctness"));
+    if (hasCompleteness) headerCells.push(createHeaderCell("Completeness"));
+    if (hasRelevance) headerCells.push(createHeaderCell("Relevance"));
+    if (hasSafety) headerCells.push(createHeaderCell("Safety"));
+
+    const tableRows: TableRow[] = [new TableRow({ children: headerCells })];
+
+    for (const row of rows) {
+      const groundTruthElements = (await markdownToDocxElements(
+        row.groundTruth
+      )) as (Paragraph | Table)[];
+      const actualOutputElements = (await markdownToDocxElements(
+        row.actualOutput
+      )) as (Paragraph | Table)[];
+
+      // Try to center text horizontally within docx elements
+      const applyCenterAlignment = (elements: any[]) => {
+        elements.forEach((el) => {
+          try {
+            if (el && typeof el === "object") {
+              if (el.options) {
+                el.options.alignment = AlignmentType.CENTER;
+              }
+              // Docx Paragraph internal structure might have alignment property
+              if (!el.options) {
+                (el as any).alignment = AlignmentType.CENTER;
+              }
+            }
+          } catch (e) {
+            // Ignore if we can't mutate
+          }
+        });
+      };
+
+      applyCenterAlignment(groundTruthElements);
+      applyCenterAlignment(actualOutputElements);
+
+      const rowCells = [
+        new TableCell({
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: row.studyName, size: 16 })],
+              alignment: AlignmentType.CENTER,
+            }),
+          ],
+          verticalAlign: VerticalAlign.CENTER,
+        }),
+        new TableCell({
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: row.llmSource, size: 16 })],
+              alignment: AlignmentType.CENTER,
+            }),
+          ],
+          verticalAlign: VerticalAlign.CENTER,
+        }),
+        new TableCell({
+          children: groundTruthElements,
+          verticalAlign: VerticalAlign.CENTER,
+        }),
+        new TableCell({
+          children: actualOutputElements,
+          verticalAlign: VerticalAlign.CENTER,
+        }),
+        new TableCell({
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: row.judge || "—", size: 16 })],
+              alignment: AlignmentType.CENTER,
+            }),
+          ],
+          verticalAlign: VerticalAlign.CENTER,
+        }),
+      ];
+
+      // Add metric scores with color coding
+      const getScoreTextRun = (score: string) => {
+        const numericScore = parseInt(score.replace("%", ""));
+        let color = "666666"; // Light gray (default)
+        if (!isNaN(numericScore)) {
+          if (numericScore >= 80)
+            color = "28A745"; // Green
+          else if (numericScore >= 60)
+            color = "FFC107"; // Amber
+          else color = "DC3545"; // Red
+        }
+        return new TextRun({
+          text: score || "—",
+          size: 16,
+          bold: !!score,
+          color,
+        });
+      };
+
+      if (hasCorrectness) {
+        rowCells.push(
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [getScoreTextRun(row.correctness)],
+                alignment: AlignmentType.CENTER,
+              }),
+            ],
+            verticalAlign: VerticalAlign.CENTER,
+          })
+        );
+      }
+      if (hasCompleteness) {
+        rowCells.push(
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [getScoreTextRun(row.completeness)],
+                alignment: AlignmentType.CENTER,
+              }),
+            ],
+            verticalAlign: VerticalAlign.CENTER,
+          })
+        );
+      }
+      if (hasRelevance) {
+        rowCells.push(
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [getScoreTextRun(row.relevance)],
+                alignment: AlignmentType.CENTER,
+              }),
+            ],
+            verticalAlign: VerticalAlign.CENTER,
+          })
+        );
+      }
+      if (hasSafety) {
+        rowCells.push(
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [getScoreTextRun(row.safety)],
+                alignment: AlignmentType.CENTER,
+              }),
+            ],
+            verticalAlign: VerticalAlign.CENTER,
+          })
+        );
+      }
+
+      tableRows.push(new TableRow({ children: rowCells }));
+    }
+
+    const entityTable = new Table({
+      rows: tableRows,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: TABLE_BORDERS,
+    });
+
+    sections.push(entityTable);
+    // Add spacing after each entity table
+    sections.push(new Paragraph({ spacing: { after: 400 } }));
+  }
 
   // ====== SUMMARY STATISTICS ======
   sections.push(

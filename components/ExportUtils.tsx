@@ -437,7 +437,13 @@ export const generateWordDocument = async (
         new TableRow({
           children: [
             createConfigLabelCell("Parser Used"),
-            createConfigValueCell(getParserName(documentData.parser)),
+            createConfigValueCell(
+              getParserName(
+                (documentData as any).selectedParser ||
+                  documentData.parser ||
+                  (documentData as any).processorUsed
+              )
+            ),
           ],
         }),
         new TableRow({
@@ -459,21 +465,34 @@ export const generateWordDocument = async (
   );
 
   // ══════ ENTITY EXTRACTION RESULTS ══════
-  sections.push(createSectionHeading("Entity Extraction Configuration"));
+  sections.push(createSectionHeading("Entity Extraction Results"));
 
-  // Build header row
-  const entityTableRows: TableRow[] = [
-    new TableRow({
-      children: [
-        createHeaderCell("Entity", 15),
-        createHeaderCell("Extraction Prompt", 40),
-        createHeaderCell("Extracted Result", 45),
-      ],
-    }),
-  ];
-
-  // Build data rows — convert extracted markdown → docx elements for proper table rendering
   for (const entity of resolvedEntities) {
+    // 1. Entity Subheading
+    sections.push(createSubsectionHeading(`Entity: ${entity.name}`));
+
+    // 2. Extraction Prompt
+    sections.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "Extraction Prompt: ",
+            bold: true,
+            color: COLORS.bodyText,
+            font: "Calibri",
+            size: 18,
+          }),
+          new TextRun({
+            text: entity.prompt || "No prompt provided",
+            size: 16,
+            font: "Calibri",
+            color: COLORS.bodyText,
+          }),
+        ],
+        spacing: { after: 200 },
+      })
+    );
+
     const extractedElements = (await markdownToDocxElements(
       entity.extracted || "No result"
     )) as (Paragraph | Table)[];
@@ -491,65 +510,52 @@ export const generateWordDocument = async (
               italics: true,
             }),
           ],
+          alignment: AlignmentType.CENTER,
           spacing: { before: 60 },
         })
       );
     }
 
-    entityTableRows.push(
-      new TableRow({
-        children: [
-          // Entity name
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: entity.name,
-                    bold: true,
-                    size: 18,
-                    font: "Calibri",
-                  }),
-                ],
-              }),
-            ],
-            verticalAlign: VerticalAlign.TOP,
-            width: { size: 15, type: WidthType.PERCENTAGE },
-          }),
-          // Full extraction prompt (NOT truncated)
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: entity.prompt || "",
-                    size: 16,
-                    font: "Calibri",
-                  }),
-                ],
-              }),
-            ],
-            verticalAlign: VerticalAlign.TOP,
-            width: { size: 40, type: WidthType.PERCENTAGE },
-          }),
-          // Extracted result (rendered from markdown)
-          new TableCell({
-            children: extractedElements,
-            verticalAlign: VerticalAlign.TOP,
-            width: { size: 45, type: WidthType.PERCENTAGE },
-          }),
-        ],
-      })
-    );
-  }
+    // Center the extracted elements
+    const applyCenterAlignment = (elements: any[]) => {
+      elements.forEach((el) => {
+        try {
+          if (el && typeof el === "object") {
+            if (el.options) {
+              el.options.alignment = AlignmentType.CENTER;
+            }
+            if (!el.options) {
+              (el as any).alignment = AlignmentType.CENTER;
+            }
+          }
+        } catch (e) {
+          // Ignore if can't set
+        }
+      });
+    };
+    applyCenterAlignment(extractedElements);
 
-  sections.push(
-    new Table({
-      rows: entityTableRows,
+    const resultTable = new Table({
+      rows: [
+        new TableRow({
+          children: [createHeaderCell("Extracted Result", 100)],
+        }),
+        new TableRow({
+          children: [
+            new TableCell({
+              children: extractedElements,
+              verticalAlign: VerticalAlign.CENTER,
+            }),
+          ],
+        }),
+      ],
       width: { size: 100, type: WidthType.PERCENTAGE },
       borders: TABLE_BORDERS,
-    })
-  );
+    });
+
+    sections.push(resultTable);
+    sections.push(new Paragraph({ spacing: { after: 400 } })); // space between entities
+  }
 
   // ══════ SUMMARY PROMPT (if available) ══════
   const summaryPrompt =
@@ -614,29 +620,6 @@ export const generateWordDocument = async (
       | Table
     )[];
     sections.push(...summaryElements);
-  }
-
-  // ══════ COMPLETE ENTITY PROMPTS ══════
-  sections.push(
-    createSectionHeading("Complete Entity Prompts", { pageBreakBefore: true })
-  );
-
-  for (let i = 0; i < resolvedEntities.length; i++) {
-    const entity = resolvedEntities[i];
-    sections.push(createSubsectionHeading(`${i + 1}. ${entity.name}`));
-    sections.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: entity.prompt || "",
-            size: 16,
-            font: "Calibri",
-            color: COLORS.bodyText,
-          }),
-        ],
-        spacing: { after: 200 },
-      })
-    );
   }
 
   // ══════ ASSEMBLE DOCUMENT ══════
