@@ -516,22 +516,45 @@ export const generateWordDocument = async (
       );
     }
 
-    // Center the extracted elements
-    const applyCenterAlignment = (elements: any[]) => {
-      elements.forEach((el) => {
-        try {
-          if (el && typeof el === "object") {
-            if (el.options) {
-              el.options.alignment = AlignmentType.CENTER;
-            }
-            if (!el.options) {
-              (el as any).alignment = AlignmentType.CENTER;
-            }
-          }
-        } catch (e) {
-          // Ignore if can't set
+    // Center the extracted elements by recursively traversing the entire object tree
+    const applyCenterAlignment = (obj: any, visited = new Set()) => {
+      if (!obj || typeof obj !== "object") return;
+      if (visited.has(obj)) return;
+      visited.add(obj);
+
+      try {
+        // If it's an array, iterate through it
+        if (Array.isArray(obj)) {
+          obj.forEach((item) => applyCenterAlignment(item, visited));
+          return;
         }
-      });
+
+        // Apply alignment where possible
+        if (obj.options) {
+          obj.options.alignment = AlignmentType.CENTER;
+        }
+        if (obj.constructor && obj.constructor.name === "Paragraph") {
+          (obj as any).alignment = AlignmentType.CENTER;
+        }
+
+        // Recursively search all properties of the object for more arrays/objects
+        for (const key of Object.keys(obj)) {
+          // Skip known non-traversable or cyclic properties if any (though 'visited' handles cycles)
+          if (
+            key === "root" ||
+            key === "options" ||
+            key === "children" ||
+            key === "rows" ||
+            key === "cells"
+          ) {
+            applyCenterAlignment(obj[key], visited);
+          } else if (Array.isArray(obj[key])) {
+            applyCenterAlignment(obj[key], visited);
+          }
+        }
+      } catch (e) {
+        // Ignore mutability errors
+      }
     };
     applyCenterAlignment(extractedElements);
 
@@ -624,9 +647,13 @@ export const generateWordDocument = async (
 
   // ══════ ASSEMBLE DOCUMENT ══════
   const doc = new Document({
+    creator: "Science GPT Summarization Tool",
+    title: "Entity Extraction Report",
+    description: "Exported Entity Extraction Results",
     sections: [
       {
-        children: sections as FileChild[],
+        properties: {},
+        children: sections,
       },
     ],
   });
@@ -709,8 +736,10 @@ export const downloadFile = (
   filename: string,
   mimeType: string
 ) => {
-  const blob =
-    content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  // Always wrap in a new Blob to explicitly enforce the mimeType for the browser.
+  // This fixes 'Text Recovery' errors in MS Word when files are downloaded via HTTP
+  // and placed in Protected View due to 'Mark of the Web'.
+  const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
