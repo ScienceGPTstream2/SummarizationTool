@@ -174,12 +174,11 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
 
     // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
     const filename = imagePath.split("/").pop();
-    const apiBase = import.meta.env.VITE_API_BASE_URL || "";
     const token = await getValidToken();
     if (!token) {
       throw new Error("No authentication token found");
     }
-    const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
+    const url = `/api/documents/${conversionId}/figures/${filename}`;
 
     console.log(`[FigureGallery] Fetching figure:`, {
       figureId,
@@ -244,8 +243,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     setExtractingFigure(figureId);
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-      const url = `${apiBase}/api/documents/${conversionId}/figures/${figureId}/generate-summary`;
+      const url = `/api/documents/${conversionId}/figures/${figureId}/generate-summary`;
 
       const response = await authenticatedFetch(url, {
         method: "POST",
