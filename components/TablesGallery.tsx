@@ -35,9 +35,8 @@ function TablePreview({
 
     const fetchTable = async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || "";
         const token = await getValidToken();
-        const url = `${apiBase}/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
+        const url = `/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
 
         const response = await fetch(url, {
           headers: {
@@ -156,9 +155,8 @@ function TableDisplay({
 
     const fetchTable = async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || "";
         const token = await getValidToken();
-        const url = `${apiBase}/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
+        const url = `/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
 
         const response = await fetch(url, {
           headers: {
