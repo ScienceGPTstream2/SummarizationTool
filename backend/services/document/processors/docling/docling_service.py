@@ -56,8 +56,15 @@ class DoclingService:
             }
         )
 
-        # Thread pool for CPU-intensive tasks
-        self.executor = ThreadPoolExecutor(max_workers=50)
+        # Thread pool for CPU-intensive tasks.
+        # Docling runs CPU-bound ML inference; a small pool prevents resource exhaustion.
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+        # Semaphore to serialize Docling conversions: the DocumentConverter shares
+        # internal state and its ML models are not safe to run concurrently on a
+        # resource-constrained server.  One conversion at a time prevents CPU/RAM
+        # saturation and silent hangs when multiple documents are uploaded together.
+        self._conversion_semaphore = asyncio.Semaphore(1)
 
     async def convert_document_to_markdown(
         self,
@@ -107,13 +114,19 @@ class DoclingService:
             # Capture warnings into the logging framework (optional)
             _logging.captureWarnings(True)
 
-            # Run the conversion in a thread pool to avoid blocking
+            # Run the conversion in a thread pool to avoid blocking.
+            # The semaphore ensures only one Docling conversion runs at a time,
+            # preventing CPU/RAM saturation on resource-constrained servers.
+            import time as _time
+            _conversion_start = _time.perf_counter()
             loop = asyncio.get_event_loop()
             try:
-                result = await loop.run_in_executor(
-                    self.executor, self._convert_document_sync, source
-                )
+                async with self._conversion_semaphore:
+                    result = await loop.run_in_executor(
+                        self.executor, self._convert_document_sync, source
+                    )
             finally:
+                _parse_duration_seconds = _time.perf_counter() - _conversion_start
                 # Remove the temporary handler so subsequent conversions won't write to this file
                 try:
                     root_logger.removeHandler(handler)
@@ -208,6 +221,7 @@ class DoclingService:
                 "markdown_path": str(markdown_path),
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
+                "parse_duration_seconds": _parse_duration_seconds,
                 "content_length": len(markdown_content),
                 "page_count": page_count,
                 "status": "success",

@@ -339,6 +339,17 @@ async def process_uploaded_file(
                         f"file_hash={file_hash} in session={session_id}"
                     )
 
+            # Fallback: read original_filename from the file's metadata.json
+            _metadata_filename = None
+            try:
+                import json as _json
+                _meta_path = file_path.parent / "metadata.json"
+                if _meta_path.exists():
+                    _meta = _json.loads(_meta_path.read_text())
+                    _metadata_filename = _meta.get("original_filename")
+            except Exception:
+                pass
+
             cost_tracker.record_call(
                 session_id=session_id,
                 provider="azure",
@@ -347,7 +358,7 @@ async def process_uploaded_file(
                 completion_tokens=0,
                 duration=conversion_duration,
                 page_count=metadata.get("page_count") or 0,
-                document_name=_original_filename or file_path.name,
+                document_name=_original_filename or _metadata_filename or file_path.name,
             )
         except Exception as e:
             _parse_cost = 0.0
