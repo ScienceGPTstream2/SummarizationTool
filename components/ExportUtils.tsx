@@ -437,7 +437,13 @@ export const generateWordDocument = async (
         new TableRow({
           children: [
             createConfigLabelCell("Parser Used"),
-            createConfigValueCell(getParserName(documentData.parser)),
+            createConfigValueCell(
+              getParserName(
+                (documentData as any).selectedParser ||
+                  documentData.parser ||
+                  (documentData as any).processorUsed
+              )
+            ),
           ],
         }),
         new TableRow({

@@ -407,7 +407,12 @@ export async function downloadEvaluationReport(
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
     const ingestionTool =
-      fileItem.processorUsed || documentData.processorUsed || "";
+      (fileItem as any).selectedParser ||
+      (documentData as any).selectedParser ||
+      (documentData as any).parser ||
+      fileItem.processorUsed ||
+      documentData.processorUsed ||
+      "";
     const entities = fileItem.entities || [];
 
     for (const entity of entities) {
