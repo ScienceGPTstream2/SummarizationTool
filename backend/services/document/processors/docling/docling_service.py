@@ -117,16 +117,21 @@ class DoclingService:
             # Run the conversion in a thread pool to avoid blocking.
             # The semaphore ensures only one Docling conversion runs at a time,
             # preventing CPU/RAM saturation on resource-constrained servers.
+            # Timer starts INSIDE the semaphore so queue wait time is excluded
+            # from parse_duration_seconds (batch docs each get their own duration).
             import time as _time
-            _conversion_start = _time.perf_counter()
             loop = asyncio.get_event_loop()
+            _parse_duration_seconds = 0.0
             try:
                 async with self._conversion_semaphore:
-                    result = await loop.run_in_executor(
-                        self.executor, self._convert_document_sync, source
-                    )
+                    _conversion_start = _time.perf_counter()
+                    try:
+                        result = await loop.run_in_executor(
+                            self.executor, self._convert_document_sync, source
+                        )
+                    finally:
+                        _parse_duration_seconds = _time.perf_counter() - _conversion_start
             finally:
-                _parse_duration_seconds = _time.perf_counter() - _conversion_start
                 # Remove the temporary handler so subsequent conversions won't write to this file
                 try:
                     root_logger.removeHandler(handler)

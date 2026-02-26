@@ -328,6 +328,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 processorUsed: result.processor_used,
                 figuresCount: result.figures_found,
                 tablesCount: result.tables_found,
+                parseCost: result.parse_cost,
+                parseDuration: result.parse_duration_seconds,
                 parser,
               },
             }));

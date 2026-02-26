@@ -79,6 +79,9 @@ export interface ResultRow {
   docParseCost?: string;
   extractionCost?: string;
   evalCost?: string;
+  extractionLatency?: number | null;  // seconds — from extractionData.duration
+  evalLatency?: number | null;        // seconds — from result.evaluation_time
+  parseLatency?: number | null;       // seconds — document parse duration
 }
 
 const formatModelName = (modelId: string) => {
@@ -154,9 +157,15 @@ export const transformToRows = (documentData: any): ResultRow[] => {
       "";
     const entities = fileItem.entities || [];
     const docParseCostRaw =
-      fileItem.processingResult?.parse_cost ??
+      fileItem.processingResult?.parseCost ??        // camelCase (live upload path)
+      fileItem.processingResult?.parse_cost ??       // snake_case fallback (session restore path)
       fileItem.parse_cost ??
       documentData.parse_cost;
+
+    const docParseLatencyRaw: number | null =
+      fileItem.processingResult?.parseDuration ??
+      fileItem.processingResult?.parse_duration_seconds ??
+      null;
 
     for (const entity of entities) {
       const entityName = entity.name;
@@ -233,6 +242,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
             docParseCost: formatCost(docParseCostRaw),
             extractionCost: formatCost(extractionCost),
             evalCost: "",
+            extractionLatency: extractionData.duration ?? extractionData.meta?.duration ?? null,
+            evalLatency: null,
+            parseLatency: docParseLatencyRaw,
           });
         } else {
           for (const result of evalResults) {
@@ -266,6 +278,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
               docParseCost: formatCost(docParseCost),
               extractionCost: formatCost(extractionCost),
               evalCost: formatCost(result.evaluation_cost),
+              extractionLatency: extractionData.duration ?? extractionData.meta?.duration ?? null,
+              evalLatency: result.evaluation_time ?? null,
+              parseLatency: docParseLatencyRaw,
             });
           }
         }
@@ -301,6 +316,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
         docParseCost: "",
         extractionCost: formatCost((fileItem as any).paragraphSummaryCost),
         evalCost: "",
+        extractionLatency: null,
+        evalLatency: null,
+        parseLatency: docParseLatencyRaw,
       });
     }
   }
@@ -337,6 +355,9 @@ const ALL_COLUMNS = [
   { key: "docParseCost", label: "Doc Parse Cost", type: "text" },
   { key: "extractionCost", label: "Extraction Cost", type: "text" },
   { key: "evalCost", label: "Eval Cost", type: "text" },
+  { key: "parseLatency", label: "Parse Latency (s)", type: "text" },
+  { key: "extractionLatency", label: "Extraction Latency (s)", type: "text" },
+  { key: "evalLatency", label: "Eval Latency (s)", type: "text" },
 ] as const;
 
 type SortDirection = "asc" | "desc" | null;
@@ -519,18 +540,32 @@ export default function BatchResultsPage({
 
   // Export filtered results to Excel
   const exportToExcel = async () => {
-    const sessionMetrics = await (async () => {
-      try {
-        const response = await authenticatedFetch(
-          "/api/server/session-metrics"
-        );
-        const data = await response.json();
-        return data.metrics || null;
-      } catch (error) {
-        console.warn("Failed to fetch session metrics for export:", error);
-        return null;
-      }
-    })();
+    const [sessionMetrics, docMetrics] = await Promise.all([
+      (async () => {
+        try {
+          const response = await authenticatedFetch(
+            "/api/server/session-metrics"
+          );
+          const data = await response.json();
+          return data.metrics || null;
+        } catch (error) {
+          console.warn("Failed to fetch session metrics for export:", error);
+          return null;
+        }
+      })(),
+      (async () => {
+        try {
+          const response = await authenticatedFetch(
+            "/api/server/document-metrics"
+          );
+          const data = await response.json();
+          return (data.documents as any[]) || [];
+        } catch (error) {
+          console.warn("Failed to fetch document metrics for export:", error);
+          return [];
+        }
+      })(),
+    ]);
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Filtered Results");
@@ -545,13 +580,15 @@ export default function BatchResultsPage({
       filteredRows[0]?.cost
     );
 
+    let metricsSheet: ExcelJS.Worksheet | null = null;
     if (sessionMetrics) {
-      const metricsSheet = workbook.addWorksheet("Session Metrics");
-      metricsSheet.columns = [
+      const ms = workbook.addWorksheet("Session Metrics");
+      metricsSheet = ms;
+      ms.columns = [
         { header: "Metric", key: "metric", width: 30 },
         { header: "Value", key: "value", width: 30 },
       ];
-      metricsSheet.addRows([
+      ms.addRows([
         { metric: "Total Cost", value: sessionMetrics.total_cost?.toFixed(6) },
         {
           metric: "Total Latency (s)",
@@ -560,9 +597,9 @@ export default function BatchResultsPage({
         { metric: "Total Calls", value: sessionMetrics.total_calls },
       ]);
 
-      metricsSheet.addRow([]);
-      metricsSheet.addRow(["By Provider"]);
-      metricsSheet.addRow([
+      ms.addRow([]);
+      ms.addRow(["By Provider"]);
+      ms.addRow([
         "Provider",
         "Calls",
         "Avg Latency (s)",
@@ -587,7 +624,7 @@ export default function BatchResultsPage({
       });
 
       providerStats.forEach((stats, provider) => {
-        metricsSheet.addRow([
+        ms.addRow([
           provider,
           stats.calls,
           (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2),
@@ -595,9 +632,9 @@ export default function BatchResultsPage({
         ]);
       });
 
-      metricsSheet.addRow([]);
-      metricsSheet.addRow(["By Model"]);
-      metricsSheet.addRow([
+      ms.addRow([]);
+      ms.addRow(["By Model"]);
+      ms.addRow([
         "Model",
         "Provider",
         "Calls",
@@ -629,12 +666,41 @@ export default function BatchResultsPage({
       });
 
       modelStats.forEach((stats, model) => {
-        metricsSheet.addRow([
+        ms.addRow([
           model,
           stats.provider,
           stats.calls,
           (stats.totalLatency / Math.max(stats.calls, 1)).toFixed(2),
           stats.totalCost.toFixed(6),
+        ]);
+      });
+    }
+
+    // Document Processing section — sourced from DB so it persists after session restore
+    if (docMetrics.length > 0) {
+      const dmSheet = metricsSheet ?? workbook.addWorksheet("Session Metrics");
+      dmSheet.addRow([]);
+      dmSheet.addRow(["Document Processing"]);
+      dmSheet.addRow([
+        "Document",
+        "Provider",
+        "Model",
+        "Latency (s)",
+        "Cost ($)",
+        "Pages",
+        "Figures",
+        "Tables",
+      ]);
+      docMetrics.forEach((d: any) => {
+        dmSheet.addRow([
+          d.document_name || "—",
+          d.provider || "—",
+          d.model || "—",
+          d.duration != null ? Number(d.duration).toFixed(2) : "—",
+          d.cost != null ? Number(d.cost).toFixed(6) : "—",
+          d.page_count ?? "—",
+          d.figure_count ?? "—",
+          d.table_count ?? "—",
         ]);
       });
     }
@@ -1017,6 +1083,21 @@ export default function BatchResultsPage({
                   {visibleColumns.has("evalCost") && (
                     <TableCell className="text-xs text-gray-600 px-1 font-mono">
                       {row.evalCost || "—"}
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("parseLatency") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.parseLatency != null ? row.parseLatency.toFixed(2) : "—"}
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("extractionLatency") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.extractionLatency != null ? row.extractionLatency.toFixed(2) : "—"}
+                    </TableCell>
+                  )}
+                  {visibleColumns.has("evalLatency") && (
+                    <TableCell className="text-xs text-gray-600 px-1 font-mono">
+                      {row.evalLatency != null ? row.evalLatency.toFixed(2) : "—"}
                     </TableCell>
                   )}
                   {/* Compare button removed, row is clickable */}

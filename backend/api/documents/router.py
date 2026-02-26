@@ -168,6 +168,7 @@ async def process_uploaded_file(
 
             # If a session_id is available, prefer the DB-persisted value for consistency,
             # and backfill DB if the record doesn't have a cost yet.
+            _cached_doc_filename = None
             try:
                 session_id = (
                     http_request.headers.get("X-Session-Id") if http_request else None
@@ -183,6 +184,8 @@ async def process_uploaded_file(
                     doc_match = next(
                         (d for d in docs if d.get("file_hash") == file_hash), None
                     )
+                    if doc_match:
+                        _cached_doc_filename = doc_match.get("filename")
 
                     if (
                         doc_match
@@ -193,15 +196,51 @@ async def process_uploaded_file(
                         parse_cost = float(doc_match["parse_cost"])
                     elif doc_match:
                         # Not yet in DB (or stored as 0) — persist the freshly estimated value
+                        _cached_dur_for_db = cached_metadata.get("parse_duration_seconds")
+                        if _cached_dur_for_db is None:
+                            _raw = cached_metadata.get("conversion_time")
+                            if isinstance(_raw, (int, float)):
+                                _cached_dur_for_db = float(_raw)
                         db.update_document(
                             doc_match["id"],
                             {
                                 "parse_cost": parse_cost,
                                 "page_count": cached_metadata.get("page_count"),
+                                "figure_count": cached_metadata.get("figures_found") or 0,
+                                "table_count": cached_metadata.get("tables_found") or 0,
+                                "parse_duration_seconds": float(_cached_dur_for_db or 0.0),
                             },
                         )
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to handle cached parse cost DB sync: {e}")
+
+            # Record a call metric for the cached document so it appears in session metrics.
+            # Use the internally stored processing duration (not wall-clock time).
+            try:
+                _cached_session_id = (
+                    http_request.headers.get("X-Session-Id") if http_request else None
+                )
+                if _cached_session_id:
+                    _cached_dur = cached_metadata.get("parse_duration_seconds")
+                    if _cached_dur is None:
+                        _raw = cached_metadata.get("conversion_time")
+                        if isinstance(_raw, (int, float)):
+                            _cached_dur = float(_raw)
+                    _cached_filename = _cached_doc_filename or cached_metadata.get("original_filename") or file_path.name
+                    cost_tracker.record_call(
+                        session_id=_cached_session_id,
+                        provider="azure",
+                        model=processor_name,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        duration=float(_cached_dur or 0.0),
+                        page_count=cached_metadata.get("page_count") or 0,
+                        figure_count=cached_metadata.get("figures_found") or 0,
+                        table_count=cached_metadata.get("tables_found") or 0,
+                        document_name=_cached_filename,
+                    )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
 
             return JSONResponse(
                 status_code=200,
@@ -219,6 +258,7 @@ async def process_uploaded_file(
                     "tables_found": cached_metadata.get("tables_found", 0),
                     "parse_cost": parse_cost,
                     "page_count": cached_metadata.get("page_count"),
+                    "parse_duration_seconds": float(cached_metadata.get("parse_duration_seconds") or 0) or None,
                 },
             )
 
@@ -236,18 +276,31 @@ async def process_uploaded_file(
         )
         conversion_duration = time.perf_counter() - conversion_start
 
+        # Determine actual processing duration from the service's internal measurement.
+        # The router wrapper (conversion_duration) includes queue wait when Docling
+        # serializes conversions — use the per-doc value stored in metadata instead.
+        metadata = result.get("metadata", {})
+        actual_duration = metadata.get("parse_duration_seconds")
+        if actual_duration is None:
+            _raw_ct = metadata.get("conversion_time")
+            if isinstance(_raw_ct, (int, float)):
+                actual_duration = float(_raw_ct)
+        if actual_duration is None:
+            actual_duration = conversion_duration  # fallback
+
         # Estimate parse cost (per-page or per-minute depending on processor)
-        parse_cost = 0.0
+        parse_cost = None
         try:
-            metadata = result.get("metadata", {})
-            parse_cost = cost_tracker.estimate_call_cost(
+            _estimated = cost_tracker.estimate_call_cost(
                 provider="azure",
                 model=result.get("processor_used", processor_name),
                 prompt_tokens=0,
                 completion_tokens=0,
                 page_count=metadata.get("page_count") or 0,
-                duration=conversion_duration,
+                duration=actual_duration,
             )
+            if _estimated and float(_estimated) > 0:
+                parse_cost = _estimated
         except Exception as e:
             print(f"[COST_TRACKER] Failed to estimate parse cost: {e}")
 
@@ -275,6 +328,9 @@ async def process_uploaded_file(
                             "processor_used": result.get(
                                 "processor_used", processor_name
                             ),
+                            "figure_count": metadata.get("figures_found") or 0,
+                            "table_count": metadata.get("tables_found") or 0,
+                            "parse_duration_seconds": actual_duration,
                         },
                     )
         except Exception as e:
@@ -292,7 +348,7 @@ async def process_uploaded_file(
                 if _meta_path.exists():
                     _meta_data = _json.loads(_meta_path.read_text())
                     _meta_data["parse_cost"] = parse_cost
-                    _meta_data["parse_duration_seconds"] = conversion_duration
+                    _meta_data["parse_duration_seconds"] = actual_duration
                     _meta_path.write_text(_json.dumps(_meta_data, indent=2))
         except Exception as _e:
             print(f"[COST_TRACKER] Failed to write parse_cost to metadata.json: {_e}")
@@ -312,7 +368,7 @@ async def process_uploaded_file(
                 model=result.get("processor_used", "unknown"),
                 prompt_tokens=0,
                 completion_tokens=0,
-                duration=conversion_duration,
+                duration=actual_duration,
                 page_count=metadata.get("page_count") or 0,
             )
             print(
@@ -356,8 +412,10 @@ async def process_uploaded_file(
                 model=result.get("processor_used", "unknown"),
                 prompt_tokens=0,
                 completion_tokens=0,
-                duration=conversion_duration,
+                duration=actual_duration,
                 page_count=metadata.get("page_count") or 0,
+                figure_count=metadata.get("figures_found") or 0,
+                table_count=metadata.get("tables_found") or 0,
                 document_name=_original_filename or _metadata_filename or file_path.name,
             )
         except Exception as e:
@@ -385,6 +443,7 @@ async def process_uploaded_file(
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
             "parse_cost": parse_cost,
+            "parse_duration_seconds": actual_duration,
         }
 
         # Include figures information if available

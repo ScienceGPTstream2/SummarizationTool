@@ -33,13 +33,32 @@ interface SessionMetricsData {
     cost: number;
     timestamp: string;
     document_name?: string | null;
+    page_count?: number;
+    figure_count?: number;
+    table_count?: number;
   }>;
 }
 
+interface BenchmarkClearResult {
+  ok: boolean;
+  output: string;
+  errors: string;
+  exit_code: number;
+}
+
+const CONFIRM_PHRASE = "CLEAR BENCHMARK CACHE";
+
 export function SessionMetrics() {
   const [metrics, setMetrics] = useState<SessionMetricsData | null>(null);
-  const [_loading, setLoading] = useState(false); // Used internally for fetch state
+  const [_loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
+
+  // Dangerous clear state
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [clearProcessor, setClearProcessor] = useState<string>("all");
+  const [clearRunning, setClearRunning] = useState(false);
+  const [clearResult, setClearResult] = useState<BenchmarkClearResult | null>(null);
 
   const summaries = useMemo(() => {
     const calls = metrics?.calls ?? [];
@@ -110,7 +129,14 @@ export function SessionMetrics() {
       string,
       {
         provider: string;
-        docs: Array<{ name: string; duration: number; cost: number }>;
+        docs: Array<{
+          name: string;
+          duration: number;
+          cost: number;
+          page_count: number;
+          figure_count: number;
+          table_count: number;
+        }>;
         totalCost: number;
         totalLatency: number;
       }
@@ -129,6 +155,9 @@ export function SessionMetrics() {
           name: call.document_name || "Unknown document",
           duration: call.duration || 0,
           cost: call.cost || 0,
+          page_count: call.page_count ?? 0,
+          figure_count: call.figure_count ?? 0,
+          table_count: call.table_count ?? 0,
         });
         entry.totalCost += call.cost || 0;
         entry.totalLatency += call.duration || 0;
@@ -167,8 +196,7 @@ export function SessionMetrics() {
     };
 
     fetchMetrics();
-    // Poll less frequently (was 8s) to reduce backend load
-    const interval = setInterval(fetchMetrics, 20000);
+    const interval = setInterval(fetchMetrics, 5000);
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -194,8 +222,30 @@ export function SessionMetrics() {
     }
   };
 
-  // Always show the metrics widget, even when there are no calls yet
-  // This provides a consistent UI and shows $0.00 until calls are made
+  const handleBenchmarkClear = async (mode: "dry_run" | "execute") => {
+    setClearRunning(true);
+    setClearResult(null);
+    try {
+      const processor = clearProcessor === "all" ? null : clearProcessor;
+      const response = await authenticatedFetch("/api/server/benchmark/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, processor }),
+      });
+      const data: BenchmarkClearResult = await response.json();
+      setClearResult(data);
+    } catch (error) {
+      setClearResult({
+        ok: false,
+        output: "",
+        errors: String(error),
+        exit_code: 1,
+      });
+    } finally {
+      setClearRunning(false);
+    }
+  };
+
   const displayMetrics = metrics || {
     total_cost: 0,
     total_latency: 0,
@@ -203,199 +253,327 @@ export function SessionMetrics() {
     calls: [],
   };
 
+  const confirmValid = confirmText.trim() === CONFIRM_PHRASE;
+
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Badge variant="secondary">Session Metrics</Badge>
-            <span className="text-muted-foreground">
-              Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
-            </span>
-            <span className="text-muted-foreground">
-              Latency:{" "}
-              <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
-            </span>
-            <span className="text-muted-foreground">
-              Calls: <strong>{displayMetrics.total_calls}</strong>
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Click for details
-            </span>
-          </div>
-        </Card>
-      </DialogTrigger>
-      <DialogContent className="w-[99vw] max-w-7xl min-w-[900px] max-h-[85vh] overflow-hidden">
-        <DialogHeader className="shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 pr-12">
-            <DialogTitle>Session Metrics Breakdown</DialogTitle>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleClear}
-              disabled={clearing}
-            >
-              {clearing ? "Clearing..." : "Clear metrics"}
-            </Button>
-          </div>
-          <DialogDescription>
-            Per-provider and per-model usage for this browser session.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-6 overflow-y-auto pr-2 max-h-[70vh]">
-          <Card className="border border-border">
-            <CardContent className="pt-4">
-              <h3 className="text-sm font-semibold mb-3">By Provider</h3>
-              {summaries.providerRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No calls recorded yet.
-                </p>
-              ) : (
-                <div className="w-full overflow-x-auto">
-                  <Table className="table-auto min-w-[520px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-1/3">Provider</TableHead>
-                        <TableHead className="text-right">Calls</TableHead>
-                        <TableHead className="text-right">
-                          Avg Latency
-                        </TableHead>
-                        <TableHead className="text-right">Total Cost</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {summaries.providerRows.map((row) => (
-                        <TableRow key={row.provider}>
-                          <TableCell className="font-medium break-words">
-                            {row.provider}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {row.calls}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {row.avgLatency.toFixed(2)}s
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ${row.totalCost.toFixed(4)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+    <>
+      {/* Benchmark clear confirmation modal */}
+      <Dialog open={showClearModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowClearModal(false);
+          setConfirmText("");
+          setClearResult(null);
+          setClearProcessor("all");
+        }
+      }}>
+        <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">⚠ Clear Benchmark Cache</DialogTitle>
+            <DialogDescription>
+              This deletes all sessions, documents, and extraction results from the database
+              and removes processed caches from the filesystem. It impacts{" "}
+              <strong>all users</strong>. Original uploaded PDFs are preserved.
+            </DialogDescription>
+          </DialogHeader>
 
-          <Card className="border border-border">
-            <CardContent className="pt-4">
-              <h3 className="text-sm font-semibold mb-3">By Model</h3>
-              {summaries.modelRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No calls recorded yet.
-                </p>
-              ) : (
-                <div className="w-full overflow-x-auto">
-                  <Table className="table-auto min-w-[620px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Model</TableHead>
-                        <TableHead>Provider</TableHead>
-                        <TableHead className="text-right">Calls</TableHead>
-                        <TableHead className="text-right">
-                          Avg Latency
-                        </TableHead>
-                        <TableHead className="text-right">Total Cost</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {summaries.modelRows.map((row) => (
-                        <TableRow key={`${row.provider}-${row.model}`}>
-                          <TableCell className="font-medium whitespace-nowrap">
-                            {row.model}
-                          </TableCell>
-                          <TableCell>{row.provider}</TableCell>
-                          <TableCell className="text-right">
-                            {row.calls}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {row.avgLatency.toFixed(2)}s
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ${row.totalCost.toFixed(4)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label className="text-sm font-medium">Processor filter</label>
+              <select
+                value={clearProcessor}
+                onChange={(e) => setClearProcessor(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+              >
+                <option value="all">All processors (docling + Azure DI)</option>
+                <option value="docling">Docling only</option>
+                <option value="azure_doc_intelligence">Azure Doc Intelligence only</option>
+              </select>
+            </div>
 
-          {summaries.docRows.length > 0 && (
+            <div>
+              <label className="text-sm font-medium">
+                Type{" "}
+                <code className="bg-muted px-1 py-0.5 rounded text-destructive font-mono text-xs">
+                  {CONFIRM_PHRASE}
+                </code>{" "}
+                to confirm
+              </label>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder={CONFIRM_PHRASE}
+                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBenchmarkClear("dry_run")}
+                disabled={clearRunning}
+              >
+                {clearRunning ? "Running..." : "Dry Run"}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => handleBenchmarkClear("execute")}
+                disabled={!confirmValid || clearRunning}
+              >
+                {clearRunning ? "Clearing..." : "Clear All"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowClearModal(false)}
+                disabled={clearRunning}
+              >
+                Cancel
+              </Button>
+            </div>
+
+            {clearResult && (
+              <div className="space-y-2">
+                <div className={`text-sm font-medium ${clearResult.ok ? "text-green-600" : "text-destructive"}`}>
+                  {clearResult.ok ? "✓ Success" : `✗ Failed (exit code ${clearResult.exit_code})`}
+                </div>
+                {clearResult.output && (
+                  <pre className="text-xs bg-muted rounded p-3 overflow-x-auto max-h-[50vh] whitespace-pre-wrap">
+                    {clearResult.output}
+                  </pre>
+                )}
+                {clearResult.errors && (
+                  <pre className="text-xs bg-destructive/10 text-destructive rounded p-3 overflow-x-auto max-h-48 whitespace-pre-wrap">
+                    {clearResult.errors}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Main metrics modal */}
+      <Dialog>
+        <DialogTrigger asChild>
+          <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Badge variant="secondary">Session Metrics</Badge>
+              <span className="text-muted-foreground">
+                Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
+              </span>
+              <span className="text-muted-foreground">
+                Latency:{" "}
+                <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
+              </span>
+              <span className="text-muted-foreground">
+                Calls: <strong>{displayMetrics.total_calls}</strong>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Click for details
+              </span>
+            </div>
+          </Card>
+        </DialogTrigger>
+        <DialogContent className="w-[99vw] max-w-[96rem] min-w-[1080px] max-h-[90vh] overflow-hidden">
+          <DialogHeader className="shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 pr-12">
+              <DialogTitle>Session Metrics Breakdown</DialogTitle>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClear}
+                  disabled={clearing}
+                >
+                  {clearing ? "Clearing..." : "Clear metrics"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setShowClearModal(true)}
+                >
+                  Dangerous: Clear Cache
+                </Button>
+              </div>
+            </div>
+            <DialogDescription>
+              Per-provider and per-model usage for this browser session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 overflow-y-auto pr-2 max-h-[70vh]">
             <Card className="border border-border">
               <CardContent className="pt-4">
-                <h3 className="text-sm font-semibold mb-3">
-                  Document Processing
-                </h3>
-                <div className="w-full overflow-x-auto">
-                  <Table className="table-auto min-w-[620px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Processor</TableHead>
-                        <TableHead>Document</TableHead>
-                        <TableHead className="text-right">Latency</TableHead>
-                        <TableHead className="text-right">Cost</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {summaries.docRows.flatMap((row) => [
-                        ...row.docs.map((doc, i) => (
-                          <TableRow key={`${row.model}-doc-${i}`}>
-                            <TableCell className="font-medium whitespace-nowrap">
-                              {i === 0 ? row.model : ""}
-                            </TableCell>
-                            <TableCell className="break-words">
-                              {doc.name}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {doc.duration.toFixed(2)}s
+                <h3 className="text-sm font-semibold mb-3">By Provider</h3>
+                {summaries.providerRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No calls recorded yet.
+                  </p>
+                ) : (
+                  <div className="w-full overflow-x-auto">
+                    <Table className="table-auto min-w-[520px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-1/3">Provider</TableHead>
+                          <TableHead className="text-right">Calls</TableHead>
+                          <TableHead className="text-right">
+                            Avg Latency
+                          </TableHead>
+                          <TableHead className="text-right">Total Cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summaries.providerRows.map((row) => (
+                          <TableRow key={row.provider}>
+                            <TableCell className="font-medium break-words">
+                              {row.provider}
                             </TableCell>
                             <TableCell className="text-right">
-                              ${doc.cost.toFixed(4)}
+                              {row.calls}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.avgLatency.toFixed(2)}s
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${row.totalCost.toFixed(4)}
                             </TableCell>
                           </TableRow>
-                        )),
-                        ...(row.docs.length > 1
-                          ? [
-                              <TableRow
-                                key={`${row.model}-total`}
-                                className="border-t bg-muted/20"
-                              >
-                                <TableCell />
-                                <TableCell className="text-muted-foreground text-xs">
-                                  Total ({row.docs.length} docs)
-                                </TableCell>
-                                <TableCell className="text-right text-xs">
-                                  {row.avgLatency.toFixed(2)}s avg
-                                </TableCell>
-                                <TableCell className="text-right text-xs">
-                                  ${row.totalCost.toFixed(4)}
-                                </TableCell>
-                              </TableRow>,
-                            ]
-                          : []),
-                      ])}
-                    </TableBody>
-                  </Table>
-                </div>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+
+            <Card className="border border-border">
+              <CardContent className="pt-4">
+                <h3 className="text-sm font-semibold mb-3">By Model</h3>
+                {summaries.modelRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No calls recorded yet.
+                  </p>
+                ) : (
+                  <div className="w-full overflow-x-auto">
+                    <Table className="table-auto min-w-[620px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Model</TableHead>
+                          <TableHead>Provider</TableHead>
+                          <TableHead className="text-right">Calls</TableHead>
+                          <TableHead className="text-right">
+                            Avg Latency
+                          </TableHead>
+                          <TableHead className="text-right">Total Cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summaries.modelRows.map((row) => (
+                          <TableRow key={`${row.provider}-${row.model}`}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              {row.model}
+                            </TableCell>
+                            <TableCell>{row.provider}</TableCell>
+                            <TableCell className="text-right">
+                              {row.calls}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.avgLatency.toFixed(2)}s
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${row.totalCost.toFixed(4)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {summaries.docRows.length > 0 && (
+              <Card className="border border-border">
+                <CardContent className="pt-4">
+                  <h3 className="text-sm font-semibold mb-3">
+                    Document Processing
+                  </h3>
+                  <div className="w-full overflow-x-auto">
+                    <Table className="table-auto min-w-[820px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Processor</TableHead>
+                          <TableHead>Document</TableHead>
+                          <TableHead className="text-right">Latency</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead className="text-right">Pages</TableHead>
+                          <TableHead className="text-right">Figures</TableHead>
+                          <TableHead className="text-right">Tables</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summaries.docRows.flatMap((row) => [
+                          ...row.docs.map((doc, i) => (
+                            <TableRow key={`${row.model}-doc-${i}`}>
+                              <TableCell className="font-medium whitespace-nowrap">
+                                {i === 0 ? row.model : ""}
+                              </TableCell>
+                              <TableCell className="break-words">
+                                {doc.name}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {doc.duration.toFixed(2)}s
+                              </TableCell>
+                              <TableCell className="text-right">
+                                ${doc.cost.toFixed(4)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {doc.page_count > 0 ? doc.page_count : "—"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {doc.figure_count > 0 ? doc.figure_count : "—"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {doc.table_count > 0 ? doc.table_count : "—"}
+                              </TableCell>
+                            </TableRow>
+                          )),
+                          ...(row.docs.length > 1
+                            ? [
+                                <TableRow
+                                  key={`${row.model}-total`}
+                                  className="border-t bg-muted/20"
+                                >
+                                  <TableCell />
+                                  <TableCell className="text-muted-foreground text-xs">
+                                    Total ({row.docs.length} docs)
+                                  </TableCell>
+                                  <TableCell className="text-right text-xs">
+                                    {row.avgLatency.toFixed(2)}s avg
+                                  </TableCell>
+                                  <TableCell className="text-right text-xs">
+                                    ${row.totalCost.toFixed(4)}
+                                  </TableCell>
+                                  <TableCell />
+                                  <TableCell />
+                                  <TableCell />
+                                </TableRow>,
+                              ]
+                            : []),
+                        ])}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

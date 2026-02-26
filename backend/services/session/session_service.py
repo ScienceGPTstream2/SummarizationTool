@@ -97,6 +97,7 @@ class SessionService:
                     processor_used=doc.processor_used,
                     parse_cost=doc.parse_cost,
                     page_count=doc.page_count,
+                    parse_duration_seconds=doc.parse_duration_seconds,
                 )
                 documents.append(
                     SessionDocument(
@@ -594,6 +595,7 @@ class SessionService:
                     processor_used=doc.get("processor_used"),
                     parse_cost=parse_cost,
                     page_count=doc.get("page_count"),
+                    parse_duration_seconds=doc.get("parse_duration_seconds"),
                 )
             )
 
