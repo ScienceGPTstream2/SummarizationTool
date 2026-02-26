@@ -443,6 +443,24 @@ class SessionService:
                     extraction_id = ext["id"]
                     break
 
+        # Fallback for __paragraph_summary__ when model_id is empty or doesn't match
+        # This handles the case where paragraphSummaryModel isn't set in frontend state
+        if not extraction_id and result.entity_name == "__paragraph_summary__":
+            for ext in extractions:
+                if ext["entity_name"] == "__paragraph_summary__":
+                    if target_document_id:
+                        if ext.get("document_id") == target_document_id:
+                            extraction_id = ext["id"]
+                            break
+                    else:
+                        extraction_id = ext["id"]
+                        break
+            if extraction_id:
+                print(
+                    f"[Eval] Used entity-name-only fallback for __paragraph_summary__ "
+                    f"(sent model_id='{result.model_id}', extraction model_id='{ext.get('model_id','')}')"
+                )
+
         if not extraction_id:
             print(
                 f"Warning: No extraction found for {result.entity_name}/{result.model_id}"
@@ -466,6 +484,13 @@ class SessionService:
                         existing_evals = self.db.get_evaluation_results_by_extraction(
                             extraction_id
                         )
+                        print(
+                            f"[Eval] human_score_update: extraction_id={extraction_id}, "
+                            f"entity={result.entity_name}, judge={score.judge_model}, "
+                            f"human_score={result.human_score}, "
+                            f"existing_evals={len(existing_evals)}, "
+                            f"existing_judges={[e.get('judge_model') for e in existing_evals]}"
+                        )
                         judge_found = False
                         # Update ALL metrics for this judge_model (not just the first one)
                         for eval_result in existing_evals:
@@ -482,9 +507,32 @@ class SessionService:
                                     or eval_result.get("ground_truth"),
                                 )
                                 judge_found = True
+                                print(
+                                    f"[Eval] ✅ Updated human_score for judge={score.judge_model}, "
+                                    f"metric={eval_result['metric']}"
+                                )
                                 # NOTE: Don't break here! Update ALL metrics for this judge
-                        # If no evaluation found for this judge, skip saving silently
-                        # This can happen if the source model wasn't evaluated with this judge
+                        if not judge_found:
+                            print(
+                                f"[Eval] ⚠️ No existing eval found for judge={score.judge_model}. "
+                                f"Creating placeholder for entity={result.entity_name}"
+                            )
+                            # Create a placeholder evaluation if none exists
+                            # This handles the case where paragraph eval was never generated
+                            # via /api/paragraph-evaluation/generate
+                            self.db.upsert_evaluation_result(
+                                extraction_result_id=extraction_id,
+                                metric=(
+                                    "paragraph_human_eval"
+                                    if result.entity_name == "__paragraph_summary__"
+                                    else "human_evaluation"
+                                ),
+                                score=None,
+                                reasoning=None,
+                                judge_model=score.judge_model,
+                                human_score=result.human_score,
+                                ground_truth=result.ground_truth,
+                            )
             else:
                 # Regular evaluation scores - save each one
                 # Calculate per-score cost/time (distribute evenly across metrics)

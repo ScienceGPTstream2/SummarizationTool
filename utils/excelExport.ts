@@ -106,7 +106,12 @@ export async function downloadExcelReport(documentData: DocumentData) {
   for (const fileItem of filesToProcess) {
     const fileName = fileItem.file?.name || "Unknown File";
     const ingestionTool =
-      fileItem.processorUsed || documentData.processorUsed || "";
+      (fileItem as any).selectedParser ||
+      (documentData as any).selectedParser ||
+      (documentData as any).parser ||
+      fileItem.processorUsed ||
+      documentData.processorUsed ||
+      "";
     const entities = fileItem.entities || [];
     const docParseCost = (fileItem as any).processingResult?.parse_cost ?? "";
 
@@ -362,7 +367,11 @@ export async function downloadExcelReport(documentData: DocumentData) {
   // 3. Generate File
   const buffer = await workbook.xlsx.writeBuffer();
   const now = new Date();
-  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}h${String(now.getMinutes()).padStart(2, "0")}m${String(now.getSeconds()).padStart(2, "0")}s`;
-
-  saveAs(new Blob([buffer]), `Evaluation_Report_${timestamp}.xlsx`);
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  saveAs(
+    new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    `Evaluation_Report_${timestamp}.xlsx`
+  );
 }

@@ -60,7 +60,7 @@ async def get_session(
     session = session_service.get_session(user_id, session_id)
 
     if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        raise HTTPException(status_code=404, detail="Session not found")
 
     return session
 

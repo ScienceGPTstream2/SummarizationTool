@@ -41,6 +41,7 @@ export interface Template {
   can_edit: boolean | null;
   is_owner: boolean | null;
   group_name?: string | null;
+  folder_id?: string | null;
 }
 
 export interface TemplateVersion {
@@ -78,6 +79,7 @@ export interface CreateTemplateData {
   variables?: TemplateVariable[];
   tags?: string[];
   is_immutable?: boolean;
+  folder_id?: string | null;
 }
 
 export interface UpdateTemplateData {
@@ -91,6 +93,7 @@ export interface UpdateTemplateData {
   tags?: string[];
   is_immutable?: boolean;
   change_summary?: string;
+  folder_id?: string | null;
 }
 
 export interface TemplateFilters {
@@ -126,7 +129,7 @@ async function apiRequest<T>(
     try {
       const json = JSON.parse(text);
       message = json.detail || json.message || text;
-    } catch {}
+    } catch { }
     throw new Error(message);
   }
 

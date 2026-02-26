@@ -68,11 +68,10 @@ import {
   generateWordDocument,
   generateMarkdownDocument,
   downloadFile,
+  EntityExportOptions,
 } from "./ExportUtils";
-import {
-  loadStudyTypeTemplate,
-  getAvailableStudyTypes,
-} from "./TemplateLoader";
+import { loadStudyTypeTemplate } from "./TemplateLoader";
+import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
 import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
@@ -958,8 +957,7 @@ export function EntityExtractionPage({
     });
   }, [entities]);
 
-  // Get available study types from templates
-  const studyTypes = getAvailableStudyTypes();
+  // studyTypes removed — TemplatePicker handles both built-in and user templates
 
   // Get available models from backend API (includes all configured Azure and Gemini models)
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
@@ -1264,11 +1262,14 @@ export function EntityExtractionPage({
     }
   };
 
-  const handleStudyTypeChange = (value: string) => {
+  const handleStudyTypeChange = (
+    value: string,
+    resolved?: ResolvedTemplate
+  ) => {
     setSelectedStudyType(value);
-    // Load template entities for the new study type
+    // Use resolved template from TemplatePicker or fall back to built-in loader
     const { entities: templateEntities, summaryPrompt: templateSummaryPrompt } =
-      loadStudyTypeTemplate(value);
+      resolved ?? loadStudyTypeTemplate(value);
     setEntities(templateEntities);
     setSummaryPrompt(templateSummaryPrompt);
     setShowResults(false);
@@ -2176,7 +2177,7 @@ export function EntityExtractionPage({
   const handleExportWord = async () => {
     setIsExporting(true);
     try {
-      // Use current file data for export
+      // Use current file data for export, merged with documentData for parser/studyType
       const fileData = {
         ...documentData,
         ...currentFile,
@@ -2185,8 +2186,15 @@ export function EntityExtractionPage({
         fileId: currentFile.fileId,
       };
 
-      const wordBlob = await generateWordDocument(fileData);
-      const fileName = `summary - report - ${currentFile.file?.name || "document"}.docx`;
+      // Pass model-specific options so the export shows the correct model's results
+      const exportOptions: EntityExportOptions = {
+        selectedModel,
+        summaryPrompt,
+        paragraphSystemPrompt,
+      };
+
+      const wordBlob = await generateWordDocument(fileData, exportOptions);
+      const fileName = `summary-report-${currentFile.file?.name || "document"}.docx`;
       downloadFile(
         wordBlob,
         fileName,
@@ -2445,35 +2453,19 @@ export function EntityExtractionPage({
         <div className="grid md:grid-cols-2 gap-6">
           <Card className="border-gray-200">
             <CardHeader>
-              <CardTitle>Selected Study Type</CardTitle>
+              <CardTitle>Template</CardTitle>
               <CardDescription>
-                Study type configured during batch study selection
+                Active extraction template — change to load a different set of
+                entities
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Select
+              <TemplatePicker
                 value={selectedStudyType}
-                onValueChange={handleStudyTypeChange}
-                disabled={true}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select study type" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[60vh] sm:max-h-[400px] overflow-y-auto">
-                  {studyTypes.map((type) => (
-                    <SelectItem key={type.id} value={type.id} className="py-3">
-                      <span data-select-trigger-text={type.name} />
-                      <div className="flex flex-col gap-1.5 w-full">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm">
-                            {type.name}
-                          </span>
-                        </div>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onSelect={(id, resolved) => handleStudyTypeChange(id, resolved)}
+                triggerClassName="w-full"
+                placeholder="Select a template"
+              />
             </CardContent>
           </Card>
 

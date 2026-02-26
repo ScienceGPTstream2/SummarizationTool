@@ -171,6 +171,28 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(
     isAuthCallback ? "auth_callback" : "upload"
   );
+  // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
+  // Used so Back buttons on those pages return to the right place.
+  const [previousWorkflowStep, setPreviousWorkflowStep] =
+    useState<Step>("upload");
+
+  // Wrapper so navigating to a tool page always records where we came from
+  const navigateTo = (step: Step) => {
+    const toolOnlySteps: Step[] = [
+      "templates",
+      "groups",
+      "history",
+      "executive",
+    ];
+    if (toolOnlySteps.includes(step)) {
+      // Only save the return destination when we're currently on a workflow step
+      if (!toolOnlySteps.includes(currentStep)) {
+        setPreviousWorkflowStep(currentStep);
+      }
+    }
+    setCurrentStep(step);
+  };
+
   const [documentData, setDocumentData] = useState<DocumentData>({
     file: null,
     parser: "",
@@ -515,44 +537,35 @@ export default function App() {
       setCurrentStep("study_selection");
     } else if (currentStep === "evaluation") {
       setCurrentStep("extraction");
-    } else if (currentStep === "executive") {
-      // Clear document data when going back from executive to start fresh
-      setDocumentData({
-        file: null,
-        parser: "",
-        extractedText: "",
-        annotatedOutput: "",
-        studyType: "",
-        selectedModel: "",
-        entities: [],
-        finalSummary: "",
-        uploadedFiles: [],
-      });
-      sessionCreationInProgressRef.current = false;
-      // Reset client session ID to start fresh metrics
-      import("./utils/session").then(({ resetSessionId }) => {
-        resetSessionId();
-      });
-      setCurrentStep("upload");
-    } else if (currentStep === "history") {
-      // Clear document data when going back from history to start fresh
-      setDocumentData({
-        file: null,
-        parser: "",
-        extractedText: "",
-        annotatedOutput: "",
-        studyType: "",
-        selectedModel: "",
-        entities: [],
-        finalSummary: "",
-        uploadedFiles: [],
-      });
-      sessionCreationInProgressRef.current = false;
-      // Reset client session ID to start fresh metrics
-      import("./utils/session").then(({ resetSessionId }) => {
-        resetSessionId();
-      });
-      setCurrentStep("upload");
+    } else if (
+      currentStep === "executive" ||
+      currentStep === "templates" ||
+      currentStep === "groups" ||
+      currentStep === "history"
+    ) {
+      // Return to the workflow step the user came from
+      if (currentStep === "executive" || currentStep === "history") {
+        // Clear document data and start fresh when leaving executive/history
+        setDocumentData({
+          file: null,
+          parser: "",
+          extractedText: "",
+          annotatedOutput: "",
+          studyType: "",
+          selectedModel: "",
+          entities: [],
+          finalSummary: "",
+          uploadedFiles: [],
+        });
+        sessionCreationInProgressRef.current = false;
+        import("./utils/session").then(({ resetSessionId }) => {
+          resetSessionId();
+        });
+        setCurrentStep("upload");
+      } else {
+        // templates / groups: just go back to where the user was
+        setCurrentStep(previousWorkflowStep);
+      }
     }
   };
 
@@ -710,13 +723,24 @@ export default function App() {
                   r.document_id === doc.id
               )?.extracted_text || "",
 
-            // Restore paragraph summary model_id for human score saving
-            paragraphSummaryModel:
-              sessionData.extraction_results?.find(
-                (r: any) =>
-                  r.entity_name === "__paragraph_summary__" &&
-                  r.document_id === doc.id
-              )?.model_id || "",
+            // Restore chosen paragraph summary model (prioritize the one with a saved score)
+            paragraphSummaryModel: (() => {
+              const scoredEval = sessionData.evaluation_results?.find(
+                (ev: any) =>
+                  ev.entity_name === "__paragraph_summary__" &&
+                  ev.document_id === doc.id &&
+                  ev.human_score != null
+              );
+              if (scoredEval) return scoredEval.model_id;
+
+              return (
+                sessionData.extraction_results?.find(
+                  (r: any) =>
+                    r.entity_name === "__paragraph_summary__" &&
+                    r.document_id === doc.id
+                )?.model_id || ""
+              );
+            })(),
 
             // Restore paragraph generation LLM cost
             paragraphSummaryCost:
@@ -728,12 +752,25 @@ export default function App() {
 
             // Restore paragraph evaluation record (ground truth + human score)
             paragraphEvaluation: (() => {
-              const paragEval = sessionData.evaluation_results?.find(
+              // Priority 1: find an evaluation that already has a human score
+              let paragEval = sessionData.evaluation_results?.find(
                 (ev: any) =>
                   ev.entity_name === "__paragraph_summary__" &&
-                  ev.document_id === doc.id
+                  ev.document_id === doc.id &&
+                  ev.human_score != null
               );
+
+              // Priority 2: fallback to any paragraph evaluation found
+              if (!paragEval) {
+                paragEval = sessionData.evaluation_results?.find(
+                  (ev: any) =>
+                    ev.entity_name === "__paragraph_summary__" &&
+                    ev.document_id === doc.id
+                );
+              }
+
               if (!paragEval) return undefined;
+
               return {
                 groundTruth: paragEval.ground_truth || "",
                 humanScore:
@@ -1323,11 +1360,16 @@ export default function App() {
 
       // Determine the step to restore to
       // Skip "upload" step since restored sessions don't have actual File objects
+      const toolOnlySteps = [
+        "login",
+        "history",
+        "upload",
+        "templates",
+        "groups",
+        "executive",
+      ];
       const validLastStep =
-        sessionData.last_step &&
-        sessionData.last_step !== "login" &&
-        sessionData.last_step !== "history" &&
-        sessionData.last_step !== "upload"; // Skip upload - files are already "uploaded"
+        sessionData.last_step && !toolOnlySteps.includes(sessionData.last_step);
 
       if (validLastStep) {
         console.log("Restoring to last step:", sessionData.last_step);
@@ -1463,7 +1505,7 @@ export default function App() {
                 {currentStep !== "executive" && (
                   <RainbowButton
                     size="sm"
-                    onClick={() => setCurrentStep("executive")}
+                    onClick={() => navigateTo("executive")}
                     className="!rounded-md"
                   >
                     <Briefcase className="h-4 w-4 mr-2" />
@@ -1475,7 +1517,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("templates")}
+                    onClick={() => navigateTo("templates")}
                   >
                     <FileText className="h-4 w-4 mr-2" />
                     Templates
@@ -1486,7 +1528,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("groups")}
+                    onClick={() => navigateTo("groups")}
                   >
                     <Users className="h-4 w-4 mr-2" />
                     Groups
@@ -1497,7 +1539,7 @@ export default function App() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentStep("history")}
+                    onClick={() => navigateTo("history")}
                   >
                     <Clock className="h-4 w-4 mr-2" />
                     History
