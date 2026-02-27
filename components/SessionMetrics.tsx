@@ -20,6 +20,12 @@ import {
   TableRow,
 } from "./ui/table";
 
+interface BatchMetric {
+  batch_number: number;
+  batch_latency: number;
+  document_count: number;
+}
+
 interface SessionMetricsData {
   total_cost: number;
   total_latency: number;
@@ -36,7 +42,9 @@ interface SessionMetricsData {
     page_count?: number;
     figure_count?: number;
     table_count?: number;
+    batch_number?: number | null;
   }>;
+  batches?: Record<string, BatchMetric>;
 }
 
 interface BenchmarkClearResult {
@@ -136,6 +144,7 @@ export function SessionMetrics() {
           page_count: number;
           figure_count: number;
           table_count: number;
+          batch_number: number | null;
         }>;
         totalCost: number;
         totalLatency: number;
@@ -158,6 +167,7 @@ export function SessionMetrics() {
           page_count: call.page_count ?? 0,
           figure_count: call.figure_count ?? 0,
           table_count: call.table_count ?? 0,
+          batch_number: call.batch_number ?? null,
         });
         entry.totalCost += call.cost || 0;
         entry.totalLatency += call.duration || 0;
@@ -171,7 +181,25 @@ export function SessionMetrics() {
       avgLatency: stats.docs.length ? stats.totalLatency / stats.docs.length : 0,
     }));
 
-    return { providerRows, modelRows, docRows };
+    // Batch rows: merge backend batches with per-call sum for comparison
+    const batchMap = metrics?.batches ?? {};
+    const batchSumLatency = new Map<number, number>();
+    calls
+      .filter((call) => DOC_MODELS.has(call.model) && call.batch_number != null)
+      .forEach((call) => {
+        const bn = call.batch_number!;
+        batchSumLatency.set(bn, (batchSumLatency.get(bn) ?? 0) + (call.duration || 0));
+      });
+    const batchRows = Object.values(batchMap)
+      .map((b) => ({
+        batch_number: b.batch_number,
+        batch_latency: b.batch_latency,
+        document_count: b.document_count,
+        sum_latency: batchSumLatency.get(b.batch_number) ?? 0,
+      }))
+      .sort((a, b) => a.batch_number - b.batch_number);
+
+    return { providerRows, modelRows, docRows, batchRows };
   }, [metrics]);
 
   useEffect(() => {
@@ -496,6 +524,38 @@ export function SessionMetrics() {
               </CardContent>
             </Card>
 
+            {summaries.batchRows.length > 0 && (
+              <Card className="border border-border">
+                <CardContent className="pt-4">
+                  <h3 className="text-sm font-semibold mb-3">By Batch</h3>
+                  <div className="w-full overflow-x-auto">
+                    <Table className="table-auto min-w-[560px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Batch #</TableHead>
+                          <TableHead className="text-right">Documents</TableHead>
+                          <TableHead className="text-right">Batch Latency</TableHead>
+                          <TableHead className="text-right">Sum of Doc Latencies</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summaries.batchRows.map((b) => (
+                          <TableRow key={b.batch_number}>
+                            <TableCell className="font-medium">#{b.batch_number}</TableCell>
+                            <TableCell className="text-right">{b.document_count}</TableCell>
+                            <TableCell className="text-right">{b.batch_latency.toFixed(2)}s</TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {b.sum_latency.toFixed(2)}s
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {summaries.docRows.length > 0 && (
               <Card className="border border-border">
                 <CardContent className="pt-4">
@@ -508,6 +568,7 @@ export function SessionMetrics() {
                         <TableRow>
                           <TableHead>Processor</TableHead>
                           <TableHead>Document</TableHead>
+                          <TableHead className="text-right">Batch</TableHead>
                           <TableHead className="text-right">Latency</TableHead>
                           <TableHead className="text-right">Cost</TableHead>
                           <TableHead className="text-right">Pages</TableHead>
@@ -524,6 +585,9 @@ export function SessionMetrics() {
                               </TableCell>
                               <TableCell className="break-words">
                                 {doc.name}
+                              </TableCell>
+                              <TableCell className="text-right text-muted-foreground">
+                                {doc.batch_number != null ? `#${doc.batch_number}` : "—"}
                               </TableCell>
                               <TableCell className="text-right">
                                 {doc.duration.toFixed(2)}s
@@ -552,6 +616,7 @@ export function SessionMetrics() {
                                   <TableCell className="text-muted-foreground text-xs">
                                     Total ({row.docs.length} docs)
                                   </TableCell>
+                                  <TableCell />
                                   <TableCell className="text-right text-xs">
                                     {row.avgLatency.toFixed(2)}s avg
                                   </TableCell>
