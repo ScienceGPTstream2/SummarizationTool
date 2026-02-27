@@ -377,6 +377,7 @@ class AzureDocIntelligenceService:
                 "metadata": {
                     "content_length": len(markdown_content),
                     "conversion_time": conversion_time,
+                    "parse_duration_seconds": conversion_time,
                     "page_count": metadata["page_count"],
                     "tables_found": metadata["tables_found"],
                     "key_value_pairs_found": metadata["key_value_pairs_found"],

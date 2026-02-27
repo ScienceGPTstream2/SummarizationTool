@@ -614,9 +614,13 @@ class SessionService:
             # (e.g., stored as 0 from a previous run where estimation failed),
             # recompute from page_count + processor_used and backfill the DB.
             if not parse_cost:
-                page_count = doc.get("page_count")
                 processor_used = doc.get("processor_used")
-                if page_count and processor_used:
+                page_count = doc.get("page_count") or 0
+                parse_duration_seconds = doc.get("parse_duration_seconds") or 0.0
+                # Only attempt recompute when we have at least one meaningful input.
+                # Docling uses cost_per_minute (needs duration); Azure DI uses cost_per_page
+                # (needs page_count). Pass both so the formula works for either processor.
+                if processor_used and (page_count or parse_duration_seconds):
                     try:
                         parse_cost = cost_tracker.estimate_call_cost(
                             provider="azure",
@@ -624,7 +628,7 @@ class SessionService:
                             prompt_tokens=0,
                             completion_tokens=0,
                             page_count=page_count,
-                            duration=0,
+                            duration=parse_duration_seconds,
                         )
                         if parse_cost:
                             self.db.update_document(

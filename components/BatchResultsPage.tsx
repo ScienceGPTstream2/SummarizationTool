@@ -157,11 +157,15 @@ export const transformToRows = (documentData: any): ResultRow[] => {
       documentData.processorUsed ||
       "";
     const entities = fileItem.entities || [];
+    // Use || (falsy) instead of ?? (nullish) so that 0.0 also falls through to the
+    // next candidate — a stored 0 means cost estimation failed, not a real $0 cost.
+    // The final || null ensures formatCost receives null (→ "") rather than undefined.
     const docParseCostRaw =
-      fileItem.processingResult?.parseCost ??        // camelCase (live upload path)
-      fileItem.processingResult?.parse_cost ??       // snake_case fallback (session restore path)
-      fileItem.parse_cost ??
-      documentData.parse_cost;
+      fileItem.processingResult?.parseCost ||        // camelCase (live upload path)
+      fileItem.processingResult?.parse_cost ||       // snake_case (session restore path)
+      fileItem.parse_cost ||
+      documentData.parse_cost ||
+      null;
 
     const docParseLatencyRaw: number | null =
       fileItem.processingResult?.parseDuration ??
