@@ -54,8 +54,6 @@ interface BenchmarkClearResult {
   exit_code: number;
 }
 
-const CONFIRM_PHRASE = "CLEAR BENCHMARK CACHE";
-
 export function SessionMetrics() {
   const [metrics, setMetrics] = useState<SessionMetricsData | null>(null);
   const [_loading, setLoading] = useState(false);
@@ -63,7 +61,7 @@ export function SessionMetrics() {
 
   // Dangerous clear state
   const [showClearModal, setShowClearModal] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
+  const [clearConfirmed, setClearConfirmed] = useState(false);
   const [clearProcessor, setClearProcessor] = useState<string>("all");
   const [clearRunning, setClearRunning] = useState(false);
   const [clearResult, setClearResult] = useState<BenchmarkClearResult | null>(null);
@@ -281,15 +279,13 @@ export function SessionMetrics() {
     calls: [],
   };
 
-  const confirmValid = confirmText.trim() === CONFIRM_PHRASE;
-
   return (
     <>
       {/* Benchmark clear confirmation modal */}
       <Dialog open={showClearModal} onOpenChange={(open) => {
         if (!open) {
           setShowClearModal(false);
-          setConfirmText("");
+          setClearConfirmed(false);
           setClearResult(null);
           setClearProcessor("all");
         }
@@ -309,30 +305,16 @@ export function SessionMetrics() {
               <label className="text-sm font-medium">Processor filter</label>
               <select
                 value={clearProcessor}
-                onChange={(e) => setClearProcessor(e.target.value)}
+                onChange={(e) => {
+                  setClearProcessor(e.target.value);
+                  setClearConfirmed(false);
+                }}
                 className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
               >
                 <option value="all">All processors (docling + Azure DI)</option>
                 <option value="docling">Docling only</option>
                 <option value="azure_doc_intelligence">Azure Doc Intelligence only</option>
               </select>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">
-                Type{" "}
-                <code className="bg-muted px-1 py-0.5 rounded text-destructive font-mono text-xs">
-                  {CONFIRM_PHRASE}
-                </code>{" "}
-                to confirm
-              </label>
-              <input
-                type="text"
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
-                placeholder={CONFIRM_PHRASE}
-                className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono"
-              />
             </div>
 
             <div className="flex gap-2">
@@ -344,18 +326,36 @@ export function SessionMetrics() {
               >
                 {clearRunning ? "Running..." : "Dry Run"}
               </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleBenchmarkClear("execute")}
-                disabled={!confirmValid || clearRunning}
-              >
-                {clearRunning ? "Clearing..." : "Clear All"}
-              </Button>
+              {!clearConfirmed ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setClearConfirmed(true)}
+                  disabled={clearRunning}
+                >
+                  Clear All
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="animate-pulse"
+                  onClick={() => {
+                    setClearConfirmed(false);
+                    handleBenchmarkClear("execute");
+                  }}
+                  disabled={clearRunning}
+                >
+                  {clearRunning ? "Clearing..." : "⚠ Click again to confirm"}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setShowClearModal(false)}
+                onClick={() => {
+                  setShowClearModal(false);
+                  setClearConfirmed(false);
+                }}
                 disabled={clearRunning}
               >
                 Cancel
