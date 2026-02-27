@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import json
 import asyncio
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, AcceleratorOptions, AcceleratorDevice
+from docling.pipeline.standard_pdf_pipeline import ThreadedPdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
 
@@ -21,7 +23,7 @@ class DoclingService:
     def __init__(
         self,
         markdown_dir: Optional[Union[str, Path]] = None,
-        image_resolution_scale: float = 2.0,
+        image_resolution_scale: float = 1.5,
     ):
         """
         Initialize the docling service
@@ -44,10 +46,19 @@ class DoclingService:
         self.output_base_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure PDF pipeline options for image extraction
-        pipeline_options = PdfPipelineOptions()
+        pipeline_options = ThreadedPdfPipelineOptions(
+            accelerator_options=AcceleratorOptions(
+                num_threads=multiprocessing.cpu_count(),
+                device=AcceleratorDevice.AUTO,
+            ),
+            ocr_batch_size=4,
+            layout_batch_size=64,
+            table_batch_size=32,
+        )
         pipeline_options.images_scale = image_resolution_scale
-        pipeline_options.generate_page_images = True
+        pipeline_options.generate_page_images = False
         pipeline_options.generate_picture_images = True
+        pipeline_options.do_ocr = False
 
         # Initialize docling converter with image extraction enabled
         self.converter = DocumentConverter(
@@ -56,15 +67,8 @@ class DoclingService:
             }
         )
 
-        # Thread pool for CPU-intensive tasks.
-        # Docling runs CPU-bound ML inference; a small pool prevents resource exhaustion.
-        self.executor = ThreadPoolExecutor(max_workers=2)
-
-        # Semaphore to serialize Docling conversions: the DocumentConverter shares
-        # internal state and its ML models are not safe to run concurrently on a
-        # resource-constrained server.  One conversion at a time prevents CPU/RAM
-        # saturation and silent hangs when multiple documents are uploaded together.
-        self._conversion_semaphore = asyncio.Semaphore(1)
+        # Thread pool for CPU-intensive tasks
+        self.executor = ThreadPoolExecutor(max_workers=4)
 
     async def convert_document_to_markdown(
         self,
@@ -114,23 +118,12 @@ class DoclingService:
             # Capture warnings into the logging framework (optional)
             _logging.captureWarnings(True)
 
-            # Run the conversion in a thread pool to avoid blocking.
-            # The semaphore ensures only one Docling conversion runs at a time,
-            # preventing CPU/RAM saturation on resource-constrained servers.
-            # Timer starts INSIDE the semaphore so queue wait time is excluded
-            # from parse_duration_seconds (batch docs each get their own duration).
-            import time as _time
+            # Run the conversion in a thread pool to avoid blocking
             loop = asyncio.get_event_loop()
-            _parse_duration_seconds = 0.0
             try:
-                async with self._conversion_semaphore:
-                    _conversion_start = _time.perf_counter()
-                    try:
-                        result = await loop.run_in_executor(
-                            self.executor, self._convert_document_sync, source
-                        )
-                    finally:
-                        _parse_duration_seconds = _time.perf_counter() - _conversion_start
+                result = await loop.run_in_executor(
+                    self.executor, self._convert_document_sync, source
+                )
             finally:
                 # Remove the temporary handler so subsequent conversions won't write to this file
                 try:
@@ -226,7 +219,6 @@ class DoclingService:
                 "markdown_path": str(markdown_path),
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
-                "parse_duration_seconds": _parse_duration_seconds,
                 "content_length": len(markdown_content),
                 "page_count": page_count,
                 "status": "success",
