@@ -292,9 +292,44 @@ export const transformToRows = (documentData: any): ResultRow[] => {
       }
     }
 
-    // Paragraph Evaluation row — human-only, no LLM judge scores
+    // Paragraph Evaluation rows — one per model in summariesByModel
     const paragraphEval = (fileItem as any).paragraphEvaluation;
-    if (fileItem.finalSummary && paragraphEval?.groundTruth) {
+    const summariesByModel = (fileItem as any).summariesByModel as Record<string, string> | undefined;
+
+    if (paragraphEval?.groundTruth && summariesByModel && Object.keys(summariesByModel).length > 0) {
+      // Create a row for each model that generated a paragraph
+      for (const [modelId, summaryText] of Object.entries(summariesByModel)) {
+        rows.push({
+          id: `row-${idCounter++}`,
+          fileId: fileId,
+          studyName: fileName,
+          llmSource: getDisplayModelName(modelId),
+          sourceModelRaw: modelId,
+          ingestion: ingestionTool,
+          systemPrompt: "",
+          promptTemplate: "",
+          entity: "Paragraph Evaluation",
+          entityNameRaw: "__paragraph_summary__",
+          actualOutput: summaryText || "",
+          groundTruth: paragraphEval.groundTruth,
+          judge: "Human",
+          judgeRaw: "human",
+          correctness: null,
+          completeness: null,
+          relevance: null,
+          safety: null,
+          humanEval: paragraphEval.humanScore ?? null,
+          cost: "",
+          docParseCost: "",
+          extractionCost: formatCost((fileItem as any).paragraphSummaryCost),
+          evalCost: "",
+          extractionLatency: null,
+          evalLatency: null,
+          parseLatency: docParseLatencyRaw,
+        });
+      }
+    } else if (fileItem.finalSummary && paragraphEval?.groundTruth) {
+      // Fallback: single paragraph row (legacy / no summariesByModel)
       rows.push({
         id: `row-${idCounter++}`,
         fileId: fileId,

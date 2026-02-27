@@ -222,6 +222,25 @@ class LLMService:
                 )
                 self._record_session_metrics(session_id, "gcp", result)
                 return result
+            elif model_type == "azure-llama":
+                if self.azure_client.disabled:
+                    return {"success": False, "error": "Azure OpenAI is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.azure_client.extract_entities_with_azure(
+                        markdown,
+                        extraction_prompt,
+                        deployment,
+                        api_version,
+                        endpoint_override,
+                        api_key_override,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                )
+                self._record_session_metrics(session_id, "azure", result)
+                return result
             elif model_type == "macbook":
                 if self.macbook_client.disabled:
                     return {"success": False, "error": "Macbook LLM is not configured."}
@@ -338,7 +357,7 @@ class LLMService:
         """
         Generate a paragraph using the specified LLM.
         """
-        if model_type == "azure":
+        if model_type in ("azure", "azure-llama"):
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
             result = await self.azure_client.generate_paragraph_with_azure(

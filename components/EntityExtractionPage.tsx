@@ -859,7 +859,7 @@ export function EntityExtractionPage({
         const mObj = availableModels.find((m) => m.id === mId);
         if (!mObj) return;
 
-        const mType = getModelType(mObj.provider || "");
+        const mType = getModelType(mObj.provider || "", mObj.id);
 
         // Use per-model entity results if available
         const modelEntities = updatedEntities.map((e: any) => {
@@ -1458,7 +1458,8 @@ export function EntityExtractionPage({
       } else if (provider.includes("azure")) {
         modelType = "azure";
       } else if (provider.includes("meta") || provider.includes("llama")) {
-        modelType = "llama";
+        // Azure-hosted Llama has id "azure-{deployment}"; GCP Llama has id "meta/..."
+        modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
       } else if (provider.includes("macbook")) {
         modelType = "macbook";
       }
@@ -1720,11 +1721,13 @@ export function EntityExtractionPage({
   };
 
   // Helper: determine model_type from provider string
-  const getModelType = (providerStr: string): string => {
+  // modelId is used to distinguish Azure-hosted Llama ("azure-llama") from GCP Llama ("llama")
+  const getModelType = (providerStr: string, modelId?: string): string => {
     const p = providerStr.toLowerCase();
     if (p.includes("google") || p.includes("gemini")) return "gemini";
     if (p.includes("anthropic")) return "anthropic";
-    if (p.includes("meta") || p.includes("llama")) return "llama";
+    if (p.includes("meta") || p.includes("llama"))
+      return modelId?.startsWith("azure-") ? "azure-llama" : "llama";
     if (p.includes("macbook")) return "macbook";
     return "azure";
   };
@@ -1734,7 +1737,7 @@ export function EntityExtractionPage({
     const modelObj = availableModels.find((m) => m.id === modelId);
     if (!modelObj) throw new Error(`Model ${modelId} not found`);
 
-    const modelTypeToUse = getModelType(modelObj.provider || "");
+    const modelTypeToUse = getModelType(modelObj.provider || "", modelObj.id);
 
     // Use per-model entity results if available
     const modelEntities = entities.map((e) => {

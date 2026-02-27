@@ -169,6 +169,22 @@ async def get_available_models():
                 )  # Optional: model-specific endpoint
                 api_key = model_cfg.get("api_key")  # Optional: model-specific key
                 if deployment and model_name:
+                    # model_family = "meta" → emit under Meta Llama group (Azure-hosted Llama)
+                    model_family = model_cfg.get("model_family", "")
+                    if model_family == "meta":
+                        models.append({
+                            "id": f"azure-{deployment}",
+                            "name": f"{model_name} (Azure)",
+                            "provider": "Meta Llama",
+                            "model_type": "azure-llama",
+                            "description": "Fast (Azure)",
+                            "deployment": deployment,
+                            "api_version": api_version,
+                            "supports_temperature": True,
+                            "default_temperature": 0.5,
+                        })
+                        continue
+
                     # Map model names to their characteristics
                     model_descriptions = {
                         "gpt-4o": "Ultra-fast",
