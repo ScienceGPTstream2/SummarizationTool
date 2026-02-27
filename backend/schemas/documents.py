@@ -12,6 +12,10 @@ class ProcessFileRequest(BaseModel):
         default=True,
         description="Extract figures/charts from document (Azure Document Intelligence only)",
     )
+    batch_number: Optional[int] = Field(
+        default=None,
+        description="Logical batch identifier (1–99) assigned by the frontend for grouped uploads",
+    )
 
 
 class ExtractFigureContentRequest(BaseModel):

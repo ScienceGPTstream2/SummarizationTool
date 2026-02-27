@@ -238,6 +238,7 @@ async def process_uploaded_file(
                         figure_count=cached_metadata.get("figures_found") or 0,
                         table_count=cached_metadata.get("tables_found") or 0,
                         document_name=_cached_filename,
+                        batch_number=request.batch_number if hasattr(request, "batch_number") else None,
                     )
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
@@ -417,6 +418,7 @@ async def process_uploaded_file(
                 figure_count=metadata.get("figures_found") or 0,
                 table_count=metadata.get("tables_found") or 0,
                 document_name=_original_filename or _metadata_filename or file_path.name,
+                batch_number=request.batch_number if hasattr(request, "batch_number") else None,
             )
         except Exception as e:
             _parse_cost = 0.0

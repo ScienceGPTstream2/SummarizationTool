@@ -4,12 +4,21 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from core.dependencies import get_current_user
 from schemas.server import ServerConfig
 from services.llm.macbook import MacbookLLMClient
+
+
+class BatchMetricsRequest(BaseModel):
+    session_id: str
+    batch_number: int
+    batch_latency: float
+    document_count: int
 
 # Repo root is two levels above this file (backend/api/server/router.py → repo/)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -495,9 +504,18 @@ async def get_session_metrics(http_request: Request):
                         "page_count": call.page_count,
                         "figure_count": call.figure_count,
                         "table_count": call.table_count,
+                        "batch_number": call.batch_number,
                     }
                     for call in metrics.calls
                 ],
+                "batches": {
+                    str(b.batch_number): {
+                        "batch_number": b.batch_number,
+                        "batch_latency": round(b.batch_latency, 3),
+                        "document_count": b.document_count,
+                    }
+                    for b in metrics.batches.values()
+                },
             },
         },
     )
@@ -548,6 +566,20 @@ async def clear_session_metrics(http_request: Request):
     return JSONResponse(
         status_code=200, content={"session_id": session_id, "cleared": True}
     )
+
+
+@router.post("/server/batch-metrics", dependencies=[Depends(get_current_user)])
+async def record_batch_metrics(body: BatchMetricsRequest):
+    """Record wall-clock batch latency for a group of documents processed together."""
+    from services.telemetry.cost_tracker import cost_tracker
+
+    cost_tracker.record_batch(
+        session_id=body.session_id,
+        batch_number=body.batch_number,
+        batch_latency=body.batch_latency,
+        document_count=body.document_count,
+    )
+    return JSONResponse(status_code=200, content={"ok": True})
 
 
 @router.get("/server/document-metrics", dependencies=[Depends(get_current_user)])
