@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -58,6 +58,9 @@ function FigureImage({
   useEffect(() => {
     let mounted = true;
 
+    setImageUrl(null);
+    setLoading(true);
+
     getImageUrl(imagePath, figureId)
       .then((url) => {
         if (mounted) {
@@ -75,7 +78,7 @@ function FigureImage({
     return () => {
       mounted = false;
     };
-  }, [imagePath, figureId]);
+  }, [imagePath, figureId, getImageUrl]);
 
   if (loading) {
     return (
@@ -154,15 +157,30 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     return null;
   }
 
-  // Cleanup blob URLs on unmount ONLY
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
       imageBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       imageBlobUrlsRef.current.clear();
     };
-  }, []); // Empty dependency array - only run on mount/unmount
+  }, []);
 
-  const getImageUrl = async (
+  // Clear blob URL cache and reset document-scoped state when switching documents
+  useEffect(() => {
+    return () => {
+      imageBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      imageBlobUrlsRef.current.clear();
+    };
+  }, [conversionId]);
+
+  useEffect(() => {
+    setSelectedFigure(null);
+    setImageErrors(new Map());
+    setExtractingFigure(null);
+    setExtractedContent(new Map());
+  }, [conversionId]);
+
+  const getImageUrl = useCallback(async (
     imagePath: string,
     figureId: string
   ): Promise<string> => {
@@ -227,7 +245,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
       console.error("[FigureGallery] Error fetching image:", error);
       throw error;
     }
-  };
+  }, [conversionId]);
 
   const handleImageError = (figureId: string, errorMessage?: string) => {
     setImageErrors((prev) => {

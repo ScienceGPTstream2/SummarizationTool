@@ -1,5 +1,6 @@
 import os
 import uuid
+import time
 import aiofiles
 from datetime import datetime
 from pathlib import Path
@@ -121,7 +122,7 @@ class DoclingService:
             # Run the conversion in a thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             try:
-                result = await loop.run_in_executor(
+                result, _parse_duration = await loop.run_in_executor(
                     self.executor, self._convert_document_sync, source
                 )
             finally:
@@ -219,6 +220,7 @@ class DoclingService:
                 "markdown_path": str(markdown_path),
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
+                "parse_duration_seconds": _parse_duration,
                 "content_length": len(markdown_content),
                 "page_count": page_count,
                 "status": "success",
@@ -335,7 +337,7 @@ class DoclingService:
                 _logging.captureWarnings(True)
 
                 # Run the actual conversion synchronously (in executor)
-                result = convert_sync(src)
+                result, _parse_duration = convert_sync(src)
 
                 # Determine base filename
                 if s_type == "url":
@@ -408,6 +410,7 @@ class DoclingService:
                     "markdown_path": str(markdown_path),
                     "log_path": str(log_path),
                     "conversion_time": datetime.now().isoformat(),
+                    "parse_duration_seconds": _parse_duration,
                     "content_length": len(markdown_content),
                     "page_count": page_count,
                     "status": "success",
@@ -471,9 +474,11 @@ class DoclingService:
             source: File path or URL to the document
 
         Returns:
-            Docling conversion result
+            Tuple of (Docling conversion result, parse_duration_seconds float)
         """
-        return self.converter.convert(source)
+        _start = time.perf_counter()
+        result = self.converter.convert(source)
+        return result, time.perf_counter() - _start
 
     def _extract_images_sync(
         self, result, conversion_dir: Path, doc_filename: str
