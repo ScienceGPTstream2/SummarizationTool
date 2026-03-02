@@ -367,9 +367,18 @@ export default function App() {
                 file_hash: f.fileId,
                 filename: f.file.name,
                 processor_used: f.processingResult?.processorUsed ?? null,
-                parse_cost: f.processingResult?.parseCost || f.processingResult?.parse_cost || null,
-                page_count: f.processingResult?.pageCount ?? f.processingResult?.page_count ?? null,
-                parse_duration_seconds: f.processingResult?.parseDuration ?? f.processingResult?.parse_duration_seconds ?? null,
+                parse_cost:
+                  f.processingResult?.parseCost ||
+                  f.processingResult?.parse_cost ||
+                  null,
+                page_count:
+                  f.processingResult?.pageCount ??
+                  f.processingResult?.page_count ??
+                  null,
+                parse_duration_seconds:
+                  f.processingResult?.parseDuration ??
+                  f.processingResult?.parse_duration_seconds ??
+                  null,
               })),
             }),
           });
