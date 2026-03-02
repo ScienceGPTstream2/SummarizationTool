@@ -759,34 +759,28 @@ export default function App() {
                   r.document_id === doc.id
               )?.cost ?? undefined,
 
-            // Restore paragraph evaluation record (ground truth + human score)
+            // Restore paragraph evaluation record (ground truth + per-model human scores)
             paragraphEvaluation: (() => {
-              // Priority 1: find an evaluation that already has a human score
-              let paragEval = sessionData.evaluation_results?.find(
-                (ev: any) =>
-                  ev.entity_name === "__paragraph_summary__" &&
-                  ev.document_id === doc.id &&
-                  ev.human_score != null
-              );
-
-              // Priority 2: fallback to any paragraph evaluation found
-              if (!paragEval) {
-                paragEval = sessionData.evaluation_results?.find(
+              const paragEvals =
+                sessionData.evaluation_results?.filter(
                   (ev: any) =>
                     ev.entity_name === "__paragraph_summary__" &&
                     ev.document_id === doc.id
-                );
+                ) ?? [];
+
+              if (paragEvals.length === 0) return undefined;
+
+              const groundTruth = paragEvals[0].ground_truth || "";
+              const humanScoreByModel: Record<string, number | null> = {};
+              for (const ev of paragEvals) {
+                if (ev.model_id) {
+                  humanScoreByModel[ev.model_id] =
+                    ev.human_score != null
+                      ? Math.round(ev.human_score * 100)
+                      : null;
+                }
               }
-
-              if (!paragEval) return undefined;
-
-              return {
-                groundTruth: paragEval.ground_truth || "",
-                humanScore:
-                  paragEval.human_score != null
-                    ? Math.round(paragEval.human_score * 100)
-                    : null,
-              };
+              return { groundTruth, humanScoreByModel };
             })(),
 
             // Restore per-model paragraph summaries

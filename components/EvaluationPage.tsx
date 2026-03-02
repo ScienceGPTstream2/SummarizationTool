@@ -873,7 +873,7 @@ export function EvaluationPage({
 
             const updatedFile = { ...file };
 
-            // Special case: paragraph evaluation — update paragraphEvaluation.humanScore
+            // Special case: paragraph evaluation — update humanScoreByModel per source model
             // This is what BatchResultsPage reads from
             if (
               params.entityName === "__paragraph_summary__" &&
@@ -881,7 +881,10 @@ export function EvaluationPage({
             ) {
               updatedFile.paragraphEvaluation = {
                 ...updatedFile.paragraphEvaluation,
-                humanScore: params.humanScore,
+                humanScoreByModel: {
+                  ...(updatedFile.paragraphEvaluation.humanScoreByModel || {}),
+                  [params.sourceModel]: params.humanScore,
+                },
               };
             }
 

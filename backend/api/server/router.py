@@ -687,6 +687,7 @@ async def clear_benchmark_cache(http_request: Request):
         )
 
     args = [sys.executable, str(_CLEAR_SCRIPT)]
+    args.append("--fs-only")  # Never touch the DB — only clear processed/ dirs
     if mode == "dry_run":
         args.append("--dry-run")
     else:

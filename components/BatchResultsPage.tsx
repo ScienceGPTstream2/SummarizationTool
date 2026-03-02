@@ -328,7 +328,7 @@ export const transformToRows = (documentData: any): ResultRow[] => {
           completeness: null,
           relevance: null,
           safety: null,
-          humanEval: paragraphEval.humanScore ?? null,
+          humanEval: paragraphEval.humanScoreByModel?.[modelId] ?? null,
           cost: "",
           docParseCost: "",
           extractionCost: formatCost((fileItem as any).paragraphSummaryCost),
@@ -361,7 +361,10 @@ export const transformToRows = (documentData: any): ResultRow[] => {
         completeness: null,
         relevance: null,
         safety: null,
-        humanEval: paragraphEval.humanScore ?? null,
+        humanEval:
+          paragraphEval.humanScoreByModel?.[
+            (fileItem as any).paragraphSummaryModel || ""
+          ] ?? null,
         cost: "",
         docParseCost: "",
         extractionCost: formatCost((fileItem as any).paragraphSummaryCost),
