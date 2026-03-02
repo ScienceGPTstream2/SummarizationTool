@@ -14,6 +14,7 @@ import {
 import { DocumentData } from "../App";
 import { toast } from "sonner";
 import { authenticatedFetch } from "../utils/authUtils";
+import { getSessionId } from "../utils/session";
 import {
   Select,
   SelectContent,
@@ -45,6 +46,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   );
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const batchNumberRef = useRef(0);
 
   // Parser selection state
   const [defaultParser, setDefaultParser] = useState<string>(
@@ -287,6 +289,14 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     // Limit concurrency to 5 to prevent browser freeze
     const limit = pLimit(5);
 
+    // Assign a batch number for this upload action (1–99, wraps after 99)
+    batchNumberRef.current =
+      batchNumberRef.current >= 99 ? 1 : batchNumberRef.current + 1;
+    const currentBatch = batchNumberRef.current;
+    const batchStart = Date.now();
+
+    let batchDocumentCount = 0;
+
     // Process all files with concurrency limit
     await Promise.all(
       filesToProcess.map((file) =>
@@ -305,7 +315,10 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 headers: {
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ processor: parser }),
+                body: JSON.stringify({
+                  processor: parser,
+                  batch_number: currentBatch,
+                }),
               }
             );
 
@@ -328,10 +341,13 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 processorUsed: result.processor_used,
                 figuresCount: result.figures_found,
                 tablesCount: result.tables_found,
+                parseCost: result.parse_cost,
+                parseDuration: result.parse_duration_seconds,
                 parser,
               },
             }));
 
+            batchDocumentCount += 1;
             toast.success(`${file.name} processed successfully`);
           } catch (error) {
             console.error(`Error processing ${file.name}:`, error);
@@ -352,6 +368,25 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
         })
       )
     );
+
+    // Ship batch wall-clock latency to backend
+    if (batchDocumentCount > 0) {
+      const batchLatency = (Date.now() - batchStart) / 1000;
+      try {
+        await authenticatedFetch("/api/server/batch-metrics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: getSessionId(),
+            batch_number: currentBatch,
+            batch_latency: batchLatency,
+            document_count: batchDocumentCount,
+          }),
+        });
+      } catch (err) {
+        console.warn("[batch-metrics] Failed to record batch latency:", err);
+      }
+    }
   };
 
   const handleProceed = () => {

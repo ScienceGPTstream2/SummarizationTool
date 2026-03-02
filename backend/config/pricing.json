@@ -95,6 +95,16 @@
       "batch_input_per_million": 0.55,
       "batch_output_per_million": 2.2
     },
+    "azure:llama-4-maverick-17b-128e-instruct-fp8-2": {
+      "provider": "azure",
+      "input_per_million": 0.339,
+      "output_per_million": 1.356
+    },
+    "azure:llama-3.3-70b-instruct": {
+      "provider": "azure",
+      "input_per_million": 0.963,
+      "output_per_million": 0.963
+    },
     "vertex:gemini-2.5-pro": {
       "provider": "gcp",
       "input_per_million": 1.25,

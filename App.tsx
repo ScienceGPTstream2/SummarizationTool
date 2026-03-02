@@ -367,8 +367,18 @@ export default function App() {
                 file_hash: f.fileId,
                 filename: f.file.name,
                 processor_used: f.processingResult?.processorUsed ?? null,
-                parse_cost: f.processingResult?.parse_cost ?? null,
-                page_count: f.processingResult?.page_count ?? null,
+                parse_cost:
+                  f.processingResult?.parseCost ||
+                  f.processingResult?.parse_cost ||
+                  null,
+                page_count:
+                  f.processingResult?.pageCount ??
+                  f.processingResult?.page_count ??
+                  null,
+                parse_duration_seconds:
+                  f.processingResult?.parseDuration ??
+                  f.processingResult?.parse_duration_seconds ??
+                  null,
               })),
             }),
           });
@@ -379,6 +389,43 @@ export default function App() {
             console.log("✅ Early session created:", newSessionId);
 
             updatedData.sessionId = newSessionId;
+
+            // Fetch session back to get recomputed parse_cost values from DB
+            // (same _db_to_session recompute path used by history restore)
+            try {
+              const sessionDetailRes = await fetch(
+                `/api/sessions/${newSessionId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (sessionDetailRes.ok) {
+                const sessionDetail = await sessionDetailRes.json();
+                const docs = sessionDetail.documents || [];
+                if (updatedData.uploadedFiles && docs.length > 0) {
+                  for (const uf of updatedData.uploadedFiles) {
+                    const matchDoc = docs.find(
+                      (d: any) => d.file_hash === uf.fileId
+                    );
+                    if (matchDoc?.parse_cost) {
+                      if (!uf.processingResult) uf.processingResult = {} as any;
+                      uf.processingResult.parseCost = matchDoc.parse_cost;
+                      uf.processingResult.parse_cost = matchDoc.parse_cost;
+                    }
+                    if (matchDoc?.parse_duration_seconds) {
+                      if (!uf.processingResult) uf.processingResult = {} as any;
+                      uf.processingResult.parseDuration =
+                        matchDoc.parse_duration_seconds;
+                      uf.processingResult.parse_duration_seconds =
+                        matchDoc.parse_duration_seconds;
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn(
+                "Could not fetch session for parse_cost backfill:",
+                e
+              );
+            }
 
             // CRITICAL: Update state immediately so the persistence useEffect has the ID
             setDocumentData((prev) => ({ ...prev, sessionId: newSessionId }));
@@ -668,6 +715,7 @@ export default function App() {
                 fileConfig.processor_used ||
                 "azure_doc_intelligence",
               parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
+              parseDuration: doc.parse_duration_seconds ?? undefined,
             },
             processorUsed:
               doc.processor_used || fileConfig.processor_used || undefined,

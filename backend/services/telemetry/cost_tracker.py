@@ -14,6 +14,18 @@ class CallMetric:
     duration: float
     cost: float
     timestamp: str
+    document_name: Optional[str] = None
+    page_count: int = 0
+    figure_count: int = 0
+    table_count: int = 0
+    batch_number: Optional[int] = None
+
+
+@dataclass
+class BatchMetric:
+    batch_number: int
+    batch_latency: float
+    document_count: int
 
 
 @dataclass
@@ -23,6 +35,7 @@ class SessionMetrics:
     total_latency: float = 0.0
     total_calls: int = 0
     calls: List[CallMetric] = field(default_factory=list)
+    batches: Dict[int, BatchMetric] = field(default_factory=dict)
 
 
 class CostTracker:
@@ -172,6 +185,10 @@ class CostTracker:
         completion_tokens: Optional[int],
         duration: Optional[float],
         page_count: Optional[int] = None,
+        document_name: Optional[str] = None,
+        figure_count: int = 0,
+        table_count: int = 0,
+        batch_number: Optional[int] = None,
     ) -> None:
         if not session_id:
             return
@@ -204,6 +221,11 @@ class CostTracker:
                 duration=duration,
                 cost=cost,
                 timestamp=datetime.utcnow().isoformat(),
+                document_name=document_name,
+                page_count=int(page_count or 0),
+                figure_count=int(figure_count or 0),
+                table_count=int(table_count or 0),
+                batch_number=batch_number,
             )
         )
 
@@ -218,6 +240,25 @@ class CostTracker:
                 )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to update session metrics in DB: {e}")
+
+    def record_batch(
+        self,
+        session_id: Optional[str],
+        batch_number: int,
+        batch_latency: float,
+        document_count: int,
+    ) -> None:
+        if not session_id:
+            return
+        metrics = self._sessions.get(session_id)
+        if not metrics:
+            metrics = SessionMetrics(session_id=session_id)
+            self._sessions[session_id] = metrics
+        metrics.batches[batch_number] = BatchMetric(
+            batch_number=batch_number,
+            batch_latency=batch_latency,
+            document_count=document_count,
+        )
 
     def get_session_metrics(
         self, session_id: Optional[str]

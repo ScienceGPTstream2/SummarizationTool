@@ -43,6 +43,7 @@ class SessionDocument(BaseModel):
     processor_used: Optional[str] = None
     parse_cost: Optional[float] = None
     page_count: Optional[int] = None
+    parse_duration_seconds: Optional[float] = None
 
 
 class ExtractionResult(BaseModel):

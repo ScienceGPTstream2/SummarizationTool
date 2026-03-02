@@ -168,6 +168,7 @@ async def process_uploaded_file(
 
             # If a session_id is available, prefer the DB-persisted value for consistency,
             # and backfill DB if the record doesn't have a cost yet.
+            _cached_doc_filename = None
             try:
                 session_id = (
                     http_request.headers.get("X-Session-Id") if http_request else None
@@ -183,6 +184,8 @@ async def process_uploaded_file(
                     doc_match = next(
                         (d for d in docs if d.get("file_hash") == file_hash), None
                     )
+                    if doc_match:
+                        _cached_doc_filename = doc_match.get("filename")
 
                     if (
                         doc_match
@@ -193,15 +196,65 @@ async def process_uploaded_file(
                         parse_cost = float(doc_match["parse_cost"])
                     elif doc_match:
                         # Not yet in DB (or stored as 0) — persist the freshly estimated value
+                        _cached_dur_for_db = cached_metadata.get(
+                            "parse_duration_seconds"
+                        )
+                        if _cached_dur_for_db is None:
+                            _raw = cached_metadata.get("conversion_time")
+                            if isinstance(_raw, (int, float)):
+                                _cached_dur_for_db = float(_raw)
                         db.update_document(
                             doc_match["id"],
                             {
                                 "parse_cost": parse_cost,
                                 "page_count": cached_metadata.get("page_count"),
+                                "figure_count": cached_metadata.get("figures_found")
+                                or 0,
+                                "table_count": cached_metadata.get("tables_found") or 0,
+                                "parse_duration_seconds": float(
+                                    _cached_dur_for_db or 0.0
+                                ),
                             },
                         )
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to handle cached parse cost DB sync: {e}")
+
+            # Record a call metric for the cached document so it appears in session metrics.
+            # Use the internally stored processing duration (not wall-clock time).
+            try:
+                _cached_session_id = (
+                    http_request.headers.get("X-Session-Id") if http_request else None
+                )
+                if _cached_session_id:
+                    _cached_dur = cached_metadata.get("parse_duration_seconds")
+                    if _cached_dur is None:
+                        _raw = cached_metadata.get("conversion_time")
+                        if isinstance(_raw, (int, float)):
+                            _cached_dur = float(_raw)
+                    _cached_filename = (
+                        _cached_doc_filename
+                        or cached_metadata.get("original_filename")
+                        or file_path.name
+                    )
+                    cost_tracker.record_call(
+                        session_id=_cached_session_id,
+                        provider="azure",
+                        model=processor_name,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        duration=float(_cached_dur or 0.0),
+                        page_count=cached_metadata.get("page_count") or 0,
+                        figure_count=cached_metadata.get("figures_found") or 0,
+                        table_count=cached_metadata.get("tables_found") or 0,
+                        document_name=_cached_filename,
+                        batch_number=(
+                            request.batch_number
+                            if hasattr(request, "batch_number")
+                            else None
+                        ),
+                    )
+            except Exception as e:
+                print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
 
             return JSONResponse(
                 status_code=200,
@@ -219,6 +272,10 @@ async def process_uploaded_file(
                     "tables_found": cached_metadata.get("tables_found", 0),
                     "parse_cost": parse_cost,
                     "page_count": cached_metadata.get("page_count"),
+                    "parse_duration_seconds": float(
+                        cached_metadata.get("parse_duration_seconds") or 0
+                    )
+                    or None,
                 },
             )
 
@@ -236,28 +293,49 @@ async def process_uploaded_file(
         )
         conversion_duration = time.perf_counter() - conversion_start
 
-        # Estimate parse cost (per-page or per-minute depending on processor)
-        parse_cost = 0.0
+        # Determine actual processing duration from the service's internal measurement.
+        # The router wrapper (conversion_duration) includes queue wait when Docling
+        # serializes conversions — use the per-doc value stored in metadata instead.
+        # Normalize 0.0 → None so the fallback chain below activates correctly.
+        metadata = result.get("metadata", {})
+        actual_duration = metadata.get("parse_duration_seconds") or None
+        if actual_duration is None:
+            _raw_ct = metadata.get("conversion_time")
+            if isinstance(_raw_ct, (int, float)) and _raw_ct > 0:
+                actual_duration = float(_raw_ct)
+        if not actual_duration:
+            actual_duration = conversion_duration  # fallback: wall-clock always > 0
+
+        # Estimate parse cost (per-page or per-minute depending on processor).
+        # parse_cost stays None when estimation produces 0 so we never surface a
+        # misleading "$0.000" — the DB write below will skip it (None is filtered).
+        parse_cost = None
         try:
-            metadata = result.get("metadata", {})
-            parse_cost = cost_tracker.estimate_call_cost(
+            _estimated = cost_tracker.estimate_call_cost(
                 provider="azure",
                 model=result.get("processor_used", processor_name),
                 prompt_tokens=0,
                 completion_tokens=0,
                 page_count=metadata.get("page_count") or 0,
-                duration=conversion_duration,
+                duration=actual_duration,
             )
+            if _estimated and float(_estimated) > 0:
+                parse_cost = _estimated
         except Exception as e:
             print(f"[COST_TRACKER] Failed to estimate parse cost: {e}")
 
-        # Persist parse_cost and page_count to documents table if possible.
-        # page_count is stored so the deterministic recompute fallback in
-        # _db_to_session() can reconstruct parse_cost from page_count + processor_used.
+        print(
+            f"[PARSE_COST] fresh doc: processor={result.get('processor_used', processor_name)!r} "
+            f"actual_duration={actual_duration:.3f}s page_count={metadata.get('page_count')} "
+            f"parse_cost={parse_cost}"
+        )
+
+        # Single consolidated DB write: persist parse_cost + all per-doc fields.
+        # update_document() filters None values so parse_cost=None → not written,
+        # leaving the DB column null rather than 0.0.
+        session_id = http_request.headers.get("X-Session-Id") if http_request else None
+        _original_filename = None
         try:
-            session_id = (
-                http_request.headers.get("X-Session-Id") if http_request else None
-            )
             if session_id:
                 from services.database.supabase_db_service import get_db_service
 
@@ -267,15 +345,28 @@ async def process_uploaded_file(
                     (d for d in docs if d.get("file_hash") == file_hash), None
                 )
                 if doc_match:
+                    _original_filename = doc_match.get("filename")
                     db.update_document(
                         doc_match["id"],
                         {
-                            "parse_cost": parse_cost,
+                            "parse_cost": parse_cost,  # None → skipped by filter
                             "page_count": metadata.get("page_count"),
                             "processor_used": result.get(
                                 "processor_used", processor_name
                             ),
+                            "figure_count": metadata.get("figures_found") or 0,
+                            "table_count": metadata.get("tables_found") or 0,
+                            "parse_duration_seconds": actual_duration,
                         },
+                    )
+                    print(
+                        f"[PARSE_COST] Persisted parse_cost={parse_cost} "
+                        f"to doc {doc_match['id']}"
+                    )
+                else:
+                    print(
+                        f"[PARSE_COST] WARNING: No doc row found for "
+                        f"file_hash={file_hash} in session={session_id}"
                     )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
@@ -292,26 +383,41 @@ async def process_uploaded_file(
                 if _meta_path.exists():
                     _meta_data = _json.loads(_meta_path.read_text())
                     _meta_data["parse_cost"] = parse_cost
-                    _meta_data["parse_duration_seconds"] = conversion_duration
+                    _meta_data["parse_duration_seconds"] = actual_duration
                     _meta_path.write_text(_json.dumps(_meta_data, indent=2))
         except Exception as _e:
             print(f"[COST_TRACKER] Failed to write parse_cost to metadata.json: {_e}")
 
+        # Record call metric for session metrics widget.
+        # Fallback: read original_filename from the file's metadata.json.
+        _metadata_filename = None
         try:
-            from services.telemetry.cost_tracker import cost_tracker
+            import json as _json
 
-            session_id = (
-                http_request.headers.get("X-Session-Id") if http_request else None
-            )
-            metadata = result.get("metadata", {})
+            _meta_path = file_path.parent / "metadata.json"
+            if _meta_path.exists():
+                _meta = _json.loads(_meta_path.read_text())
+                _metadata_filename = _meta.get("original_filename")
+        except Exception:
+            pass
+
+        try:
             cost_tracker.record_call(
                 session_id=session_id,
                 provider="azure",
-                model=result.get("processor_used", "unknown"),
+                model=result.get("processor_used", processor_name),
                 prompt_tokens=0,
                 completion_tokens=0,
-                duration=conversion_duration,
+                duration=actual_duration,
                 page_count=metadata.get("page_count") or 0,
+                figure_count=metadata.get("figures_found") or 0,
+                table_count=metadata.get("tables_found") or 0,
+                document_name=_original_filename
+                or _metadata_filename
+                or file_path.name,
+                batch_number=(
+                    request.batch_number if hasattr(request, "batch_number") else None
+                ),
             )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to record document processing metrics: {e}")
@@ -337,6 +443,7 @@ async def process_uploaded_file(
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
             "parse_cost": parse_cost,
+            "parse_duration_seconds": actual_duration,
         }
 
         # Include figures information if available

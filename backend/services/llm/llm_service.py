@@ -206,6 +206,8 @@ class LLMService:
             elif model_type == "llama":
                 if self.llama_client.disabled:
                     return {"success": False, "error": "Llama is not configured."}
+                # Allow 300s for Llama: Vertex AI MaaS has cold-start latency of 90-150s
+                # when the model instance has been idle. Warm instances respond in 2-5s.
                 result = await self._call_with_timeout_logging(
                     operation_name,
                     self.llama_client.extract_entities_with_llama(
@@ -216,8 +218,31 @@ class LLMService:
                         temperature,
                         max_input_length,
                     ),
+                    timeout_seconds=300,
                 )
                 self._record_session_metrics(session_id, "gcp", result)
+                return result
+            elif model_type == "azure-llama":
+                if self.azure_client.disabled:
+                    return {
+                        "success": False,
+                        "error": "Azure OpenAI is not configured.",
+                    }
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.azure_client.extract_entities_with_azure(
+                        markdown,
+                        extraction_prompt,
+                        deployment,
+                        api_version,
+                        endpoint_override,
+                        api_key_override,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                )
+                self._record_session_metrics(session_id, "azure", result)
                 return result
             elif model_type == "macbook":
                 if self.macbook_client.disabled:
@@ -335,7 +360,7 @@ class LLMService:
         """
         Generate a paragraph using the specified LLM.
         """
-        if model_type == "azure":
+        if model_type in ("azure", "azure-llama"):
             if self.azure_client.disabled:
                 return {"success": False, "error": "Azure OpenAI is not configured."}
             result = await self.azure_client.generate_paragraph_with_azure(
@@ -378,11 +403,16 @@ class LLMService:
         elif model_type == "llama":
             if self.llama_client.disabled:
                 return {"success": False, "error": "Llama is not configured."}
-            result = await self.llama_client.generate_paragraph_with_llama(
-                user_prompt,
-                model_id,
-                max_tokens,
-                temperature,
+            # Wrap with timeout logging — same 300s budget as extraction
+            result = await self._call_with_timeout_logging(
+                "paragraph_llama",
+                self.llama_client.generate_paragraph_with_llama(
+                    user_prompt,
+                    model_id,
+                    max_tokens,
+                    temperature,
+                ),
+                timeout_seconds=300,
             )
             self._record_session_metrics(session_id, "gcp", result)
             return result

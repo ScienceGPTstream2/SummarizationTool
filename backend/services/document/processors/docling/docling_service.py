@@ -1,15 +1,22 @@
 import os
 import uuid
+import time
 import aiofiles
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import json
 import asyncio
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    AcceleratorOptions,
+    AcceleratorDevice,
+)
+from docling.pipeline.standard_pdf_pipeline import ThreadedPdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
 
@@ -21,7 +28,7 @@ class DoclingService:
     def __init__(
         self,
         markdown_dir: Optional[Union[str, Path]] = None,
-        image_resolution_scale: float = 2.0,
+        image_resolution_scale: float = 1.5,
     ):
         """
         Initialize the docling service
@@ -44,10 +51,19 @@ class DoclingService:
         self.output_base_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure PDF pipeline options for image extraction
-        pipeline_options = PdfPipelineOptions()
+        pipeline_options = ThreadedPdfPipelineOptions(
+            accelerator_options=AcceleratorOptions(
+                num_threads=multiprocessing.cpu_count(),
+                device=AcceleratorDevice.AUTO,
+            ),
+            ocr_batch_size=4,
+            layout_batch_size=64,
+            table_batch_size=32,
+        )
         pipeline_options.images_scale = image_resolution_scale
-        pipeline_options.generate_page_images = True
+        pipeline_options.generate_page_images = False
         pipeline_options.generate_picture_images = True
+        pipeline_options.do_ocr = False
 
         # Initialize docling converter with image extraction enabled
         self.converter = DocumentConverter(
@@ -57,7 +73,7 @@ class DoclingService:
         )
 
         # Thread pool for CPU-intensive tasks
-        self.executor = ThreadPoolExecutor(max_workers=50)
+        self.executor = ThreadPoolExecutor(max_workers=4)
 
     async def convert_document_to_markdown(
         self,
@@ -110,7 +126,7 @@ class DoclingService:
             # Run the conversion in a thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             try:
-                result = await loop.run_in_executor(
+                result, _parse_duration = await loop.run_in_executor(
                     self.executor, self._convert_document_sync, source
                 )
             finally:
@@ -208,6 +224,7 @@ class DoclingService:
                 "markdown_path": str(markdown_path),
                 "log_path": str(log_path),
                 "conversion_time": datetime.now().isoformat(),
+                "parse_duration_seconds": _parse_duration,
                 "content_length": len(markdown_content),
                 "page_count": page_count,
                 "status": "success",
@@ -324,7 +341,7 @@ class DoclingService:
                 _logging.captureWarnings(True)
 
                 # Run the actual conversion synchronously (in executor)
-                result = convert_sync(src)
+                result, _parse_duration = convert_sync(src)
 
                 # Determine base filename
                 if s_type == "url":
@@ -397,6 +414,7 @@ class DoclingService:
                     "markdown_path": str(markdown_path),
                     "log_path": str(log_path),
                     "conversion_time": datetime.now().isoformat(),
+                    "parse_duration_seconds": _parse_duration,
                     "content_length": len(markdown_content),
                     "page_count": page_count,
                     "status": "success",
@@ -460,9 +478,11 @@ class DoclingService:
             source: File path or URL to the document
 
         Returns:
-            Docling conversion result
+            Tuple of (Docling conversion result, parse_duration_seconds float)
         """
-        return self.converter.convert(source)
+        _start = time.perf_counter()
+        result = self.converter.convert(source)
+        return result, time.perf_counter() - _start
 
     def _extract_images_sync(
         self, result, conversion_dir: Path, doc_filename: str

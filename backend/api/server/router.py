@@ -1,12 +1,29 @@
 """Server configuration API endpoints"""
 
 import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from core.dependencies import get_current_user
 from schemas.server import ServerConfig
 from services.llm.macbook import MacbookLLMClient
+
+
+class BatchMetricsRequest(BaseModel):
+    session_id: str
+    batch_number: int
+    batch_latency: float
+    document_count: int
+
+
+# Repo root is two levels above this file (backend/api/server/router.py → repo/)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CLEAR_SCRIPT = _REPO_ROOT / "backend" / "scripts" / "clear_for_benchmarking.py"
 
 router = APIRouter(prefix="/api", tags=["server"])
 
@@ -153,6 +170,24 @@ async def get_available_models():
                 )  # Optional: model-specific endpoint
                 api_key = model_cfg.get("api_key")  # Optional: model-specific key
                 if deployment and model_name:
+                    # model_family = "meta" → emit under Meta Llama group (Azure-hosted Llama)
+                    model_family = model_cfg.get("model_family", "")
+                    if model_family == "meta":
+                        models.append(
+                            {
+                                "id": f"azure-{deployment}",
+                                "name": f"{model_name} (Azure)",
+                                "provider": "Meta Llama",
+                                "model_type": "azure-llama",
+                                "description": "Fast (Azure)",
+                                "deployment": deployment,
+                                "api_version": api_version,
+                                "supports_temperature": True,
+                                "default_temperature": 0.5,
+                            }
+                        )
+                        continue
+
                     # Map model names to their characteristics
                     model_descriptions = {
                         "gpt-4o": "Ultra-fast",
@@ -484,9 +519,22 @@ async def get_session_metrics(http_request: Request):
                         "duration": call.duration,
                         "cost": round(call.cost, 6),
                         "timestamp": call.timestamp,
+                        "document_name": call.document_name,
+                        "page_count": call.page_count,
+                        "figure_count": call.figure_count,
+                        "table_count": call.table_count,
+                        "batch_number": call.batch_number,
                     }
                     for call in metrics.calls
                 ],
+                "batches": {
+                    str(b.batch_number): {
+                        "batch_number": b.batch_number,
+                        "batch_latency": round(b.batch_latency, 3),
+                        "document_count": b.document_count,
+                    }
+                    for b in metrics.batches.values()
+                },
             },
         },
     )
@@ -537,3 +585,143 @@ async def clear_session_metrics(http_request: Request):
     return JSONResponse(
         status_code=200, content={"session_id": session_id, "cleared": True}
     )
+
+
+@router.post("/server/batch-metrics", dependencies=[Depends(get_current_user)])
+async def record_batch_metrics(body: BatchMetricsRequest):
+    """Record wall-clock batch latency for a group of documents processed together."""
+    from services.telemetry.cost_tracker import cost_tracker
+
+    cost_tracker.record_batch(
+        session_id=body.session_id,
+        batch_number=body.batch_number,
+        batch_latency=body.batch_latency,
+        document_count=body.document_count,
+    )
+    return JSONResponse(status_code=200, content={"ok": True})
+
+
+@router.get("/server/document-metrics", dependencies=[Depends(get_current_user)])
+async def get_document_metrics(http_request: Request):
+    """
+    Return per-document parse metrics from the documents table for the current session.
+    Reads from DB so the data is available even after session restoration.
+
+    Returns:
+        { documents: [ { document_name, provider, model, duration, cost,
+                          page_count, figure_count, table_count } ] }
+    """
+    session_id = http_request.headers.get("X-Session-Id")
+    if not session_id:
+        return JSONResponse(status_code=200, content={"documents": []})
+
+    try:
+        from services.database.supabase_db_service import get_db_service
+
+        db = get_db_service()
+        docs = db.get_documents_by_session(session_id)
+
+        _DOC_PROCESSORS = {"docling", "azure_doc_intelligence"}
+        return JSONResponse(
+            status_code=200,
+            content={
+                "documents": [
+                    {
+                        "document_name": doc.get("filename"),
+                        "provider": "azure",
+                        "model": doc.get("processor_used") or "docling",
+                        "duration": doc.get("parse_duration_seconds"),
+                        "cost": doc.get("parse_cost"),
+                        "page_count": doc.get("page_count") or 0,
+                        "figure_count": doc.get("figure_count") or 0,
+                        "table_count": doc.get("table_count") or 0,
+                    }
+                    for doc in docs
+                    if (doc.get("processor_used") or "docling") in _DOC_PROCESSORS
+                ]
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"documents": [], "error": str(e)},
+        )
+
+
+@router.post("/server/benchmark/clear", dependencies=[Depends(get_current_user)])
+async def clear_benchmark_cache(http_request: Request):
+    """
+    Run backend/scripts/clear_for_benchmarking.py to wipe cached processed outputs
+    and DB rows so the next upload forces fresh Docling/Azure conversions.
+
+    Body:
+        mode      "dry_run" | "execute"
+        processor null | "docling" | "azure_doc_intelligence"
+
+    Returns:
+        { ok, output, errors, exit_code }
+    """
+    body = await http_request.json()
+    mode = body.get("mode")
+    processor = body.get("processor")
+
+    if mode not in ("dry_run", "execute"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "mode must be 'dry_run' or 'execute'",
+                "exit_code": 1,
+            },
+        )
+    if processor not in (None, "docling", "azure_doc_intelligence"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "processor must be null, 'docling', or 'azure_doc_intelligence'",
+                "exit_code": 1,
+            },
+        )
+
+    args = [sys.executable, str(_CLEAR_SCRIPT)]
+    if mode == "dry_run":
+        args.append("--dry-run")
+    else:
+        args.append("--yes")
+    if processor:
+        args.extend(["--processor", processor])
+
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO_ROOT),
+            timeout=120,
+        )
+        return JSONResponse(
+            content={
+                "ok": proc.returncode == 0,
+                "output": proc.stdout,
+                "errors": proc.stderr,
+                "exit_code": proc.returncode,
+            }
+        )
+    except subprocess.TimeoutExpired:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "Script timed out after 120s",
+                "exit_code": 1,
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "output": "", "errors": str(e), "exit_code": 1},
+        )

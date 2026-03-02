@@ -248,6 +248,7 @@ class SupabaseDBService:
         processor_used: Optional[str] = None,
         parse_cost: Optional[float] = None,
         page_count: Optional[int] = None,
+        parse_duration_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Create a document record"""
         data = {
@@ -265,6 +266,8 @@ class SupabaseDBService:
             data["page_count"] = page_count
         if processor_used is not None:
             data["processor_used"] = processor_used
+        if parse_duration_seconds is not None:
+            data["parse_duration_seconds"] = parse_duration_seconds
 
         result = self.client.table("documents").insert(data).execute()
         return result.data[0] if result.data else None
@@ -369,6 +372,26 @@ class SupabaseDBService:
             data["processed_at"] = datetime.utcnow().isoformat()
 
         return self.update_document(document_id, data)
+
+    def get_parse_cost_by_file_hash(self, file_hash: str) -> Optional[float]:
+        """Cross-session lookup: find any prior parse_cost stored for this file."""
+        try:
+            result = (
+                self.client.table("documents")
+                .select("parse_cost")
+                .eq("file_hash", file_hash)
+                .not_.is_("parse_cost", "null")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                val = result.data[0].get("parse_cost")
+                return float(val) if val and float(val) > 0 else None
+            return None
+        except Exception as e:
+            print(f"[DB] get_parse_cost_by_file_hash failed: {e}")
+            return None
 
     # ==========================================
     # Extraction Result Operations

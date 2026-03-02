@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -58,6 +58,9 @@ function FigureImage({
   useEffect(() => {
     let mounted = true;
 
+    setImageUrl(null);
+    setLoading(true);
+
     getImageUrl(imagePath, figureId)
       .then((url) => {
         if (mounted) {
@@ -75,7 +78,7 @@ function FigureImage({
     return () => {
       mounted = false;
     };
-  }, [imagePath, figureId]);
+  }, [imagePath, figureId, getImageUrl]);
 
   if (loading) {
     return (
@@ -154,81 +157,95 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     return null;
   }
 
-  // Cleanup blob URLs on unmount ONLY
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
       imageBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       imageBlobUrlsRef.current.clear();
     };
-  }, []); // Empty dependency array - only run on mount/unmount
+  }, []);
 
-  const getImageUrl = async (
-    imagePath: string,
-    figureId: string
-  ): Promise<string> => {
-    // Check if we already have a blob URL for this image
-    if (imageBlobUrlsRef.current.has(figureId)) {
-      console.log(`[FigureGallery] Using cached blob URL for ${figureId}`);
-      return imageBlobUrlsRef.current.get(figureId)!;
-    }
+  // Clear blob URL cache and reset document-scoped state when switching documents
+  useEffect(() => {
+    return () => {
+      imageBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      imageBlobUrlsRef.current.clear();
+    };
+  }, [conversionId]);
 
-    // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
-    const filename = imagePath.split("/").pop();
-    const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-    const token = await getValidToken();
-    if (!token) {
-      throw new Error("No authentication token found");
-    }
-    const url = `${apiBase}/api/documents/${conversionId}/figures/${filename}`;
+  useEffect(() => {
+    setSelectedFigure(null);
+    setImageErrors(new Map());
+    setExtractingFigure(null);
+    setExtractedContent(new Map());
+  }, [conversionId]);
 
-    console.log(`[FigureGallery] Fetching figure:`, {
-      figureId,
-      imagePath,
-      filename,
-      conversionId,
-      url,
-    });
-
-    try {
-      const response = await authenticatedFetch(url);
-
-      console.log(`[FigureGallery] Response:`, {
-        status: response.status,
-        ok: response.ok,
-        contentType: response.headers.get("content-type"),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[FigureGallery] Error response:`, errorText);
-        throw new Error(
-          `Error ${response.status}: ${response.statusText} (${url})`
-        );
+  const getImageUrl = useCallback(
+    async (imagePath: string, figureId: string): Promise<string> => {
+      // Check if we already have a blob URL for this image
+      if (imageBlobUrlsRef.current.has(figureId)) {
+        console.log(`[FigureGallery] Using cached blob URL for ${figureId}`);
+        return imageBlobUrlsRef.current.get(figureId)!;
       }
 
-      const blob = await response.blob();
-      console.log(`[FigureGallery] Blob received:`, {
-        size: blob.size,
-        type: blob.type,
+      // Extract just the filename from the path (e.g., "figures/1.1.png" -> "1.1.png")
+      const filename = imagePath.split("/").pop();
+      const token = await getValidToken();
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      const url = `/api/documents/${conversionId}/figures/${filename}`;
+
+      console.log(`[FigureGallery] Fetching figure:`, {
+        figureId,
+        imagePath,
+        filename,
+        conversionId,
+        url,
       });
 
-      const blobUrl = URL.createObjectURL(blob);
-      console.log(
-        `[FigureGallery] ✅ Created blob URL for ${figureId}: ${blobUrl}`
-      );
+      try {
+        const response = await authenticatedFetch(url);
 
-      // Store in ref instead of state to avoid re-render that would revoke the blob
-      imageBlobUrlsRef.current.set(figureId, blobUrl);
+        console.log(`[FigureGallery] Response:`, {
+          status: response.status,
+          ok: response.ok,
+          contentType: response.headers.get("content-type"),
+        });
 
-      // Force a re-render to show the image
-      forceUpdate({});
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[FigureGallery] Error response:`, errorText);
+          throw new Error(
+            `Error ${response.status}: ${response.statusText} (${url})`
+          );
+        }
 
-      return blobUrl;
-    } catch (error) {
-      console.error("[FigureGallery] Error fetching image:", error);
-      throw error;
-    }
-  };
+        const blob = await response.blob();
+        console.log(`[FigureGallery] Blob received:`, {
+          size: blob.size,
+          type: blob.type,
+        });
+
+        const blobUrl = URL.createObjectURL(blob);
+        console.log(
+          `[FigureGallery] ✅ Created blob URL for ${figureId}: ${blobUrl}`
+        );
+
+        // Store in ref instead of state to avoid re-render that would revoke the blob
+        imageBlobUrlsRef.current.set(figureId, blobUrl);
+
+        // Force a re-render to show the image
+        forceUpdate({});
+
+        return blobUrl;
+      } catch (error) {
+        console.error("[FigureGallery] Error fetching image:", error);
+        throw error;
+      }
+    },
+    [conversionId]
+  );
 
   const handleImageError = (figureId: string, errorMessage?: string) => {
     setImageErrors((prev) => {
@@ -244,8 +261,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     setExtractingFigure(figureId);
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-      const url = `${apiBase}/api/documents/${conversionId}/figures/${figureId}/generate-summary`;
+      const url = `/api/documents/${conversionId}/figures/${figureId}/generate-summary`;
 
       const response = await authenticatedFetch(url, {
         method: "POST",

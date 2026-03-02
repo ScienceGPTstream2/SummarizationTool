@@ -138,6 +138,10 @@ class AzureLLMClient:
         # Fall back to default API key
         return self.api_key
 
+    def _is_foundry_endpoint(self, endpoint: str) -> bool:
+        """Azure AI Foundry serverless endpoints use a different URL/payload format."""
+        return ".services.ai.azure.com" in (endpoint or "")
+
     async def generate_paragraph_with_azure(
         self,
         user_prompt: str,
@@ -185,7 +189,11 @@ class AzureLLMClient:
         used_api_version = self._get_api_version_for_deployment(
             used_deployment, api_version
         )
-        url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
+        is_foundry = self._is_foundry_endpoint(used_endpoint)
+        if is_foundry:
+            url = f"{used_endpoint.rstrip('/')}/models/chat/completions?api-version={used_api_version}"
+        else:
+            url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
 
         print(
             f"[LLMService] Using deployment: {used_deployment}, API version: {used_api_version}"
@@ -200,6 +208,9 @@ class AzureLLMClient:
         # Only include temperature if explicitly provided (some models like GPT-5 don't support it)
         if temperature is not None:
             payload["temperature"] = temperature
+        # AI Foundry serverless API requires model name in the request body
+        if is_foundry:
+            payload["model"] = used_deployment
 
         headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
@@ -422,9 +433,18 @@ class AzureLLMClient:
         # Check if API version supports structured outputs (2024-08-01-preview or later)
         try:
             # Create OpenAI client for Azure
-            client = OpenAI(
-                base_url=f"{used_endpoint.rstrip('/')}/openai/v1/", api_key=used_api_key
-            )
+            is_foundry = self._is_foundry_endpoint(used_endpoint)
+            if is_foundry:
+                client = OpenAI(
+                    base_url=f"{used_endpoint.rstrip('/')}/models",
+                    api_key=used_api_key,
+                    default_query={"api-version": used_api_version},
+                )
+            else:
+                client = OpenAI(
+                    base_url=f"{used_endpoint.rstrip('/')}/openai/v1/",
+                    api_key=used_api_key,
+                )
 
             # Use provided system message or default
             default_system_message = "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt. For each piece of extracted information, you must provide the exact text excerpt from the markdown that you used as evidence."
@@ -569,7 +589,11 @@ Prompt:
                 {"role": "user", "content": user_message},
             ]
 
-            url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
+            is_foundry = self._is_foundry_endpoint(used_endpoint)
+            if is_foundry:
+                url = f"{used_endpoint.rstrip('/')}/models/chat/completions?api-version={used_api_version}"
+            else:
+                url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
 
             # Omit temperature for extraction fallback path — structured output
             # models generally reject custom temperature values.
@@ -579,6 +603,9 @@ Prompt:
                 "n": 1,
                 "stop": None,
             }
+            # AI Foundry serverless API requires model name in the request body
+            if is_foundry:
+                payload["model"] = used_deployment
 
             headers = {"Content-Type": "application/json", "api-key": used_api_key}
 

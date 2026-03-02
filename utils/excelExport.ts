@@ -211,6 +211,74 @@ export async function downloadExcelReport(documentData: DocumentData) {
         }
       }
     }
+
+    // Paragraph Evaluation rows — one per model in summariesByModel
+    const paragraphEval = (fileItem as any).paragraphEvaluation;
+    const summariesByModel = (fileItem as any).summariesByModel as
+      | Record<string, string>
+      | undefined;
+
+    if (
+      paragraphEval?.groundTruth &&
+      summariesByModel &&
+      Object.keys(summariesByModel).length > 0
+    ) {
+      // Create a row for each model that generated a paragraph
+      for (const [modelId, summaryText] of Object.entries(summariesByModel)) {
+        rows.push({
+          "Study Name": fileName,
+          "LLM (Source)": getDisplayModelName(modelId),
+          Ingestion: ingestionTool,
+          "System Prompt": "",
+          "Prompt Template": "",
+          Entity: "Paragraph Evaluation",
+          "Actual Output": summaryText || "",
+          "Ground Truth": paragraphEval.groundTruth || "",
+          Judge: "Human",
+          Correctness: "",
+          Completeness: "",
+          Relevance: "",
+          Safety: "",
+          "Human Eval":
+            paragraphEval.humanScore != null
+              ? `${paragraphEval.humanScore}%`
+              : "",
+          "Doc Parse Cost": "",
+          "Extraction Cost": formatCost(
+            (fileItem as any).paragraphSummaryCost as number
+          ),
+          "Eval Cost": "",
+        });
+      }
+    } else if ((fileItem as any).finalSummary && paragraphEval?.groundTruth) {
+      // Fallback: single paragraph row (legacy / no summariesByModel)
+      rows.push({
+        "Study Name": fileName,
+        "LLM (Source)": getDisplayModelName(
+          (fileItem as any).paragraphSummaryModel || ""
+        ),
+        Ingestion: ingestionTool,
+        "System Prompt": "",
+        "Prompt Template": "",
+        Entity: "Paragraph Evaluation",
+        "Actual Output": (fileItem as any).finalSummary || "",
+        "Ground Truth": paragraphEval.groundTruth || "",
+        Judge: "Human",
+        Correctness: "",
+        Completeness: "",
+        Relevance: "",
+        Safety: "",
+        "Human Eval":
+          paragraphEval.humanScore != null
+            ? `${paragraphEval.humanScore}%`
+            : "",
+        "Doc Parse Cost": "",
+        "Extraction Cost": formatCost(
+          (fileItem as any).paragraphSummaryCost as number
+        ),
+        "Eval Cost": "",
+      });
+    }
   }
 
   // 2. Create Workbook and Worksheet with ExcelJS

@@ -36,6 +36,7 @@ _EXTRACTION_PROVIDER_MAP = {
     "gemini": "gcp",
     "anthropic": "gcp",
     "llama": "gcp",
+    "azure-llama": "azure",
     "macbook": "macbook",
 }
 
