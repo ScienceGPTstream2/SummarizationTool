@@ -64,7 +64,9 @@ export function SessionMetrics() {
   const [clearConfirmed, setClearConfirmed] = useState(false);
   const [clearProcessor, setClearProcessor] = useState<string>("all");
   const [clearRunning, setClearRunning] = useState(false);
-  const [clearResult, setClearResult] = useState<BenchmarkClearResult | null>(null);
+  const [clearResult, setClearResult] = useState<BenchmarkClearResult | null>(
+    null
+  );
 
   const summaries = useMemo(() => {
     const calls = metrics?.calls ?? [];
@@ -171,13 +173,17 @@ export function SessionMetrics() {
         entry.totalLatency += call.duration || 0;
         docModelStats.set(key, entry);
       });
-    const docRows = Array.from(docModelStats.entries()).map(([model, stats]) => ({
-      model,
-      provider: stats.provider,
-      docs: stats.docs,
-      totalCost: stats.totalCost,
-      avgLatency: stats.docs.length ? stats.totalLatency / stats.docs.length : 0,
-    }));
+    const docRows = Array.from(docModelStats.entries()).map(
+      ([model, stats]) => ({
+        model,
+        provider: stats.provider,
+        docs: stats.docs,
+        totalCost: stats.totalCost,
+        avgLatency: stats.docs.length
+          ? stats.totalLatency / stats.docs.length
+          : 0,
+      })
+    );
 
     // Batch rows: merge backend batches with per-call sum for comparison
     const batchMap = metrics?.batches ?? {};
@@ -186,7 +192,10 @@ export function SessionMetrics() {
       .filter((call) => DOC_MODELS.has(call.model) && call.batch_number != null)
       .forEach((call) => {
         const bn = call.batch_number!;
-        batchSumLatency.set(bn, (batchSumLatency.get(bn) ?? 0) + (call.duration || 0));
+        batchSumLatency.set(
+          bn,
+          (batchSumLatency.get(bn) ?? 0) + (call.duration || 0)
+        );
       });
     const batchRows = Object.values(batchMap)
       .map((b) => ({
@@ -282,21 +291,27 @@ export function SessionMetrics() {
   return (
     <>
       {/* Benchmark clear confirmation modal */}
-      <Dialog open={showClearModal} onOpenChange={(open) => {
-        if (!open) {
-          setShowClearModal(false);
-          setClearConfirmed(false);
-          setClearResult(null);
-          setClearProcessor("all");
-        }
-      }}>
+      <Dialog
+        open={showClearModal}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowClearModal(false);
+            setClearConfirmed(false);
+            setClearResult(null);
+            setClearProcessor("all");
+          }
+        }}
+      >
         <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-destructive">⚠ Clear Benchmark Cache</DialogTitle>
+            <DialogTitle className="text-destructive">
+              ⚠ Clear Benchmark Cache
+            </DialogTitle>
             <DialogDescription>
-              This deletes all sessions, documents, and extraction results from the database
-              and removes processed caches from the filesystem. It impacts{" "}
-              <strong>all users</strong>. Original uploaded PDFs are preserved.
+              This deletes all sessions, documents, and extraction results from
+              the database and removes processed caches from the filesystem. It
+              impacts <strong>all users</strong>. Original uploaded PDFs are
+              preserved.
             </DialogDescription>
           </DialogHeader>
 
@@ -313,7 +328,9 @@ export function SessionMetrics() {
               >
                 <option value="all">All processors (docling + Azure DI)</option>
                 <option value="docling">Docling only</option>
-                <option value="azure_doc_intelligence">Azure Doc Intelligence only</option>
+                <option value="azure_doc_intelligence">
+                  Azure Doc Intelligence only
+                </option>
               </select>
             </div>
 
@@ -364,8 +381,12 @@ export function SessionMetrics() {
 
             {clearResult && (
               <div className="space-y-2">
-                <div className={`text-sm font-medium ${clearResult.ok ? "text-green-600" : "text-destructive"}`}>
-                  {clearResult.ok ? "✓ Success" : `✗ Failed (exit code ${clearResult.exit_code})`}
+                <div
+                  className={`text-sm font-medium ${clearResult.ok ? "text-green-600" : "text-destructive"}`}
+                >
+                  {clearResult.ok
+                    ? "✓ Success"
+                    : `✗ Failed (exit code ${clearResult.exit_code})`}
                 </div>
                 {clearResult.output && (
                   <pre className="text-xs bg-muted rounded p-3 overflow-x-auto max-h-[50vh] whitespace-pre-wrap">
@@ -451,7 +472,9 @@ export function SessionMetrics() {
                           <TableHead className="text-right">
                             Avg Latency
                           </TableHead>
-                          <TableHead className="text-right">Total Cost</TableHead>
+                          <TableHead className="text-right">
+                            Total Cost
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -496,7 +519,9 @@ export function SessionMetrics() {
                           <TableHead className="text-right">
                             Avg Latency
                           </TableHead>
-                          <TableHead className="text-right">Total Cost</TableHead>
+                          <TableHead className="text-right">
+                            Total Cost
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -533,17 +558,29 @@ export function SessionMetrics() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Batch #</TableHead>
-                          <TableHead className="text-right">Documents</TableHead>
-                          <TableHead className="text-right">Batch Latency</TableHead>
-                          <TableHead className="text-right">Sum of Doc Latencies</TableHead>
+                          <TableHead className="text-right">
+                            Documents
+                          </TableHead>
+                          <TableHead className="text-right">
+                            Batch Latency
+                          </TableHead>
+                          <TableHead className="text-right">
+                            Sum of Doc Latencies
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {summaries.batchRows.map((b) => (
                           <TableRow key={b.batch_number}>
-                            <TableCell className="font-medium">#{b.batch_number}</TableCell>
-                            <TableCell className="text-right">{b.document_count}</TableCell>
-                            <TableCell className="text-right">{b.batch_latency.toFixed(2)}s</TableCell>
+                            <TableCell className="font-medium">
+                              #{b.batch_number}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {b.document_count}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {b.batch_latency.toFixed(2)}s
+                            </TableCell>
                             <TableCell className="text-right text-muted-foreground">
                               {b.sum_latency.toFixed(2)}s
                             </TableCell>
@@ -587,7 +624,9 @@ export function SessionMetrics() {
                                 {doc.name}
                               </TableCell>
                               <TableCell className="text-right text-muted-foreground">
-                                {doc.batch_number != null ? `#${doc.batch_number}` : "—"}
+                                {doc.batch_number != null
+                                  ? `#${doc.batch_number}`
+                                  : "—"}
                               </TableCell>
                               <TableCell className="text-right">
                                 {doc.duration.toFixed(2)}s

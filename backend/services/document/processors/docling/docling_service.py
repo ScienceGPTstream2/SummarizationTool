@@ -11,7 +11,11 @@ import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, AcceleratorOptions, AcceleratorDevice
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    AcceleratorOptions,
+    AcceleratorDevice,
+)
 from docling.pipeline.standard_pdf_pipeline import ThreadedPdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 

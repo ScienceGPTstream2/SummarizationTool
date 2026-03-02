@@ -224,7 +224,10 @@ class LLMService:
                 return result
             elif model_type == "azure-llama":
                 if self.azure_client.disabled:
-                    return {"success": False, "error": "Azure OpenAI is not configured."}
+                    return {
+                        "success": False,
+                        "error": "Azure OpenAI is not configured.",
+                    }
                 result = await self._call_with_timeout_logging(
                     operation_name,
                     self.azure_client.extract_entities_with_azure(

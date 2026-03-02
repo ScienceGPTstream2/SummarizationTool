@@ -196,7 +196,9 @@ async def process_uploaded_file(
                         parse_cost = float(doc_match["parse_cost"])
                     elif doc_match:
                         # Not yet in DB (or stored as 0) — persist the freshly estimated value
-                        _cached_dur_for_db = cached_metadata.get("parse_duration_seconds")
+                        _cached_dur_for_db = cached_metadata.get(
+                            "parse_duration_seconds"
+                        )
                         if _cached_dur_for_db is None:
                             _raw = cached_metadata.get("conversion_time")
                             if isinstance(_raw, (int, float)):
@@ -206,9 +208,12 @@ async def process_uploaded_file(
                             {
                                 "parse_cost": parse_cost,
                                 "page_count": cached_metadata.get("page_count"),
-                                "figure_count": cached_metadata.get("figures_found") or 0,
+                                "figure_count": cached_metadata.get("figures_found")
+                                or 0,
                                 "table_count": cached_metadata.get("tables_found") or 0,
-                                "parse_duration_seconds": float(_cached_dur_for_db or 0.0),
+                                "parse_duration_seconds": float(
+                                    _cached_dur_for_db or 0.0
+                                ),
                             },
                         )
             except Exception as e:
@@ -226,7 +231,11 @@ async def process_uploaded_file(
                         _raw = cached_metadata.get("conversion_time")
                         if isinstance(_raw, (int, float)):
                             _cached_dur = float(_raw)
-                    _cached_filename = _cached_doc_filename or cached_metadata.get("original_filename") or file_path.name
+                    _cached_filename = (
+                        _cached_doc_filename
+                        or cached_metadata.get("original_filename")
+                        or file_path.name
+                    )
                     cost_tracker.record_call(
                         session_id=_cached_session_id,
                         provider="azure",
@@ -238,7 +247,11 @@ async def process_uploaded_file(
                         figure_count=cached_metadata.get("figures_found") or 0,
                         table_count=cached_metadata.get("tables_found") or 0,
                         document_name=_cached_filename,
-                        batch_number=request.batch_number if hasattr(request, "batch_number") else None,
+                        batch_number=(
+                            request.batch_number
+                            if hasattr(request, "batch_number")
+                            else None
+                        ),
                     )
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
@@ -259,7 +272,10 @@ async def process_uploaded_file(
                     "tables_found": cached_metadata.get("tables_found", 0),
                     "parse_cost": parse_cost,
                     "page_count": cached_metadata.get("page_count"),
-                    "parse_duration_seconds": float(cached_metadata.get("parse_duration_seconds") or 0) or None,
+                    "parse_duration_seconds": float(
+                        cached_metadata.get("parse_duration_seconds") or 0
+                    )
+                    or None,
                 },
             )
 
@@ -377,6 +393,7 @@ async def process_uploaded_file(
         _metadata_filename = None
         try:
             import json as _json
+
             _meta_path = file_path.parent / "metadata.json"
             if _meta_path.exists():
                 _meta = _json.loads(_meta_path.read_text())
@@ -395,8 +412,12 @@ async def process_uploaded_file(
                 page_count=metadata.get("page_count") or 0,
                 figure_count=metadata.get("figures_found") or 0,
                 table_count=metadata.get("tables_found") or 0,
-                document_name=_original_filename or _metadata_filename or file_path.name,
-                batch_number=request.batch_number if hasattr(request, "batch_number") else None,
+                document_name=_original_filename
+                or _metadata_filename
+                or file_path.name,
+                batch_number=(
+                    request.batch_number if hasattr(request, "batch_number") else None
+                ),
             )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to record document processing metrics: {e}")

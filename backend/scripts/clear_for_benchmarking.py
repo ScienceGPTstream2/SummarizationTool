@@ -35,11 +35,11 @@ sys.path.insert(0, str(BACKEND))
 _secrets_path = BACKEND / "core" / "secrets.toml"
 
 # ── Path constants ─────────────────────────────────────────────────────────────
-FILES_DIR        = BACKEND / "files"
+FILES_DIR = BACKEND / "files"
 GLOBAL_FILES_DIR = FILES_DIR / "global"
-USERS_FILES_DIR  = FILES_DIR / "users"
-OUTPUT_DIR       = BACKEND / "output"
-UPLOADS_DIR      = BACKEND / "uploads"
+USERS_FILES_DIR = FILES_DIR / "users"
+OUTPUT_DIR = BACKEND / "output"
+UPLOADS_DIR = BACKEND / "uploads"
 
 # A UUID that will never match a real row — used to satisfy PostgREST's
 # requirement that DELETE operations must have at least one filter.
@@ -47,6 +47,7 @@ NEVER_UUID = "00000000-0000-0000-0000-000000000000"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _dir_size(path: Path) -> int:
     """Recursively sum file sizes under a directory."""
@@ -102,13 +103,16 @@ def _load_supabase_secrets() -> tuple[str, str]:
     key = supabase_section.get("service_role_key", "")
 
     if not url or not key:
-        print("[ERROR] Missing supabase.url or supabase.service_role_key in secrets.toml")
+        print(
+            "[ERROR] Missing supabase.url or supabase.service_role_key in secrets.toml"
+        )
         sys.exit(1)
 
     return url, key
 
 
 # ── Argument parsing ───────────────────────────────────────────────────────────
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -117,24 +121,30 @@ def parse_args() -> argparse.Namespace:
         epilog=__doc__,
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be deleted without making any changes.",
     )
     parser.add_argument(
-        "--yes", "-y", action="store_true",
+        "--yes",
+        "-y",
+        action="store_true",
         help="Skip the interactive confirmation prompt.",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--db-only", action="store_true",
+        "--db-only",
+        action="store_true",
         help="Clear database only; leave the filesystem untouched.",
     )
     mode.add_argument(
-        "--fs-only", action="store_true",
+        "--fs-only",
+        action="store_true",
         help="Clear filesystem cache only; leave the database untouched.",
     )
     parser.add_argument(
-        "--processor", choices=["docling", "azure_doc_intelligence"],
+        "--processor",
+        choices=["docling", "azure_doc_intelligence"],
         default=None,
         help=(
             "Only clear the cache for one processor. "
@@ -142,13 +152,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--include-legacy", action="store_true",
+        "--include-legacy",
+        action="store_true",
         help="Also clear backend/output/ and backend/uploads/ (legacy directories).",
     )
     return parser.parse_args()
 
 
 # ── Database operations ────────────────────────────────────────────────────────
+
 
 def _db_count(client, table: str, extra_filter=None) -> int:
     """Return the number of rows that the delete step would remove."""
@@ -186,12 +198,16 @@ def dry_run_db(client) -> dict:
     stats = {}
 
     tables = [
-        ("evaluation_results",    None,                                  "all rows"),
-        ("extraction_results",    None,                                  "all rows"),
-        ("documents",             None,                                  "all rows"),
-        ("sessions",              None,                                  "all rows"),
-        ("user_prompt_templates", ("eq", "is_default", False),           "is_default = false"),
-        ("prompt_templates",      ("in_", "scope", ["user", "group"]),   "scope in (user, group)"),
+        ("evaluation_results", None, "all rows"),
+        ("extraction_results", None, "all rows"),
+        ("documents", None, "all rows"),
+        ("sessions", None, "all rows"),
+        ("user_prompt_templates", ("eq", "is_default", False), "is_default = false"),
+        (
+            "prompt_templates",
+            ("in_", "scope", ["user", "group"]),
+            "scope in (user, group)",
+        ),
     ]
 
     for table, filt, desc in tables:
@@ -201,8 +217,8 @@ def dry_run_db(client) -> dict:
         stats[table] = count
 
     # Also show what will be preserved in template tables
-    kept_upt  = _db_count(client, "user_prompt_templates", ("neq", "is_default", False))
-    kept_pt   = _db_count(client, "prompt_templates",      ("eq",  "scope",      "global"))
+    kept_upt = _db_count(client, "user_prompt_templates", ("neq", "is_default", False))
+    kept_pt = _db_count(client, "prompt_templates", ("eq", "scope", "global"))
     print(f"\n  (preserved) user_prompt_templates (is_default=true/null): {kept_upt}")
     print(f"  (preserved) prompt_templates (scope=global):              {kept_pt}")
 
@@ -221,13 +237,17 @@ def execute_db_clear(client, errors: list) -> dict:
         stats[table] = n
 
     # Step 5: user_prompt_templates — delete only non-default rows
-    n = _db_delete(client, "user_prompt_templates", ("eq", "is_default", False), errors=errors)
+    n = _db_delete(
+        client, "user_prompt_templates", ("eq", "is_default", False), errors=errors
+    )
     print(f"  [OK] user_prompt_templates (non-default) {n:>6} rows deleted")
     stats["user_prompt_templates"] = n
 
     # Step 6: prompt_templates — delete user- and group-scoped, preserve global
     # template_versions and template_permissions cascade automatically
-    n = _db_delete(client, "prompt_templates", ("in_", "scope", ["user", "group"]), errors=errors)
+    n = _db_delete(
+        client, "prompt_templates", ("in_", "scope", ["user", "group"]), errors=errors
+    )
     print(f"  [OK] prompt_templates (user/group scope) {n:>6} rows deleted")
     stats["prompt_templates"] = n
 
@@ -236,7 +256,10 @@ def execute_db_clear(client, errors: list) -> dict:
 
 # ── Filesystem operations ──────────────────────────────────────────────────────
 
-def clear_global_processed(dry_run: bool, processor: str | None, errors: list) -> tuple[int, int]:
+
+def clear_global_processed(
+    dry_run: bool, processor: str | None, errors: list
+) -> tuple[int, int]:
     """
     Delete processed/ subdirs under files/global/{hash}/.
 
@@ -260,7 +283,11 @@ def clear_global_processed(dry_run: bool, processor: str | None, errors: list) -
         if not hash_dir.is_dir():
             continue
 
-        target = hash_dir / "processed" if processor is None else hash_dir / "processed" / processor
+        target = (
+            hash_dir / "processed"
+            if processor is None
+            else hash_dir / "processed" / processor
+        )
 
         if not target.exists():
             continue
@@ -268,13 +295,17 @@ def clear_global_processed(dry_run: bool, processor: str | None, errors: list) -
         size = _dir_size(target)
 
         if dry_run:
-            print(f"  [DRY-RUN] would delete  {target.relative_to(BACKEND)}  ({_human_bytes(size)})")
+            print(
+                f"  [DRY-RUN] would delete  {target.relative_to(BACKEND)}  ({_human_bytes(size)})"
+            )
             dirs_deleted += 1
             bytes_freed += size
         else:
             try:
                 shutil.rmtree(target)
-                print(f"  [DELETED]              {target.relative_to(BACKEND)}  ({_human_bytes(size)})")
+                print(
+                    f"  [DELETED]              {target.relative_to(BACKEND)}  ({_human_bytes(size)})"
+                )
                 dirs_deleted += 1
                 bytes_freed += size
             except Exception as e:
@@ -288,7 +319,9 @@ def clear_global_processed(dry_run: bool, processor: str | None, errors: list) -
     return dirs_deleted, bytes_freed
 
 
-def clear_directory_contents(label: str, path: Path, dry_run: bool, errors: list) -> tuple[int, int]:
+def clear_directory_contents(
+    label: str, path: Path, dry_run: bool, errors: list
+) -> tuple[int, int]:
     """
     Delete all children of path (keeping the directory itself).
     Returns (items_deleted, bytes_freed).
@@ -307,7 +340,9 @@ def clear_directory_contents(label: str, path: Path, dry_run: bool, errors: list
     total_size = _dir_size(path)
 
     if dry_run:
-        print(f"  [DRY-RUN] would delete {len(items)} item(s) under {path.relative_to(BACKEND)}  ({_human_bytes(total_size)})")
+        print(
+            f"  [DRY-RUN] would delete {len(items)} item(s) under {path.relative_to(BACKEND)}  ({_human_bytes(total_size)})"
+        )
         return len(items), total_size
 
     deleted = 0
@@ -332,10 +367,19 @@ def clear_directory_contents(label: str, path: Path, dry_run: bool, errors: list
 
 # ── Confirmation ───────────────────────────────────────────────────────────────
 
-def confirm_proceed(dry_run: bool, yes: bool, clear_db: bool, clear_fs: bool,
-                    processor: str | None, include_legacy: bool) -> bool:
+
+def confirm_proceed(
+    dry_run: bool,
+    yes: bool,
+    clear_db: bool,
+    clear_fs: bool,
+    processor: str | None,
+    include_legacy: bool,
+) -> bool:
     if dry_run:
-        print("\n[DRY-RUN MODE] No changes will be made — showing what would be deleted.\n")
+        print(
+            "\n[DRY-RUN MODE] No changes will be made — showing what would be deleted.\n"
+        )
         return True
 
     print("\n" + "=" * 62)
@@ -352,7 +396,11 @@ def confirm_proceed(dry_run: bool, yes: bool, clear_db: bool, clear_fs: bool,
         print("    KEEP    prompt_templates    where scope = global")
         print("    KEEP    groups, user_groups, login_history, user_preferences")
     if clear_fs:
-        proc_label = f"only '{processor}'" if processor else "both docling + azure_doc_intelligence"
+        proc_label = (
+            f"only '{processor}'"
+            if processor
+            else "both docling + azure_doc_intelligence"
+        )
         print(f"  FILESYSTEM:")
         print(f"    DELETE  files/global/*/processed/ cache  [{proc_label}]")
         print(f"    KEEP    files/global/*/original.pdf  (originals preserved)")
@@ -367,7 +415,9 @@ def confirm_proceed(dry_run: bool, yes: bool, clear_db: bool, clear_fs: bool,
         return True
 
     try:
-        response = input("\n  Type 'yes' to proceed, anything else to abort: ").strip().lower()
+        response = (
+            input("\n  Type 'yes' to proceed, anything else to abort: ").strip().lower()
+        )
     except (EOFError, KeyboardInterrupt):
         print("\n[ABORTED]")
         return False
@@ -376,6 +426,7 @@ def confirm_proceed(dry_run: bool, yes: bool, clear_db: bool, clear_fs: bool,
 
 
 # ── Summary ────────────────────────────────────────────────────────────────────
+
 
 def print_summary(db_stats: dict, fs_stats: dict, errors: list, dry_run: bool) -> None:
     tag = "[DRY-RUN] " if dry_run else ""
@@ -408,6 +459,7 @@ def print_summary(db_stats: dict, fs_stats: dict, errors: list, dry_run: bool) -
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     args = parse_args()
 
@@ -435,8 +487,9 @@ def main() -> None:
         print(f"[Setup] Supabase connected: {url}")
 
     # Confirm before proceeding
-    if not confirm_proceed(args.dry_run, args.yes, clear_db, clear_fs,
-                           args.processor, args.include_legacy):
+    if not confirm_proceed(
+        args.dry_run, args.yes, clear_db, clear_fs, args.processor, args.include_legacy
+    ):
         print("[ABORTED] No changes made.")
         sys.exit(0)
 

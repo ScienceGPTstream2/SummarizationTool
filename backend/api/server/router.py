@@ -20,6 +20,7 @@ class BatchMetricsRequest(BaseModel):
     batch_latency: float
     document_count: int
 
+
 # Repo root is two levels above this file (backend/api/server/router.py → repo/)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CLEAR_SCRIPT = _REPO_ROOT / "backend" / "scripts" / "clear_for_benchmarking.py"
@@ -172,17 +173,19 @@ async def get_available_models():
                     # model_family = "meta" → emit under Meta Llama group (Azure-hosted Llama)
                     model_family = model_cfg.get("model_family", "")
                     if model_family == "meta":
-                        models.append({
-                            "id": f"azure-{deployment}",
-                            "name": f"{model_name} (Azure)",
-                            "provider": "Meta Llama",
-                            "model_type": "azure-llama",
-                            "description": "Fast (Azure)",
-                            "deployment": deployment,
-                            "api_version": api_version,
-                            "supports_temperature": True,
-                            "default_temperature": 0.5,
-                        })
+                        models.append(
+                            {
+                                "id": f"azure-{deployment}",
+                                "name": f"{model_name} (Azure)",
+                                "provider": "Meta Llama",
+                                "model_type": "azure-llama",
+                                "description": "Fast (Azure)",
+                                "deployment": deployment,
+                                "api_version": api_version,
+                                "supports_temperature": True,
+                                "default_temperature": 0.5,
+                            }
+                        )
                         continue
 
                     # Map model names to their characteristics
@@ -665,12 +668,22 @@ async def clear_benchmark_cache(http_request: Request):
     if mode not in ("dry_run", "execute"):
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "output": "", "errors": "mode must be 'dry_run' or 'execute'", "exit_code": 1},
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "mode must be 'dry_run' or 'execute'",
+                "exit_code": 1,
+            },
         )
     if processor not in (None, "docling", "azure_doc_intelligence"):
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "output": "", "errors": "processor must be null, 'docling', or 'azure_doc_intelligence'", "exit_code": 1},
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "processor must be null, 'docling', or 'azure_doc_intelligence'",
+                "exit_code": 1,
+            },
         )
 
     args = [sys.executable, str(_CLEAR_SCRIPT)]
@@ -700,7 +713,12 @@ async def clear_benchmark_cache(http_request: Request):
     except subprocess.TimeoutExpired:
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "output": "", "errors": "Script timed out after 120s", "exit_code": 1},
+            content={
+                "ok": False,
+                "output": "",
+                "errors": "Script timed out after 120s",
+                "exit_code": 1,
+            },
         )
     except Exception as e:
         return JSONResponse(

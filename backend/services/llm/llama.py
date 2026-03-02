@@ -145,9 +145,7 @@ class LlamaLLMClient:
                 asyncio.to_thread(self._get_access_token, used_service_account_path),
                 timeout=20.0,
             )
-            print(
-                f"[LLMService] Token obtained in {time.time() - _auth_start:.2f}s"
-            )
+            print(f"[LLMService] Token obtained in {time.time() - _auth_start:.2f}s")
         except asyncio.TimeoutError:
             print(
                 "[LLMService] CRITICAL: Token fetch timed out after 20s — "
@@ -223,7 +221,10 @@ class LlamaLLMClient:
 
                 resp = await asyncio.to_thread(
                     lambda: requests.post(
-                        url, headers=headers, json=payload, timeout=(15, request_timeout)
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=(15, request_timeout),
                     )
                 )
                 duration = time.time() - start_time
@@ -882,14 +883,18 @@ Text: {essential_markdown}"""
                     temperature=0.0,
                     region_override=region,
                     request_timeout=300,  # Allow full cold-start window
-                    max_retries=1,        # Single attempt — bail fast on 300s+ cold starts
+                    max_retries=1,  # Single attempt — bail fast on 300s+ cold starts
                 )
                 elapsed = time.time() - t0
                 if result.get("success"):
                     print(f"[LlamaWarmUp] ✅ {region} warm in {elapsed:.1f}s")
                 else:
-                    print(f"[LlamaWarmUp] ⚠️  {region} ping failed in {elapsed:.1f}s: {result.get('error')}")
+                    print(
+                        f"[LlamaWarmUp] ⚠️  {region} ping failed in {elapsed:.1f}s: {result.get('error')}"
+                    )
             except Exception as e:
                 print(f"[LlamaWarmUp] ⚠️  {region} ping error: {e}")
 
-        await asyncio.gather(*[_ping(region, model) for region, model in regions_to_warm.items()])
+        await asyncio.gather(
+            *[_ping(region, model) for region, model in regions_to_warm.items()]
+        )

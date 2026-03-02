@@ -80,9 +80,9 @@ export interface ResultRow {
   docParseCost?: string;
   extractionCost?: string;
   evalCost?: string;
-  extractionLatency?: number | null;  // seconds — from extractionData.duration
-  evalLatency?: number | null;        // seconds — from result.evaluation_time
-  parseLatency?: number | null;       // seconds — document parse duration
+  extractionLatency?: number | null; // seconds — from extractionData.duration
+  evalLatency?: number | null; // seconds — from result.evaluation_time
+  parseLatency?: number | null; // seconds — document parse duration
 }
 
 const formatModelName = (modelId: string) => {
@@ -161,8 +161,8 @@ export const transformToRows = (documentData: any): ResultRow[] => {
     // next candidate — a stored 0 means cost estimation failed, not a real $0 cost.
     // The final || null ensures formatCost receives null (→ "") rather than undefined.
     const docParseCostRaw =
-      fileItem.processingResult?.parseCost ||        // camelCase (live upload path)
-      fileItem.processingResult?.parse_cost ||       // snake_case (session restore path)
+      fileItem.processingResult?.parseCost || // camelCase (live upload path)
+      fileItem.processingResult?.parse_cost || // snake_case (session restore path)
       fileItem.parse_cost ||
       documentData.parse_cost ||
       null;
@@ -247,7 +247,8 @@ export const transformToRows = (documentData: any): ResultRow[] => {
             docParseCost: formatCost(docParseCostRaw),
             extractionCost: formatCost(extractionCost),
             evalCost: "",
-            extractionLatency: extractionData.duration ?? extractionData.meta?.duration ?? null,
+            extractionLatency:
+              extractionData.duration ?? extractionData.meta?.duration ?? null,
             evalLatency: null,
             parseLatency: docParseLatencyRaw,
           });
@@ -283,7 +284,10 @@ export const transformToRows = (documentData: any): ResultRow[] => {
               docParseCost: formatCost(docParseCost),
               extractionCost: formatCost(extractionCost),
               evalCost: formatCost(result.evaluation_cost),
-              extractionLatency: extractionData.duration ?? extractionData.meta?.duration ?? null,
+              extractionLatency:
+                extractionData.duration ??
+                extractionData.meta?.duration ??
+                null,
               evalLatency: result.evaluation_time ?? null,
               parseLatency: docParseLatencyRaw,
             });
@@ -294,9 +298,15 @@ export const transformToRows = (documentData: any): ResultRow[] => {
 
     // Paragraph Evaluation rows — one per model in summariesByModel
     const paragraphEval = (fileItem as any).paragraphEvaluation;
-    const summariesByModel = (fileItem as any).summariesByModel as Record<string, string> | undefined;
+    const summariesByModel = (fileItem as any).summariesByModel as
+      | Record<string, string>
+      | undefined;
 
-    if (paragraphEval?.groundTruth && summariesByModel && Object.keys(summariesByModel).length > 0) {
+    if (
+      paragraphEval?.groundTruth &&
+      summariesByModel &&
+      Object.keys(summariesByModel).length > 0
+    ) {
       // Create a row for each model that generated a paragraph
       for (const [modelId, summaryText] of Object.entries(summariesByModel)) {
         rows.push({
@@ -639,12 +649,7 @@ export default function BatchResultsPage({
 
       ms.addRow([]);
       ms.addRow(["By Provider"]);
-      ms.addRow([
-        "Provider",
-        "Calls",
-        "Avg Latency (s)",
-        "Total Cost",
-      ]);
+      ms.addRow(["Provider", "Calls", "Avg Latency (s)", "Total Cost"]);
 
       const providerStats = new Map<
         string,
@@ -1127,17 +1132,23 @@ export default function BatchResultsPage({
                   )}
                   {visibleColumns.has("parseLatency") && (
                     <TableCell className="text-xs text-gray-600 px-1 font-mono">
-                      {row.parseLatency != null ? row.parseLatency.toFixed(2) : "—"}
+                      {row.parseLatency != null
+                        ? row.parseLatency.toFixed(2)
+                        : "—"}
                     </TableCell>
                   )}
                   {visibleColumns.has("extractionLatency") && (
                     <TableCell className="text-xs text-gray-600 px-1 font-mono">
-                      {row.extractionLatency != null ? row.extractionLatency.toFixed(2) : "—"}
+                      {row.extractionLatency != null
+                        ? row.extractionLatency.toFixed(2)
+                        : "—"}
                     </TableCell>
                   )}
                   {visibleColumns.has("evalLatency") && (
                     <TableCell className="text-xs text-gray-600 px-1 font-mono">
-                      {row.evalLatency != null ? row.evalLatency.toFixed(2) : "—"}
+                      {row.evalLatency != null
+                        ? row.evalLatency.toFixed(2)
+                        : "—"}
                     </TableCell>
                   )}
                   {/* Compare button removed, row is clickable */}

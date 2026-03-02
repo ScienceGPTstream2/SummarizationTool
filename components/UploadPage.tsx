@@ -290,7 +290,8 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     const limit = pLimit(5);
 
     // Assign a batch number for this upload action (1–99, wraps after 99)
-    batchNumberRef.current = batchNumberRef.current >= 99 ? 1 : batchNumberRef.current + 1;
+    batchNumberRef.current =
+      batchNumberRef.current >= 99 ? 1 : batchNumberRef.current + 1;
     const currentBatch = batchNumberRef.current;
     const batchStart = Date.now();
 
@@ -314,7 +315,10 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                 headers: {
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ processor: parser, batch_number: currentBatch }),
+                body: JSON.stringify({
+                  processor: parser,
+                  batch_number: currentBatch,
+                }),
               }
             );
 
