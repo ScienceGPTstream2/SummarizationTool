@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { pLimit } from "../utils/concurrency";
+
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import {
@@ -286,9 +286,6 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
       return newErrors;
     });
 
-    // Limit concurrency to 5 to prevent browser freeze
-    const limit = pLimit(5);
-
     // Assign a batch number for this upload action (1–99, wraps after 99)
     batchNumberRef.current =
       batchNumberRef.current >= 99 ? 1 : batchNumberRef.current + 1;
@@ -297,76 +294,75 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
 
     let batchDocumentCount = 0;
 
-    // Process all files with concurrency limit
+    // Process all files concurrently — the backend's ProcessPoolExecutor
+    // dynamically throttles based on available GPU VRAM.
     await Promise.all(
-      filesToProcess.map((file) =>
-        limit(async () => {
-          const fileId = uploadResults[file.name]?.file_id;
-          if (!fileId) return;
+      filesToProcess.map(async (file) => {
+        const fileId = uploadResults[file.name]?.file_id;
+        if (!fileId) return;
 
-          // Get parser for this file (individual override or default)
-          const parser = fileParsers[file.name] || defaultParser;
+        // Get parser for this file (individual override or default)
+        const parser = fileParsers[file.name] || defaultParser;
 
-          try {
-            const response = await authenticatedFetch(
-              `/api/documents/process/file/${fileId}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  processor: parser,
-                  batch_number: currentBatch,
-                }),
-              }
-            );
-
-            if (!response.ok) {
-              throw new Error(`Processing failed: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            // Store processing result with camelCase mapping
-            // Use file_hash as the primary identifier for document API calls (not UUID conversion_id)
-            setProcessedFiles((prev) => ({
-              ...prev,
-              [file.name]: {
-                ...result,
-                // Use file_hash as conversionId for document API calls
-                conversionId: result.file_hash || result.conversion_id,
-                fileHash: result.file_hash,
-                markdownPath: result.markdown_path,
-                processorUsed: result.processor_used,
-                figuresCount: result.figures_found,
-                tablesCount: result.tables_found,
-                parseCost: result.parse_cost,
-                parseDuration: result.parse_duration_seconds,
-                parser,
+        try {
+          const response = await authenticatedFetch(
+            `/api/documents/process/file/${fileId}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
               },
-            }));
+              body: JSON.stringify({
+                processor: parser,
+                batch_number: currentBatch,
+              }),
+            }
+          );
 
-            batchDocumentCount += 1;
-            toast.success(`${file.name} processed successfully`);
-          } catch (error) {
-            console.error(`Error processing ${file.name}:`, error);
-            const errorMsg =
-              error instanceof Error ? error.message : "Processing failed";
-            setProcessingErrors((prev) => ({
-              ...prev,
-              [file.name]: errorMsg,
-            }));
-            toast.error(`Failed to process ${file.name}`);
-          } finally {
-            setProcessingFiles((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(file.name);
-              return newSet;
-            });
+          if (!response.ok) {
+            throw new Error(`Processing failed: ${response.status}`);
           }
-        })
-      )
+
+          const result = await response.json();
+
+          // Store processing result with camelCase mapping
+          // Use file_hash as the primary identifier for document API calls (not UUID conversion_id)
+          setProcessedFiles((prev) => ({
+            ...prev,
+            [file.name]: {
+              ...result,
+              // Use file_hash as conversionId for document API calls
+              conversionId: result.file_hash || result.conversion_id,
+              fileHash: result.file_hash,
+              markdownPath: result.markdown_path,
+              processorUsed: result.processor_used,
+              figuresCount: result.figures_found,
+              tablesCount: result.tables_found,
+              parseCost: result.parse_cost,
+              parseDuration: result.parse_duration_seconds,
+              parser,
+            },
+          }));
+
+          batchDocumentCount += 1;
+          toast.success(`${file.name} processed successfully`);
+        } catch (error) {
+          console.error(`Error processing ${file.name}:`, error);
+          const errorMsg =
+            error instanceof Error ? error.message : "Processing failed";
+          setProcessingErrors((prev) => ({
+            ...prev,
+            [file.name]: errorMsg,
+          }));
+          toast.error(`Failed to process ${file.name}`);
+        } finally {
+          setProcessingFiles((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(file.name);
+            return newSet;
+          });
+        }
+      })
     );
 
     // Ship batch wall-clock latency to backend
