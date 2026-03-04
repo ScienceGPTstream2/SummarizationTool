@@ -11,6 +11,7 @@ import json
 import asyncio
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from services.document.processors.docling.vram_guard import VRAMGuard
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
@@ -489,34 +490,51 @@ class DoclingService:
 
         self.image_resolution_scale = image_resolution_scale
 
-        # Lazy-initialized: the ProcessPoolExecutor is only created on the
-        # first conversion call, so DoclingService instances that are only used
-        # for reading results (e.g. in the extractions router) never allocate
-        # subprocesses or VRAM.
+        # Lazy-initialized: the ProcessPoolExecutor and VRAMGuard are only
+        # created on the first conversion call, so DoclingService instances
+        # that are only used for reading results (e.g. in the extractions
+        # router) never allocate subprocesses or VRAM.
         self._process_pool: Optional[ProcessPoolExecutor] = None
-        self._max_workers: Optional[int] = None
+        self._vram_guard: Optional[VRAMGuard] = None
+
+    def _ensure_initialized(self):
+        """Lazily create the VRAMGuard and ProcessPoolExecutor on first use."""
+        if self._vram_guard is not None:
+            return
+
+        # The VRAMGuard auto-detects total VRAM and computes max_workers.
+        self._vram_guard = VRAMGuard()
+
+        # Size the pool slightly larger than the guard's max_workers so the
+        # pool itself never blocks — all admission control goes through the
+        # guard's semaphore + real-time VRAM check.
+        pool_size = self._vram_guard.max_workers + 2
+        _log.info(
+            f"DoclingService: creating ProcessPoolExecutor with {pool_size} slots "
+            f"(VRAMGuard max_workers={self._vram_guard.max_workers})"
+        )
+        self._process_pool = ProcessPoolExecutor(
+            max_workers=pool_size,
+            mp_context=multiprocessing.get_context("spawn"),
+        )
 
     @property
     def process_pool(self) -> ProcessPoolExecutor:
         """Lazily create the ProcessPoolExecutor on first use."""
-        if self._process_pool is None:
-            self._max_workers = _calculate_max_workers()
-            _log.info(
-                f"DoclingService: creating ProcessPoolExecutor with "
-                f"{self._max_workers} workers (lazy init)"
-            )
-            self._process_pool = ProcessPoolExecutor(
-                max_workers=self._max_workers,
-                mp_context=multiprocessing.get_context("spawn"),
-            )
+        self._ensure_initialized()
         return self._process_pool
 
     @property
+    def vram_guard(self) -> VRAMGuard:
+        """Lazily create the VRAMGuard on first use."""
+        self._ensure_initialized()
+        return self._vram_guard
+
+    @property
     def max_workers(self) -> int:
-        """Return the VRAM-based worker count, calculating if needed."""
-        if self._max_workers is None:
-            self._max_workers = _calculate_max_workers()
-        return self._max_workers
+        """Return the VRAM-based worker count from the guard."""
+        self._ensure_initialized()
+        return self._vram_guard.max_workers
 
     async def convert_document_to_markdown(
         self,
@@ -550,11 +568,13 @@ class DoclingService:
                 "image_resolution_scale": self.image_resolution_scale,
             }
 
-            # Submit to process pool and await result
+            # Acquire a VRAM slot, then submit to the process pool.
+            # The guard queues excess requests until VRAM is available.
             loop = asyncio.get_running_loop()
-            worker_result = await loop.run_in_executor(
-                self.process_pool, _docling_worker_process, task_args
-            )
+            async with self.vram_guard.acquire_slot() as slot:
+                worker_result = await loop.run_in_executor(
+                    self.process_pool, _docling_worker_process, task_args
+                )
 
             if not worker_result.get("success"):
                 raise RuntimeError(
@@ -672,12 +692,15 @@ class DoclingService:
         # Schedule the background conversion
         output_base_dir = self.output_base_dir
 
+        vram_guard = self.vram_guard  # capture before fire-and-forget
+
         async def _run_and_finalize():
             try:
                 loop = asyncio.get_running_loop()
-                worker_result = await loop.run_in_executor(
-                    self.process_pool, _docling_worker_process, task_args
-                )
+                async with vram_guard.acquire_slot() as slot:
+                    worker_result = await loop.run_in_executor(
+                        self.process_pool, _docling_worker_process, task_args
+                    )
 
                 conv_dir = output_base_dir / conversion_id
                 meta_path = conv_dir / "metadata.json"
