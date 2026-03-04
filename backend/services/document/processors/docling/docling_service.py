@@ -489,19 +489,34 @@ class DoclingService:
 
         self.image_resolution_scale = image_resolution_scale
 
-        # Dynamic worker count based on probing actual GPU VRAM usage.
-        # Loads one Docling converter, measures peak VRAM, adds 30% safety margin,
-        # then calculates: workers = floor(total_vram / measured_per_worker)
-        self.max_workers = _calculate_max_workers()
-        _log.info(f"DoclingService initialized with {self.max_workers} process workers")
+        # Lazy-initialized: the ProcessPoolExecutor is only created on the
+        # first conversion call, so DoclingService instances that are only used
+        # for reading results (e.g. in the extractions router) never allocate
+        # subprocesses or VRAM.
+        self._process_pool: Optional[ProcessPoolExecutor] = None
+        self._max_workers: Optional[int] = None
 
-        # ProcessPoolExecutor: each subprocess creates its own DocumentConverter
-        # with ThreadedStandardPdfPipeline for true parallel GPU usage.
-        # Using 'spawn' context ensures clean CUDA contexts per process.
-        self.process_pool = ProcessPoolExecutor(
-            max_workers=self.max_workers,
-            mp_context=multiprocessing.get_context("spawn"),
-        )
+    @property
+    def process_pool(self) -> ProcessPoolExecutor:
+        """Lazily create the ProcessPoolExecutor on first use."""
+        if self._process_pool is None:
+            self._max_workers = _calculate_max_workers()
+            _log.info(
+                f"DoclingService: creating ProcessPoolExecutor with "
+                f"{self._max_workers} workers (lazy init)"
+            )
+            self._process_pool = ProcessPoolExecutor(
+                max_workers=self._max_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+            )
+        return self._process_pool
+
+    @property
+    def max_workers(self) -> int:
+        """Return the VRAM-based worker count, calculating if needed."""
+        if self._max_workers is None:
+            self._max_workers = _calculate_max_workers()
+        return self._max_workers
 
     async def convert_document_to_markdown(
         self,
@@ -536,7 +551,7 @@ class DoclingService:
             }
 
             # Submit to process pool and await result
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             worker_result = await loop.run_in_executor(
                 self.process_pool, _docling_worker_process, task_args
             )
@@ -659,7 +674,7 @@ class DoclingService:
 
         async def _run_and_finalize():
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 worker_result = await loop.run_in_executor(
                     self.process_pool, _docling_worker_process, task_args
                 )
