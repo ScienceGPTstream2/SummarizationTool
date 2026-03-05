@@ -9,6 +9,7 @@ class Entity(BaseModel):
     prompt: str
     extracted: Optional[str] = None
     system_prompt: Optional[str] = None  # Per-entity system prompt
+    section: Optional[str] = None  # e.g. "metadata", "methods", "results" — used for batch grouping
 
 
 class ExtractRequest(BaseModel):

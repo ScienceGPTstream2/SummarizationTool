@@ -106,6 +106,7 @@ interface Entity {
   promptTokens?: number;
   completionTokens?: number;
   cost?: number;
+  section?: string; // e.g. "metadata", "methods", "results" — used for batch grouping
   // NEW: Store extraction results for multiple models
   extractionsByModel?: Record<
     string,
@@ -1436,6 +1437,75 @@ export function EntityExtractionPage({
     };
   };
 
+  // Group entities by their section field (fall back to "default" if unset)
+  const groupEntitiesBySection = (
+    entities: Entity[],
+    indices: number[]
+  ): Array<{ entities: Entity[]; indices: number[] }> => {
+    const groups = new Map<string, { entities: Entity[]; indices: number[] }>();
+    entities.forEach((entity, i) => {
+      const key = entity.section ?? "default";
+      if (!groups.has(key)) groups.set(key, { entities: [], indices: [] });
+      groups.get(key)!.entities.push(entity);
+      groups.get(key)!.indices.push(indices[i]);
+    });
+    return Array.from(groups.values());
+  };
+
+  // Batch version of extractEntityFromApi — sends multiple entities in one request
+  const extractEntitiesBatchFromApi = async (
+    entities: Entity[],
+    conversionId: string,
+    modelConfig: {
+      modelType: string;
+      modelId?: string;
+      deployment?: string;
+      apiVersion?: string;
+    },
+    processorUsed?: string,
+    signal?: AbortSignal,
+    sessionId?: string
+  ) => {
+    const resp = await authenticatedFetch("/api/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversion_id: conversionId,
+        model_type: modelConfig.modelType,
+        model_id: modelConfig.modelId,
+        deployment: modelConfig.deployment,
+        api_version: modelConfig.apiVersion,
+        entities: entities.map((e) => ({
+          name: e.name,
+          prompt: e.prompt,
+          system_prompt: e.systemPrompt || undefined,
+          section: e.section || undefined,
+        })),
+        max_tokens: 4096,
+        temperature: 0.0,
+        processor_used: processorUsed,
+        session_id: sessionId,
+      }),
+      signal,
+    });
+
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error(
+        errBody.detail || errBody.error || "Batch extraction request failed"
+      );
+    }
+
+    const data = await resp.json();
+    return (data.extracted_entities || []) as Array<{
+      name: string;
+      extracted: string;
+      answer?: string;
+      references?: Reference[];
+      meta?: Record<string, any>;
+    }>;
+  };
+
   // Internal helper to run extraction with multiple models
   const extractEntityWithModelsInternal = async (
     entity: Entity,
@@ -2037,64 +2107,166 @@ export function EntityExtractionPage({
         );
       }
 
-      // Process entities with concurrency limit
-      const CONCURRENCY_LIMIT = 5;
-      let currentIndex = 0;
-      const totalEntities = updatedEntities.length;
+      // Build list of (entity, originalIndex) pairs that need processing
+      const entitiesToProcess = updatedEntities
+        .map((e, i) => ({ entity: e, index: i }))
+        .filter(
+          ({ entity }) =>
+            rerunAll ||
+            !entity.extracted ||
+            entity.extracted.startsWith("Error:")
+        );
 
-      const processNextEntity = async () => {
-        while (currentIndex < totalEntities) {
-          if (signal.aborted) break;
+      // Group by section so all entities in the same section go in one request
+      const sectionGroups = groupEntitiesBySection(
+        entitiesToProcess.map((x) => x.entity),
+        entitiesToProcess.map((x) => x.index)
+      );
 
-          // Atomically capture and increment index
-          const i = currentIndex++;
-          const entity = updatedEntities[i];
+      const preSelectedModels =
+        currentFile?.selectedModels || documentData.selectedModels || [];
+      const modelsToUse =
+        preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
 
-          // Skip if not rerunning all AND already extracted successfully
-          if (
-            !rerunAll &&
-            entity.extracted &&
-            !entity.extracted.startsWith("Error:")
-          ) {
-            continue;
-          }
+      // Build the model config resolver (mirrors extractEntityWithModelsInternal)
+      const resolveModelConfig = (modelId: string) => {
+        const modelObj = availableModels.find((m) => m.id === modelId);
+        if (!modelObj) return null;
+        let modelType = "azure";
+        const provider = modelObj.provider?.toLowerCase() || "";
+        if (provider.includes("google") || provider.includes("gemini"))
+          modelType = "gemini";
+        else if (provider.includes("anthropic")) modelType = "anthropic";
+        else if (provider.includes("meta") || provider.includes("llama"))
+          modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
+        else if (provider.includes("macbook")) modelType = "macbook";
+        return {
+          modelType,
+          modelId: modelObj.id,
+          deployment: modelObj.deployment,
+          apiVersion: modelObj.api_version,
+        };
+      };
 
-          setCurrentEntityIndex(i + 1);
+      // Process one section group: fire all models in parallel, merge results
+      const processSectionGroup = async (group: {
+        entities: Entity[];
+        indices: number[];
+      }) => {
+        if (signal.aborted) return;
 
+        // Mark all entities in group as extracting
+        group.entities.forEach((e) =>
+          setExtractingEntities((prev) => new Set(prev).add(e.name))
+        );
+        setCurrentEntityIndex(group.indices[0] + 1);
+
+        const processorUsed =
+          currentFile.processingResult?.processorUsed ||
+          documentData.processorUsed;
+        const sessionId = sessionIdRef.current || undefined;
+
+        // All models run in parallel for this section group
+        const modelPromises = modelsToUse.map(async (modelId) => {
+          const config = resolveModelConfig(modelId);
+          if (!config) return { modelId, results: [] as any[] };
           try {
-            // Get pre-selected models
-            const preSelectedModels =
-              currentFile?.selectedModels || documentData.selectedModels || [];
-            const modelsToUse =
-              preSelectedModels.length > 0
-                ? preSelectedModels
-                : [selectedModel];
-
-            const updatedEntity = await extractEntityWithAllModels(
-              entity,
-              i,
-              signal,
+            const results = await extractEntitiesBatchFromApi(
+              group.entities,
               conversionId,
-              modelsToUse
+              config,
+              processorUsed,
+              signal,
+              sessionId
             );
-            updatedEntities[i] = updatedEntity;
-
-            // Save result to session if we have one
-            if (activeSessionId) {
-              saveExtractionResult(activeSessionId, updatedEntity);
-            }
+            return { modelId, results };
           } catch (err: any) {
             if (err.name === "AbortError") throw err;
-            // Continue to next entity if one fails (unless aborted)
-            console.error(`Error processing entity ${i}:`, err);
+            console.error(
+              `Batch extraction error for model ${modelId}:`,
+              err
+            );
+            return { modelId, results: [] as any[] };
+          }
+        });
+
+        const allModelResults = await Promise.all(modelPromises);
+
+        // Merge per-model results back onto each entity
+        group.entities.forEach((entity, gi) => {
+          const extractionsByModel: Record<string, any> = {};
+          for (const { modelId, results } of allModelResults) {
+            const r = results[gi];
+            if (r && !r.extracted?.startsWith("Error:")) {
+              const meta = r.meta || {};
+              extractionsByModel[modelId] = {
+                extracted: r.extracted,
+                answer: r.answer || r.extracted,
+                references: r.references || [],
+                duration: meta.duration,
+                promptTokens: meta.prompt_tokens,
+                completionTokens: meta.completion_tokens,
+                cost: meta.cost ?? undefined,
+              };
+            }
+          }
+
+          const currentModelResult =
+            extractionsByModel[selectedModel] ||
+            Object.values(extractionsByModel)[0];
+
+          const updatedEntity: Entity = {
+            ...entity,
+            extractionsByModel,
+            extracted: currentModelResult?.extracted || "No result",
+            answer: currentModelResult?.answer,
+            references: currentModelResult?.references || [],
+            duration: currentModelResult?.duration,
+            promptTokens: currentModelResult?.promptTokens,
+            completionTokens: currentModelResult?.completionTokens,
+          };
+
+          const entityGlobalIdx = group.indices[gi];
+          updatedEntities[entityGlobalIdx] = updatedEntity;
+
+          setEntities((prev) => {
+            const next = [...prev];
+            next[entityGlobalIdx] = updatedEntity;
+            return next;
+          });
+          setExtractingEntities((prev) => {
+            const s = new Set(prev);
+            s.delete(entity.name);
+            return s;
+          });
+          setCompletedEntities((prev) => new Set(prev).add(entity.name));
+
+          if (activeSessionId) {
+            saveExtractionResult(activeSessionId, updatedEntity);
+          }
+        });
+      };
+
+      // Process section groups with concurrency limit
+      const CONCURRENCY_LIMIT = 5;
+      let groupIndex = 0;
+
+      const processNextGroup = async () => {
+        while (groupIndex < sectionGroups.length) {
+          if (signal.aborted) break;
+          const group = sectionGroups[groupIndex++];
+          try {
+            await processSectionGroup(group);
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            console.error(`Error processing section group:`, err);
           }
         }
       };
 
-      // Start workers
       const workers = Array(CONCURRENCY_LIMIT)
         .fill(null)
-        .map(() => processNextEntity());
+        .map(() => processNextGroup());
 
       await Promise.all(workers);
 

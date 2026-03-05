@@ -279,24 +279,6 @@ async def extract_entities(
                 user_id = str(
                     user_model["id"] if isinstance(user_model, dict) else user_model.id
                 )
-                document_id = None
-                session_docs = session_service.db.get_documents_by_session(
-                    request.session_id
-                )
-                for doc in session_docs:
-                    if doc["file_hash"] == request.conversion_id:
-                        document_id = doc["id"]
-                        break
-
-                # Always persist all successful extractions. document_id is passed when the
-                # file_hash lookup above succeeded; if it's None, add_extraction_result_fast
-                # will use result.file_hash to find the document (same pattern as paragraph
-                # generator — this prevents silent cost loss on any hash-lookup edge case).
-                if not document_id:
-                    print(
-                        f"Warning: Could not find document with hash {request.conversion_id} "
-                        f"in session {request.session_id} — using file_hash fallback"
-                    )
                 for entity_res in extracted_entities:
                     # Skip if error string
                     if isinstance(entity_res.get("extracted"), str) and entity_res[
@@ -313,9 +295,8 @@ async def extract_entities(
                     # cost was computed in run_extraction() and injected into meta
                     extraction_cost = meta.get("cost")
 
-                    # Convert to ExtractionResult schema.
-                    # file_hash enables add_extraction_result_fast to find document_id
-                    # via fallback when document_id is None (mirrors paragraph pattern).
+                    # file_hash lets add_extraction_result_fast resolve document_id
+                    # via its internal _doc_cache — no manual DB lookup needed.
                     result_obj = ExtractionResult(
                         entity_name=entity_res["name"],
                         model_id=request.model_id
@@ -324,33 +305,35 @@ async def extract_entities(
                         extracted_text=entity_res["extracted"],
                         references=entity_res.get("references"),
                         status="completed",
-                        extracted_at=None,  # will happen in add_extraction_result
+                        extracted_at=None,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         duration_ms=duration_ms,
                         cost=extraction_cost,
-                        file_hash=request.conversion_id,  # enables fallback in add_extraction_result_fast
+                        file_hash=request.conversion_id,
                     )
 
-                    # Save to DB
-                    session_service.add_extraction_result(
+                    # Use fast path — no full session reload after each upsert
+                    ok = session_service.add_extraction_result_fast(
                         user_id=user_id,
                         session_id=request.session_id,
                         result=result_obj,
-                        document_id=document_id,  # may be None; fallback uses file_hash
                     )
-                    print(
-                        f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
-                    )
+                    if not ok:
+                        print(
+                            f"Warning: Could not persist extraction for {entity_res['name']} "
+                            f"(hash={request.conversion_id}, session={request.session_id})"
+                        )
+                    else:
+                        print(
+                            f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
+                        )
 
             except Exception as e:
                 import traceback
 
                 print(f"Error persisting extractions for session {request.session_id}:")
                 print(f"  conversion_id: {request.conversion_id}")
-                print(
-                    f"  document_id: {document_id if 'document_id' in dir() else 'not assigned'}"
-                )
                 print(f"  Error: {e}")
                 traceback.print_exc()
                 # Don't fail the request if persistence fails, just log it
