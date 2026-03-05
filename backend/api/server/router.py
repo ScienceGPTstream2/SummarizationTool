@@ -732,19 +732,25 @@ _LOG_FILE = Path(__file__).resolve().parents[2] / "output" / "logs" / "app.log"
 
 
 @router.get("/server/logs", dependencies=[Depends(get_current_user)])
-async def get_server_logs(lines: int = 200, level: str = "ALL"):
+async def get_server_logs(lines: int = 200, level: str = "ALL", format: str = "json"):
     """
     Return recent lines from the server log file (backend/output/logs/app.log).
 
     Query params:
       lines  – how many tail lines to return (default 200)
       level  – filter to a log level: ERROR, WARNING, INFO, or ALL (default)
+      format – "json" (default) or "text" (returns plain .txt, good for curl -o)
     """
+    from fastapi.responses import PlainTextResponse
+
     if not _LOG_FILE.exists():
+        msg = "No log file yet — errors will appear here after the first request."
+        if format.lower() == "text":
+            return PlainTextResponse(msg)
         return {
             "lines": [],
             "total_lines": 0,
-            "message": "No log file yet — errors will appear here after the first request.",
+            "message": msg,
             "log_path": str(_LOG_FILE),
         }
 
@@ -756,8 +762,14 @@ async def get_server_logs(lines: int = 200, level: str = "ALL"):
         tag = f"[{level.upper()}]"
         filtered = [ln for ln in all_lines if tag in ln]
 
+    tail = filtered[-lines:]
+
+    if format.lower() == "text":
+        header = f"# ScienceGPT Logs — level={level.upper()} lines={lines} of {len(filtered)} ({len(all_lines)} total)\n# {_LOG_FILE}\n\n"
+        return PlainTextResponse(header + "".join(tail))
+
     return {
-        "lines": filtered[-lines:],
+        "lines": tail,
         "total_lines": len(all_lines),
         "filtered_lines": len(filtered),
         "log_path": str(_LOG_FILE),
