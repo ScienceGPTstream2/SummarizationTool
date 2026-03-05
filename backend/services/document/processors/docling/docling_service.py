@@ -1,3 +1,4 @@
+import os
 import uuid
 import time
 import re
@@ -84,7 +85,16 @@ def _calculate_max_workers(vram_per_worker_gb: float = 2.0) -> int:
             return max_w
     except ImportError:
         pass
-    return 2
+    # CPU-only fallback: use all cores minus 1 (leave one free for Uvicorn/OS).
+    # We also pin each worker's PyTorch to 1 thread (see _docling_worker_process)
+    # so that N workers = exactly N cores, with no inter-thread contention.
+    cpu_cores = os.cpu_count() or 2
+    cpu_workers = max(1, cpu_cores - 1)
+    _log.info(
+        f"No CUDA GPU detected. Using {cpu_workers} CPU workers "
+        f"({cpu_cores} cores - 1 reserved for Uvicorn)"
+    )
+    return cpu_workers
 
 
 def _serialize_node_item(node) -> Optional[Dict[str, Any]]:
@@ -130,6 +140,16 @@ def _docling_worker_process(task_args: dict) -> dict:
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
     logging.captureWarnings(True)
+
+    # Pin PyTorch to 1 thread per worker so N workers = N cores, not N×T threads.
+    # Without this, each worker spawns multiple OpenMP threads causing core thrashing.
+    try:
+        import torch
+
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
 
     try:
         converter = _get_or_create_converter(image_resolution_scale)
