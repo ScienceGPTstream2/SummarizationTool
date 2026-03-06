@@ -9,11 +9,21 @@ This is the main application launcher that:
 5. Starts the server
 """
 
+# Logging must be configured before any other imports so all loggers inherit it
+from core.logging_config import setup_logging
+
+setup_logging()
+
+import logging
+import traceback
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import os
 import toml
+
+logger = logging.getLogger("app")
 
 # Load configuration before importing services
 from core.config import load_config
@@ -104,10 +114,32 @@ def create_app() -> FastAPI:
     # Setup middleware
     setup_cors(app)
 
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.error(
+            "Unhandled %s on %s %s\n%s",
+            type(exc).__name__,
+            request.method,
+            request.url.path,
+            traceback.format_exc(),
+        )
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
-        print(f"Incoming request: {request.method} {request.url.path}")
         response = await call_next(request)
+        if response.status_code >= 500:
+            logger.error(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
+        elif response.status_code >= 400:
+            logger.warning(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
+        else:
+            logger.info(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
         return response
 
     # Include API routers
