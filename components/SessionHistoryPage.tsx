@@ -308,7 +308,10 @@ export function SessionHistoryPage({
                         hour12: true,
                       })}
                     </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <TableCell
+                      className="text-right"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="ghost"

@@ -209,8 +209,8 @@ export function EntityExtractionPage({
         setSelectedFileId(documentData.uploadedFiles[0].fileId);
       }
     }
-  // Also include uploadedFiles.length so that if the same session is restored
-  // again (e.g. after a failed restore attempt) the sync still fires.
+    // Also include uploadedFiles.length so that if the same session is restored
+    // again (e.g. after a failed restore attempt) the sync still fires.
   }, [documentData.sessionId, documentData.uploadedFiles?.length]);
 
   const currentFile =
@@ -744,8 +744,7 @@ export function EntityExtractionPage({
             ...prev,
             [file.fileId]: {
               ...prev[file.fileId],
-              statusMessage:
-                `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes per entity\u2026`,
+              statusMessage: `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes per entity\u2026`,
             },
           }));
         }, slowThresholdMs);
@@ -850,8 +849,7 @@ export function EntityExtractionPage({
         ...prev,
         [file.fileId]: {
           ...prev[file.fileId],
-          statusMessage:
-            `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes\u2026`,
+          statusMessage: `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes\u2026`,
         },
       }));
     }, summarySlowThresholdMs);

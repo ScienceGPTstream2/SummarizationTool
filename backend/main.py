@@ -11,6 +11,7 @@ This is the main application launcher that:
 
 # Logging must be configured before any other imports so all loggers inherit it
 from core.logging_config import setup_logging
+
 setup_logging()
 
 import logging
@@ -122,19 +123,23 @@ def create_app() -> FastAPI:
             request.url.path,
             traceback.format_exc(),
         )
-        return JSONResponse(
-            status_code=500, content={"detail": str(exc)}
-        )
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         response = await call_next(request)
         if response.status_code >= 500:
-            logger.error("%s %s → %d", request.method, request.url.path, response.status_code)
+            logger.error(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
         elif response.status_code >= 400:
-            logger.warning("%s %s → %d", request.method, request.url.path, response.status_code)
+            logger.warning(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
         else:
-            logger.info("%s %s → %d", request.method, request.url.path, response.status_code)
+            logger.info(
+                "%s %s → %d", request.method, request.url.path, response.status_code
+            )
         return response
 
     # Include API routers

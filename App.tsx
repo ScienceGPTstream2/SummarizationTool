@@ -701,7 +701,9 @@ export default function App() {
         // Restore uploaded files with proper processing status
         uploadedFiles: sessionData.documents.map((doc: any) => {
           const fileConfig = filesConfig[doc.file_hash] || {};
-          console.log(`[restore] Mapping document: ${doc.filename} (id=${doc.id}, hash=${doc.file_hash})`);
+          console.log(
+            `[restore] Mapping document: ${doc.filename} (id=${doc.id}, hash=${doc.file_hash})`
+          );
 
           return {
             file: new File([""], doc.filename, { type: "application/pdf" }),
@@ -1329,7 +1331,9 @@ export default function App() {
         }),
       };
 
-      console.log(`[restore] Restored ${restoredData.uploadedFiles?.length ?? 0} files, last_step=${sessionData.last_step}`);
+      console.log(
+        `[restore] Restored ${restoredData.uploadedFiles?.length ?? 0} files, last_step=${sessionData.last_step}`
+      );
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
       sessionCreationInProgressRef.current = false; // Reset in case it was stuck
 
@@ -1396,7 +1400,9 @@ export default function App() {
       }
     } catch (error) {
       console.error("Error restoring session:", error, JSON.stringify(error));
-      toast.error(`Failed to restore session: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(
+        `Failed to restore session: ${error instanceof Error ? error.message : String(error)}`
+      );
     } finally {
       setLoading(false);
       restoringSessionRef.current = false;

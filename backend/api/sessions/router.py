@@ -111,7 +111,10 @@ async def add_extraction_result(
     ok = session_service.add_extraction_result_fast(user_id, session_id, result)
 
     if not ok:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found or document mismatch")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found or document mismatch",
+        )
 
     return {"ok": True}
 

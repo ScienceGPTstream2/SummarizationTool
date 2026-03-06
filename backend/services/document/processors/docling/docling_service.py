@@ -512,7 +512,9 @@ class DoclingService:
         # Dynamic worker count based on probing actual GPU VRAM usage.
         # Loads one Docling converter, measures peak VRAM, adds 30% safety margin,
         # then calculates: workers = floor(total_vram / measured_per_worker)
-        self.max_workers = _calculate_max_workers(vram_per_worker_gb=3.5)  # Bench-proven: actual observed peak ~3.5 GB/worker
+        self.max_workers = _calculate_max_workers(
+            vram_per_worker_gb=3.5
+        )  # Bench-proven: actual observed peak ~3.5 GB/worker
         _log.info(f"DoclingService initialized with {self.max_workers} process workers")
 
         # ProcessPoolExecutor: each subprocess creates its own DocumentConverter
