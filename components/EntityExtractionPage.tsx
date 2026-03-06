@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { pLimit } from "../utils/concurrency";
 import { Button } from "./ui/button";
 import {
   Card,
@@ -333,12 +332,16 @@ export function EntityExtractionPage({
             temperature: temperature,
             model_temperatures: modelTemperatures,
           },
-          documents: [
-            {
-              file_hash: currentFile.fileId, // Using fileId as hash for now based on file_info structure
-              filename: currentFile.file?.name || "Document",
-            },
-          ],
+          documents: files
+            .filter((f) => f.fileId)
+            .map((f) => ({
+              file_hash: f.fileId,
+              filename: f.file?.name || "Document",
+              processor_used: f.processorUsed,
+              parse_cost: f.processingResult?.parse_cost,
+              page_count: f.processingResult?.page_count,
+              parse_duration_seconds: f.processingResult?.parseDuration,
+            })),
         }),
       });
 
@@ -602,14 +605,9 @@ export function EntityExtractionPage({
       );
     }
 
-    // Limit concurrency to 5 to prevent UI freeze
-    const limit = pLimit(5);
-
-    // Process all pending files with concurrency limit
+    // Process all pending files concurrently
     try {
-      await Promise.all(
-        pendingFiles.map((file) => limit(() => processFile(file)))
-      );
+      await Promise.all(pendingFiles.map((file) => processFile(file)));
     } catch (error) {
       console.error("Batch processing error:", error);
     } finally {
