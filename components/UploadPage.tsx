@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -57,6 +57,12 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     new Set()
   );
   const [processedFiles, setProcessedFiles] = useState<Record<string, any>>({});
+  const processedFilesRef = useRef<Record<string, any>>({});
+  // Keep ref in sync so handleProceed always reads latest results even if
+  // the user clicks Proceed before React flushes the batched state update.
+  useEffect(() => {
+    processedFilesRef.current = processedFiles;
+  }, [processedFiles]);
   const [processingErrors, setProcessingErrors] = useState<
     Record<string, string>
   >({});
@@ -410,7 +416,7 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
       uploadResult: uploadResults[f.name],
       status: "completed" as const,
       selectedParser: fileParsers[f.name] || defaultParser,
-      processingResult: processedFiles[f.name],
+      processingResult: processedFilesRef.current[f.name],
     }));
 
     console.log(
