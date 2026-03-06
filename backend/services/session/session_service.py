@@ -89,27 +89,48 @@ class SessionService:
         documents = []
         if request.documents:
             for doc in request.documents:
-                db_doc = self.db.create_document(
-                    session_id=db_session["id"],
-                    user_id=request.user_id,
-                    file_hash=doc.file_hash,
-                    filename=doc.filename,
-                    processor_used=doc.processor_used,
-                    parse_cost=doc.parse_cost,
-                    page_count=doc.page_count,
-                    parse_duration_seconds=doc.parse_duration_seconds,
-                )
-                documents.append(
-                    SessionDocument(
-                        **{
-                            "file_hash": db_doc["file_hash"],
-                            "filename": db_doc["filename"],
-                            "processor_used": db_doc.get("processor_used"),
-                            "parse_cost": db_doc.get("parse_cost"),
-                            "page_count": db_doc.get("page_count"),
-                        }
+                try:
+                    db_doc = self.db.create_document(
+                        session_id=db_session["id"],
+                        user_id=request.user_id,
+                        file_hash=doc.file_hash,
+                        filename=doc.filename,
+                        processor_used=doc.processor_used,
+                        parse_cost=doc.parse_cost,
+                        page_count=doc.page_count,
+                        parse_duration_seconds=doc.parse_duration_seconds,
                     )
+                    if db_doc is None:
+                        print(
+                            f"[SESSION] Warning: create_document returned None for {doc.filename}, skipping"
+                        )
+                        continue
+                    documents.append(
+                        SessionDocument(
+                            **{
+                                "file_hash": db_doc["file_hash"],
+                                "filename": db_doc["filename"],
+                                "processor_used": db_doc.get("processor_used"),
+                                "parse_cost": db_doc.get("parse_cost"),
+                                "page_count": db_doc.get("page_count"),
+                            }
+                        )
+                    )
+                except Exception as e:
+                    print(f"[SESSION] Error creating document {doc.filename}: {e}")
+                    # Continue — don't let one failed doc abort the whole session
+
+            # If ALL document inserts failed, clean up the orphaned session row
+            if not documents:
+                print(
+                    f"[SESSION] All {len(request.documents)} document inserts failed"
+                    f" — deleting orphaned session {db_session['id']}"
                 )
+                try:
+                    self.db.delete_session(db_session["id"], request.user_id)
+                except Exception as cleanup_err:
+                    print(f"[SESSION] Could not delete orphaned session: {cleanup_err}")
+                raise RuntimeError("Failed to insert any documents for this session")
 
         # Convert to Session model
         return Session(
