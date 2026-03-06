@@ -223,15 +223,11 @@ export function SessionHistoryPage({
                 const displayName = getDisplayName(session);
 
                 return (
-                  <TableRow
-                    key={session.session_id}
-                    className="group cursor-pointer hover:bg-muted/50"
-                    onClick={() => onRestoreSession(session.session_id)}
-                  >
+                  <TableRow key={session.session_id} className="group">
                     <TableCell className="font-medium">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-base font-semibold hover:underline">
+                          <span className="text-base font-semibold">
                             {displayName}
                           </span>
                           {session.study_type && (
@@ -262,11 +258,10 @@ export function SessionHistoryPage({
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() =>
                             session.document_names.length > 0 &&
-                              toggleExpanded(session.session_id);
-                          }}
+                            toggleExpanded(session.session_id)
+                          }
                           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
                           disabled={session.document_names.length === 0}
                         >
@@ -308,10 +303,7 @@ export function SessionHistoryPage({
                         hour12: true,
                       })}
                     </TableCell>
-                    <TableCell
-                      className="text-right"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="ghost"

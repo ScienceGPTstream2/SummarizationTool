@@ -27,28 +27,6 @@ class SupabaseDBService:
         self.client: Client = create_client(self.url, self.service_key)
 
     # ==========================================
-    # Internal helpers
-    # ==========================================
-
-    def _fetch_all(self, table: str, query_fn) -> List[Dict[str, Any]]:
-        """Fetch all rows from a Supabase table, paginating past the default 1000-row limit."""
-        all_rows: List[Dict[str, Any]] = []
-        page_size = 1000
-        offset = 0
-        while True:
-            result = (
-                query_fn(self.client.table(table))
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
-            page = result.data or []
-            all_rows.extend(page)
-            if len(page) < page_size:
-                break
-            offset += page_size
-        return all_rows
-
-    # ==========================================
     # Session Operations
     # ==========================================
 
@@ -99,37 +77,30 @@ class SupabaseDBService:
         )
         session["documents"] = docs_result.data or []
 
-        # Get extraction results - paginate past Supabase's 1000-row default limit
-        session["extraction_results"] = self._fetch_all(
-            "extraction_results",
-            lambda t: t.select("*")
+        # Get extraction results - order by entity_name for consistent ordering
+        extractions_result = (
+            self.client.table("extraction_results")
+            .select("*")
             .eq("session_id", session_id)
             .order("entity_name")
-            .order("model_id"),
+            .order("model_id")
+            .execute()
         )
+        session["extraction_results"] = extractions_result.data or []
 
-        # Get evaluation results for extractions.
-        # evaluation_results has no session_id column so we must join via
-        # extraction_result_id.  Batching in groups of 50 avoids the
-        # "URI too long" (HTTP 414) error that occurs when hundreds of UUIDs
-        # are packed into a single PostgREST query string.
+        # Get evaluation results for extractions - order for consistent results
         if session["extraction_results"]:
             extraction_ids = [e["id"] for e in session["extraction_results"]]
-            all_evals: List[Dict[str, Any]] = []
-            batch_size = 50
-            for i in range(0, len(extraction_ids), batch_size):
-                batch = extraction_ids[i : i + batch_size]
-                result = (
-                    self.client.table("evaluation_results")
-                    .select("*")
-                    .in_("extraction_result_id", batch)
-                    .order("extraction_result_id")
-                    .order("judge_model")
-                    .order("metric")
-                    .execute()
-                )
-                all_evals.extend(result.data or [])
-            session["evaluation_results"] = all_evals
+            evals_result = (
+                self.client.table("evaluation_results")
+                .select("*")
+                .in_("extraction_result_id", extraction_ids)
+                .order("extraction_result_id")
+                .order("judge_model")
+                .order("metric")
+                .execute()
+            )
+            session["evaluation_results"] = evals_result.data or []
         else:
             session["evaluation_results"] = []
 
@@ -486,13 +457,15 @@ class SupabaseDBService:
     def get_extraction_results_by_session(
         self, session_id: str
     ) -> List[Dict[str, Any]]:
-        """Get all extraction results for a session, paginating past the 1000-row limit."""
-        return self._fetch_all(
-            "extraction_results",
-            lambda t: t.select("*, documents(filename, study_type)").eq(
-                "session_id", session_id
-            ),
+        """Get all extraction results for a session"""
+        result = (
+            self.client.table("extraction_results")
+            .select("*, documents(filename, study_type)")
+            .eq("session_id", session_id)
+            .execute()
         )
+
+        return result.data or []
 
     def get_extraction_results_by_document(
         self, document_id: str

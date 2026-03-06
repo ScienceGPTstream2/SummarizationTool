@@ -95,7 +95,7 @@ async def delete_session(
     return {"message": f"Session {session_id} deleted successfully"}
 
 
-@router.post("/{session_id}/extractions")
+@router.post("/{session_id}/extractions", response_model=Session)
 async def add_extraction_result(
     session_id: str,
     result: ExtractionResult,
@@ -104,19 +104,14 @@ async def add_extraction_result(
     """
     Add or update an extraction result in a session.
 
-    Returns {"ok": true} — the frontend does not consume the full session
-    response so we skip the expensive get_session() reload to avoid
-    'URI too long' errors on large sessions with many extraction results.
+    If a result for the same entity and model already exists, it will be updated.
     """
-    ok = session_service.add_extraction_result_fast(user_id, session_id, result)
+    session = session_service.add_extraction_result(user_id, session_id, result)
 
-    if not ok:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_id} not found or document mismatch",
-        )
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    return {"ok": True}
+    return session
 
 
 @router.post("/{session_id}/evaluations", response_model=Session)

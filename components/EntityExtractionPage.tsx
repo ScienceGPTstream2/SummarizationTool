@@ -199,8 +199,7 @@ export function EntityExtractionPage({
     if (lastSyncedSessionRef.current !== documentData.sessionId) {
       console.log(
         "[EntityExtractionPage] Session changed, syncing files:",
-        documentData.sessionId,
-        `(${documentData.uploadedFiles.length} files)`
+        documentData.sessionId
       );
       setFiles(documentData.uploadedFiles);
       lastSyncedSessionRef.current = documentData.sessionId;
@@ -209,9 +208,7 @@ export function EntityExtractionPage({
         setSelectedFileId(documentData.uploadedFiles[0].fileId);
       }
     }
-    // Also include uploadedFiles.length so that if the same session is restored
-    // again (e.g. after a failed restore attempt) the sync still fires.
-  }, [documentData.sessionId, documentData.uploadedFiles?.length]);
+  }, [documentData.sessionId]);
 
   const currentFile =
     files.find((f) => f.fileId === selectedFileId) || files[0];
@@ -736,18 +733,17 @@ export function EntityExtractionPage({
         if (entity.extracted && !entity.extracted.startsWith("Error:"))
           continue;
 
-        // Show a "slow models" notice after a threshold that scales with the
-        // number of models selected (reasoning models like o3 can take 60-120s).
-        const slowThresholdMs = Math.max(30000, modelsToUse.length * 10000);
+        // Start a timer to show "taking longer / retrying" message after 20s
         const retryMsgTimer = setTimeout(() => {
           setFileProcessingStatus((prev) => ({
             ...prev,
             [file.fileId]: {
               ...prev[file.fileId],
-              statusMessage: `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes per entity\u2026`,
+              statusMessage:
+                "Taking longer than expected, system is retrying automatically...",
             },
           }));
-        }, slowThresholdMs);
+        }, 20000);
 
         // Use the shared internal extraction logic
         const { results, extractionsByModel } =
@@ -842,17 +838,17 @@ export function EntityExtractionPage({
       },
     }));
 
-    // Show a "slow models" notice after a threshold that scales with model count
-    const summarySlowThresholdMs = Math.max(30000, modelsToUse.length * 10000);
+    // Start a timer to show "taking longer / retrying" message for summary generation
     const summaryRetryMsgTimer = setTimeout(() => {
       setFileProcessingStatus((prev) => ({
         ...prev,
         [file.fileId]: {
           ...prev[file.fileId],
-          statusMessage: `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes\u2026`,
+          statusMessage:
+            "Taking longer than expected, system is retrying automatically...",
         },
       }));
-    }, summarySlowThresholdMs);
+    }, 25000);
 
     try {
       // Generate paragraph summaries for ALL selected models — show each as it arrives

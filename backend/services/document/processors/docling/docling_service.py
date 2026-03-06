@@ -48,7 +48,7 @@ def _get_or_create_converter(image_resolution_scale: float = 1.5) -> DocumentCon
             device=AcceleratorDevice.AUTO,
         ),
         ocr_batch_size=8,  # Increased from 4 for better GPU throughput
-        layout_batch_size=8,  # Bench-optimal: same throughput as 32, lower per-worker VRAM
+        layout_batch_size=32,  # Increased from 16 for faster layout analysis
         table_batch_size=4,  # Kept at 4 as tables are highly VRAM intensive
     )
     opts.images_scale = image_resolution_scale
@@ -512,9 +512,7 @@ class DoclingService:
         # Dynamic worker count based on probing actual GPU VRAM usage.
         # Loads one Docling converter, measures peak VRAM, adds 30% safety margin,
         # then calculates: workers = floor(total_vram / measured_per_worker)
-        self.max_workers = _calculate_max_workers(
-            vram_per_worker_gb=3.5
-        )  # Bench-proven: actual observed peak ~3.5 GB/worker
+        self.max_workers = _calculate_max_workers()
         _log.info(f"DoclingService initialized with {self.max_workers} process workers")
 
         # ProcessPoolExecutor: each subprocess creates its own DocumentConverter

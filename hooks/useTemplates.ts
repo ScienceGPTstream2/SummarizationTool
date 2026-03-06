@@ -129,7 +129,7 @@ async function apiRequest<T>(
     try {
       const json = JSON.parse(text);
       message = json.detail || json.message || text;
-    } catch {}
+    } catch { }
     throw new Error(message);
   }
 
