@@ -235,7 +235,10 @@ export default function App() {
 
         if (session) {
           // If we just logged in, go to upload
-          if (currentStep === "login" || currentStep === "auth_callback") {
+          if (
+            event === "SIGNED_IN" &&
+            (currentStep === "login" || currentStep === "auth_callback")
+          ) {
             // Clean up URL if needed
             if (
               window.location.pathname === "/auth/callback" ||
