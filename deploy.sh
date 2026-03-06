@@ -23,4 +23,9 @@ sudo systemctl restart summarization-backend
 echo "Restarting frontend..."
 sudo systemctl restart summarization-frontend
 
+echo "Restarting Docker..."
+cd ~/SummarizationTool/supabase-docker
+sudo docker compose down
+sudo docker compose up -d
+
 echo "==== DEPLOY DONE ===="
