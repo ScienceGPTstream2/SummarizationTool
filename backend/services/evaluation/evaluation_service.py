@@ -26,6 +26,29 @@ from .metrics import (
 )
 from .storage import EvaluationResultStorage
 
+# ---------------------------------------------------------------------------
+# Global session cancellation registry
+# ---------------------------------------------------------------------------
+# When the user clicks "Stop Evaluation", the frontend POSTs the session_id
+# here. bounded_evaluate checks this set before each entity — skipping any
+# queued work so the backend stops processing as quickly as possible.
+CANCELLED_SESSIONS: set[str] = set()
+
+
+def cancel_session(session_id: str) -> None:
+    """Register a session as cancelled. Thread-safe for asyncio."""
+    CANCELLED_SESSIONS.add(session_id)
+
+
+def clear_cancelled_session(session_id: str) -> None:
+    """Remove a session from the cancelled set after the batch finishes."""
+    CANCELLED_SESSIONS.discard(session_id)
+
+
+def is_session_cancelled(session_id: Optional[str]) -> bool:
+    """Return True if this session has been cancelled."""
+    return session_id is not None and session_id in CANCELLED_SESSIONS
+
 
 class EvaluationService:
     """
@@ -384,28 +407,47 @@ class EvaluationService:
         batch_id = str(uuid.uuid4())
         start_time = datetime.now()
 
+        # Clear any stale cancellation from a previous stopped run.
+        # This must happen at the START so all judges in a new run begin fresh.
+        # We do NOT clear it at the end — another judge may still be checking it.
+        if session_id:
+            clear_cancelled_session(session_id)
+
         if metrics is None:
             metrics = ["correctness", "completeness", "relevance", "safety"]
 
-        semaphore = asyncio.Semaphore(batch_size)
+        async def evaluate_one(extraction):
+            """Run evaluation for a single extraction."""
+            return await self.evaluate_extraction(
+                entity_name=extraction.get("entity_name", "Unknown"),
+                extraction_prompt=extraction.get("extraction_prompt", ""),
+                actual_output=extraction.get("actual_output", ""),
+                expected_output=extraction.get("expected_output"),
+                metrics=metrics,
+                provider=provider,
+                threshold=threshold,
+                custom_evaluation_steps=custom_evaluation_steps,
+                session_id=session_id,
+                **model_kwargs,
+            )
 
-        async def bounded_evaluate(extraction):
-            async with semaphore:
-                return await self.evaluate_extraction(
-                    entity_name=extraction.get("entity_name", "Unknown"),
-                    extraction_prompt=extraction.get("extraction_prompt", ""),
-                    actual_output=extraction.get("actual_output", ""),
-                    expected_output=extraction.get("expected_output"),
-                    metrics=metrics,
-                    provider=provider,
-                    threshold=threshold,
-                    custom_evaluation_steps=custom_evaluation_steps,
-                    session_id=session_id,
-                    **model_kwargs,
+        results: list = []
+        for i in range(0, len(extractions), batch_size):
+            if is_session_cancelled(session_id):
+                # Fill remaining with cancelled placeholders
+                results.extend(
+                    {
+                        "entity_name": e.get("entity_name", "Unknown"),
+                        "status": "cancelled",
+                        "provider": provider,
+                    }
+                    for e in extractions[i:]
                 )
+                break
 
-        tasks = [bounded_evaluate(extraction) for extraction in extractions]
-        results = await asyncio.gather(*tasks)
+            mini_batch = extractions[i : i + batch_size]
+            mini_results = await asyncio.gather(*[evaluate_one(e) for e in mini_batch])
+            results.extend(mini_results)
 
         end_time = datetime.now()
         batch_time = (end_time - start_time).total_seconds()

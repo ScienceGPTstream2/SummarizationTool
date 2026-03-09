@@ -18,12 +18,29 @@ from schemas.evaluations import (
     EvaluationResponse,
     BatchEvaluationResponse,
 )
-from services.evaluation.evaluation_service import EvaluationService
+from services.evaluation.evaluation_service import EvaluationService, cancel_session
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 
 # Initialize evaluation service
 evaluation_service = EvaluationService()
+
+
+@router.post("/cancel", dependencies=[Depends(get_current_user)])
+async def cancel_evaluation(http_request: Request):
+    """
+    Cancel an in-progress batch evaluation for the given session.
+    The session_id is read from the X-Session-Id header (same header
+    used when starting the batch).  Any queued entities in
+    evaluate_multiple_extractions() will be skipped immediately.
+    """
+    session_id = http_request.headers.get("X-Session-Id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="X-Session-Id header required")
+    cancel_session(session_id)
+    return JSONResponse(
+        status_code=200, content={"cancelled": True, "session_id": session_id}
+    )
 
 
 @router.post("/evaluate", dependencies=[Depends(get_current_user)])
