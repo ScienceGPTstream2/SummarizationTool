@@ -85,7 +85,6 @@ async def evaluate_extraction(request: EvaluationRequest, http_request: Request)
             extraction_prompt=request.extraction_prompt,
             actual_output=request.actual_output,
             expected_output=request.expected_output,
-            retrieval_context=request.retrieval_context,
             metrics=request.metrics,
             provider=request.provider,
             threshold=request.threshold,
@@ -179,6 +178,7 @@ async def evaluate_batch(request: BatchEvaluationRequest, http_request: Request)
             provider=request.provider,
             threshold=request.threshold,
             metrics=request.metrics,
+            custom_evaluation_steps=request.custom_evaluation_steps,
             session_id=session_id,
             **model_kwargs,
         )
@@ -258,9 +258,6 @@ async def evaluate_with_custom_metric(request: CustomMetricRequest):
             input=request.extraction_prompt,
             actual_output=request.actual_output,
             expected_output=request.expected_output,
-            retrieval_context=(
-                [request.retrieval_context] if request.retrieval_context else None
-            ),
         )
 
         await custom_metric.a_measure(test_case)

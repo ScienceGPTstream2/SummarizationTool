@@ -1218,7 +1218,10 @@ export function EvaluationPage({
         extraction_prompt: entity.prompt,
         actual_output: actualOutput,
         expected_output: entityGroundTruths[entity.name] || undefined,
-        retrieval_context: documentData.extractedText || undefined,
+        // retrieval_context intentionally omitted — none of the GEval metrics
+        // (correctness, completeness, relevance, safety) declare
+        // LLMTestCaseParams.RETRIEVAL_CONTEXT in their evaluation_params.
+        // Sending the full document markdown here was inflating every request by 5–10MB.
         metrics: selectedMetrics,
         threshold: 0.7,
         custom_evaluation_steps: customEvaluationSteps,
@@ -1567,72 +1570,267 @@ export function EvaluationPage({
     setEvaluatingEntities(new Set());
     setCompletedEntities(new Set());
 
-    // IMPORTANT: Save ground truths to files_config before running evaluation
-    // This ensures the latest edits are persisted for session restore
-    hasUserEditedGroundTruthRef.current = true; // Force save even if not manually edited
+    // IMPORTANT: Save ground truths before running evaluation
+    hasUserEditedGroundTruthRef.current = true;
     await saveGroundTruthsToSession();
 
-    // Create new abort controller
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const token = await getValidToken();
-      if (!token) throw new Error("No token found");
-
-      // Filter entities that have extractions
+      // Build tasks for the current file only (single-file mode)
+      // Structure: entity × source-model × judge-model
       const entitiesToEvaluate = (currentFile.entities || []).filter(
         (e: any) => e.extracted
       );
-
       if (entitiesToEvaluate.length === 0) {
         throw new Error("No extracted entities to evaluate");
       }
 
-      const totalEvaluations =
-        selectedProviders.length * entitiesToEvaluate.length;
-      let completedEvaluations = 0;
+      type EvalTask = {
+        fileId: string;
+        entityName: string;
+        prompt: string;
+        sourceModel: string;
+        extractedContent: string;
+        groundTruth?: string;
+        judgeModel: string;
+      };
+      const tasks: EvalTask[] = [];
 
-      // Evaluate entity-by-entity (sequential entities, parallel models per entity)
-      for (const entity of entitiesToEvaluate) {
-        if (controller.signal.aborted) break;
+      entitiesToEvaluate.forEach((entity: any) => {
+        const groundTruth = entityGroundTruths[entity.name] || undefined;
+        const sourceModel = singleModeSourceModel || currentFile.selectedModel;
+        const extraction =
+          entity.extractionsByModel?.[sourceModel]?.extracted ||
+          entity.extracted;
 
-        await evaluateSingleEntity(
-          entity,
-          selectedProviders,
-          token,
-          controller.signal
-        );
+        if (!extraction) return;
 
-        // Update progress
-        if (!controller.signal.aborted) {
-          completedEvaluations += selectedProviders.length;
-          setEvaluationProgress(
-            Math.round((completedEvaluations / totalEvaluations) * 100)
-          );
-        }
+        selectedProviders.forEach((judgeModelId) => {
+          tasks.push({
+            fileId: currentFile.fileId,
+            entityName: entity.name,
+            prompt: entity.prompt,
+            sourceModel,
+            extractedContent: extraction,
+            groundTruth,
+            judgeModel: judgeModelId,
+          });
+        });
+      });
+
+      if (tasks.length === 0) {
+        throw new Error("No evaluation tasks could be built");
       }
 
+      let completedCount = 0;
+      const totalTasks = tasks.length;
+      const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
+
+      const fetchWithRetry = async (
+        url: string,
+        options: any,
+        retries = 3,
+        backoff = 1000
+      ): Promise<Response> => {
+        try {
+          const res = await authenticatedFetch(url, options);
+          if (res.status === 429) {
+            if (retries <= 0) throw new Error("Rate limit exceeded (429)");
+            const retryAfter = res.headers.get("Retry-After");
+            const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : backoff;
+            console.warn(`Rate limit hit. Retrying in ${waitTime}ms...`);
+            await new Promise((r) => setTimeout(r, waitTime));
+            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+          }
+          return res;
+        } catch (err) {
+          if (retries <= 0) throw err;
+          await new Promise((r) => setTimeout(r, backoff));
+          return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+      };
+
+      // Group by judge model → one batch request per judge (judges run in parallel)
+      const tasksByJudge = new Map<string, EvalTask[]>();
+      for (const task of tasks) {
+        if (!tasksByJudge.has(task.judgeModel))
+          tasksByJudge.set(task.judgeModel, []);
+        tasksByJudge.get(task.judgeModel)!.push(task);
+      }
+
+      const judgePromises = Array.from(tasksByJudge.entries()).map(
+        async ([judgeModelId, judgeTasks]) => {
+          if (controller.signal.aborted) return;
+
+          const provider = allProviders.find((p) => p.id === judgeModelId);
+          if (!provider) {
+            console.error(`Provider not found: ${judgeModelId}`);
+            completedCount += judgeTasks.length;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+            return;
+          }
+
+          const batchRequestBody: any = {
+            extractions: judgeTasks.map((task) => ({
+              entity_name: task.entityName,
+              extraction_prompt: task.prompt,
+              actual_output: task.extractedContent,
+              expected_output: task.groundTruth ?? undefined,
+              // retrieval_context intentionally omitted — metrics don't use it
+            })),
+            metrics: selectedMetrics,
+            threshold: 0.7,
+            strict_mode: false,
+            custom_evaluation_steps: customEvaluationSteps,
+          };
+
+          if (judgeModelId.startsWith("azure-")) {
+            batchRequestBody.provider = "azure_openai";
+            batchRequestBody.azure_deployment =
+              provider.deployment || provider.model;
+            batchRequestBody.azure_model_name = provider.model;
+          } else if (
+            judgeModelId === "vertex_ai_pro" ||
+            judgeModelId === "vertex_ai_lite"
+          ) {
+            batchRequestBody.provider = "vertex_ai";
+            batchRequestBody.vertex_model_name = provider.model;
+          } else if (judgeModelId.startsWith("anthropic_")) {
+            batchRequestBody.provider = "anthropic";
+            batchRequestBody.model_name = provider.model;
+          } else {
+            batchRequestBody.provider = judgeModelId;
+          }
+
+          try {
+            console.log(
+              `[Single-file batch] Sending ${judgeTasks.length} entities to ${provider.name}`
+            );
+            const response = await fetchWithRetry(
+              "/api/evaluations/evaluate/batch",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(batchRequestBody),
+                signal: controller.signal,
+              }
+            );
+
+            if (!response.ok)
+              throw new Error(
+                `Batch API failed for judge ${provider.name}: ${response.status}`
+              );
+
+            const batchResponse = await response.json();
+            const results: any[] = batchResponse.results || [];
+
+            results.forEach((result, idx) => {
+              const task = judgeTasks[idx];
+              if (!task || result?.status === "error") {
+                completedCount++;
+                setEvaluationProgress(
+                  Math.round((completedCount / totalTasks) * 100)
+                );
+                return;
+              }
+
+              // Update files/entities state
+              setFiles((prevFiles) =>
+                prevFiles.map((f) => {
+                  if (f.fileId !== task.fileId) return f;
+                  return {
+                    ...f,
+                    entities: f.entities.map((e: any) => {
+                      if (e.name !== task.entityName) return e;
+                      const currentExtractions = e.extractionsByModel || {};
+                      const currentSourceExtraction = currentExtractions[
+                        task.sourceModel
+                      ] || { extracted: task.extractedContent };
+                      const currentEvalResults =
+                        currentSourceExtraction.evaluationResults || [];
+                      return {
+                        ...e,
+                        // Also set top-level evaluationResults for backward compat
+                        evaluationResults: [
+                          ...(e.evaluationResults || []).filter(
+                            (r: any) => r.model !== result.model
+                          ),
+                          result,
+                        ],
+                        extractionsByModel: {
+                          ...currentExtractions,
+                          [task.sourceModel]: {
+                            ...currentSourceExtraction,
+                            evaluationResults: [
+                              ...currentEvalResults.filter(
+                                (r: any) => r.model !== result.model
+                              ),
+                              result,
+                            ],
+                          },
+                        },
+                      };
+                    }),
+                  };
+                })
+              );
+
+              // Mark entity visually complete
+              setCompletedEntities(
+                (prev) => new Set([...prev, task.entityName])
+              );
+
+              // Persist to PostgreSQL
+              saveEvaluationResult(
+                task.entityName,
+                task.sourceModel,
+                task.groundTruth,
+                [result],
+                undefined,
+                task.fileId
+              );
+
+              completedCount++;
+              setEvaluationProgress(
+                Math.round((completedCount / totalTasks) * 100)
+              );
+            });
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            console.error(
+              `Error in single-file batch eval for judge ${provider.name}:`,
+              err
+            );
+            completedCount += judgeTasks.length;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+          }
+        }
+      );
+
+      await Promise.all(judgePromises);
+
       if (!controller.signal.aborted) {
-        // Show success message only if not aborted
         setEvaluationComplete(true);
 
-        // Mark session as completed in the database
+        // Mark session as completed
         try {
-          const token = await getValidToken();
+          const tok = await getValidToken();
           const { getCurrentUser } = await import("../utils/authUtils");
           const user = await getCurrentUser();
-          if (token && user && documentData.sessionId) {
+          if (tok && user && documentData.sessionId) {
             await fetch(`/api/sessions/${documentData.sessionId}`, {
               method: "PATCH",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${tok}`,
               },
-              body: JSON.stringify({
-                user_id: user.id,
-                status: "completed",
-              }),
+              body: JSON.stringify({ user_id: user.id, status: "completed" }),
             });
             console.log("✅ Session status set to completed");
           }
@@ -1870,7 +2068,6 @@ export function EvaluationPage({
       );
       let completedCount = 0;
       const totalTasks = tasks.length;
-      const BATCH_SIZE = 10;
 
       const fetchWithRetry = async (
         url: string,
@@ -1897,144 +2094,164 @@ export function EvaluationPage({
         }
       };
 
-      // 2. Execute tasks in batches
+      // 2. Group tasks by judge model — one batch HTTP call per judge instead of one per entity
       const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
 
-      for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-        if (abortControllerRef.current?.signal.aborted) break;
+      // Build a map: judgeModelId -> array of tasks for that judge
+      const tasksByJudge = new Map<string, typeof tasks>();
+      for (const task of tasks) {
+        if (!tasksByJudge.has(task.judgeModel)) {
+          tasksByJudge.set(task.judgeModel, []);
+        }
+        tasksByJudge.get(task.judgeModel)!.push(task);
+      }
 
-        const batch = tasks.slice(i, i + BATCH_SIZE);
-        const batchPromises = batch.map(async (task) => {
+      // Process each judge model as one batch request (judges can run in parallel)
+      const judgePromises = Array.from(tasksByJudge.entries()).map(
+        async ([judgeModelId, judgeTasks]) => {
+          if (abortControllerRef.current?.signal.aborted) return;
+
+          const provider = allProviders.find((p) => p.id === judgeModelId);
+          if (!provider) {
+            console.error(`Provider not found: ${judgeModelId}`);
+            completedCount += judgeTasks.length;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+            return;
+          }
+
+          // Build the batch request body
+          const batchRequestBody: any = {
+            extractions: judgeTasks.map((task) => ({
+              entity_name: task.entityName,
+              extraction_prompt: task.prompt,
+              actual_output: task.extractedContent,
+              expected_output: task.groundTruth ?? undefined,
+              // retrieval_context intentionally omitted — metrics don't use it
+            })),
+            metrics: selectedMetrics,
+            threshold: 0.7,
+            strict_mode: false,
+            custom_evaluation_steps: customEvaluationSteps,
+          };
+
+          // Add provider-specific config
+          if (judgeModelId.startsWith("azure-")) {
+            batchRequestBody.provider = "azure_openai";
+            batchRequestBody.azure_deployment =
+              provider.deployment || provider.model;
+            batchRequestBody.azure_model_name = provider.model;
+          } else if (
+            judgeModelId === "vertex_ai_pro" ||
+            judgeModelId === "vertex_ai_lite"
+          ) {
+            batchRequestBody.provider = "vertex_ai";
+            batchRequestBody.vertex_model_name = provider.model;
+          } else if (judgeModelId.startsWith("anthropic_")) {
+            batchRequestBody.provider = "anthropic";
+            batchRequestBody.model_name = provider.model;
+          } else {
+            batchRequestBody.provider = judgeModelId;
+          }
+
           try {
-            const providerId = task.judgeModel;
-            const provider = allProviders.find((p) => p.id === providerId);
+            console.log(
+              `[Batch] Sending ${judgeTasks.length} entities to ${provider.name} in one request`
+            );
+            const response = await fetchWithRetry(
+              "/api/evaluations/evaluate/batch",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(batchRequestBody),
+                signal: abortControllerRef.current?.signal,
+              }
+            );
 
-            if (!provider) {
-              console.error(`Provider not found: ${providerId}`);
-              // return skipped or error task result
+            if (!response.ok)
+              throw new Error(
+                `Batch API failed for judge ${provider.name}: ${response.status}`
+              );
+
+            const batchResponse = await response.json();
+            const results: any[] = batchResponse.results || [];
+
+            // Map results back to tasks by index (results are in the same order as extractions)
+            results.forEach((result, idx) => {
+              const task = judgeTasks[idx];
+              if (!task || result?.status === "error") {
+                completedCount++;
+                setEvaluationProgress(
+                  Math.round((completedCount / totalTasks) * 100)
+                );
+                return;
+              }
+
+              // Update files state
+              setFiles((prevFiles) =>
+                prevFiles.map((f) => {
+                  if (f.fileId !== task.fileId) return f;
+                  return {
+                    ...f,
+                    entities: f.entities.map((e: any) => {
+                      if (e.name !== task.entityName) return e;
+                      const currentExtractions = e.extractionsByModel || {};
+                      const currentSourceExtraction = currentExtractions[
+                        task.sourceModel
+                      ] || { extracted: task.extractedContent };
+                      const currentEvalResults =
+                        currentSourceExtraction.evaluationResults || [];
+                      return {
+                        ...e,
+                        extractionsByModel: {
+                          ...currentExtractions,
+                          [task.sourceModel]: {
+                            ...currentSourceExtraction,
+                            evaluationResults: [
+                              ...currentEvalResults.filter(
+                                (r: any) => r.model !== result.model
+                              ),
+                              result,
+                            ],
+                          },
+                        },
+                      };
+                    }),
+                  };
+                })
+              );
+
+              // Persist to PostgreSQL
+              saveEvaluationResult(
+                task.entityName,
+                task.sourceModel,
+                task.groundTruth,
+                [result],
+                undefined, // humanScore
+                task.fileId // document_id
+              );
+
               completedCount++;
               setEvaluationProgress(
                 Math.round((completedCount / totalTasks) * 100)
               );
-              return null;
-            }
-
-            const requestBody: any = {
-              entity_name: task.entityName,
-              extraction_prompt: task.prompt,
-              actual_output: task.extractedContent,
-              expected_output: task.groundTruth,
-              metrics: selectedMetrics,
-              // provider: task.judgeModel, // REMOVE OLD incorrect assignment
-              threshold: 0.7,
-              strict_mode: false,
-              custom_evaluation_steps: customEvaluationSteps,
-            };
-
-            // Add provider-specific config (Copied from evaluateSingleEntity)
-            if (providerId.startsWith("azure-")) {
-              // Azure OpenAI models
-              requestBody.provider = "azure_openai";
-              requestBody.azure_deployment =
-                provider.deployment || provider.model;
-              requestBody.azure_model_name = provider.model;
-            } else if (
-              providerId === "vertex_ai_pro" ||
-              providerId === "vertex_ai_lite"
-            ) {
-              requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
-              requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
-            } else if (providerId.startsWith("anthropic_")) {
-              requestBody.provider = "anthropic"; // Backend expects "anthropic"
-              requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
-            } else {
-              // Fallback for other providers or if using just the ID
-              requestBody.provider = providerId;
-            }
-
-            const response = await fetchWithRetry("/api/evaluations/evaluate", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(requestBody),
-              signal: abortControllerRef.current?.signal,
             });
-
-            if (!response.ok)
-              throw new Error(`API failed for ${task.entityName}`);
-            const result = await response.json();
-
-            // Update state with result (Atomic state updates are tricky in loops, but we use functional update)
-            setFiles((prevFiles) =>
-              prevFiles.map((f) => {
-                if (f.fileId !== task.fileId) return f;
-
-                return {
-                  ...f,
-                  entities: f.entities.map((e: any) => {
-                    if (e.name !== task.entityName) return e;
-
-                    const currentExtractions = e.extractionsByModel || {};
-                    const currentSourceExtraction = currentExtractions[
-                      task.sourceModel
-                    ] || {
-                      extracted: task.extractedContent,
-                    };
-
-                    const currentEvalResults =
-                      currentSourceExtraction.evaluationResults || [];
-                    const updatedEvalResults = [
-                      ...currentEvalResults.filter(
-                        (r: any) => r.model !== task.judgeModel
-                      ),
-                      result,
-                    ];
-
-                    return {
-                      ...e,
-                      extractionsByModel: {
-                        ...currentExtractions,
-                        [task.sourceModel]: {
-                          ...currentSourceExtraction,
-                          evaluationResults: updatedEvalResults,
-                        },
-                      },
-                    };
-                  }),
-                };
-              })
-            );
-
-            // Persist to PostgreSQL - include document_id for multi-file support
-            saveEvaluationResult(
-              task.entityName,
-              task.sourceModel,
-              task.groundTruth,
-              [result],
-              undefined, // humanScore
-              task.fileId // document_id
-            );
-
-            completedCount++;
-            // Update progress immediately after each task completes
-            setEvaluationProgress(
-              Math.round((completedCount / totalTasks) * 100)
-            );
-          } catch (err) {
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err; // propagate abort
             console.error(
-              `Error evaluating ${task.entityName} on ${task.fileName}:`,
+              `Error in batch eval for judge ${provider.name}:`,
               err
             );
-            completedCount++;
+            completedCount += judgeTasks.length;
             setEvaluationProgress(
               Math.round((completedCount / totalTasks) * 100)
             );
           }
-        });
+        }
+      );
 
-        await Promise.all(batchPromises);
-      }
+      await Promise.all(judgePromises);
 
       setEvaluationComplete(true);
       setEvaluationProgress(100); // Ensure progress shows 100% on completion

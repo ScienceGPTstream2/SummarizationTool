@@ -14,9 +14,6 @@ class EvaluationRequest(BaseModel):
         None,
         description="Expected/ground truth output (required for correctness/completeness)",
     )
-    retrieval_context: Optional[str] = Field(
-        None, description="Source markdown/context used for extraction"
-    )
     metrics: Optional[List[str]] = Field(
         default=["all"],
         description="List of metrics to use: 'correctness', 'completeness', 'relevance', 'safety', or 'all'",
@@ -66,7 +63,6 @@ class SingleExtractionEval(BaseModel):
     extraction_prompt: str
     actual_output: str
     expected_output: Optional[str] = None
-    retrieval_context: Optional[str] = None
 
 
 class BatchEvaluationRequest(BaseModel):
@@ -77,6 +73,10 @@ class BatchEvaluationRequest(BaseModel):
     )
     metrics: Optional[List[str]] = Field(
         default=["all"], description="List of metrics to use"
+    )
+    custom_evaluation_steps: Optional[Dict[str, List[str]]] = Field(
+        None,
+        description="Custom evaluation steps for each metric (e.g., {'correctness': ['step1', 'step2']})",
     )
     provider: str = Field(
         default="azure_openai", description="LLM provider for evaluation"
@@ -110,7 +110,6 @@ class CustomMetricRequest(BaseModel):
     extraction_prompt: str = Field(..., description="Prompt used for extraction")
     actual_output: str = Field(..., description="The actual extracted output")
     expected_output: Optional[str] = None
-    retrieval_context: Optional[str] = None
     provider: str = Field(default="azure_openai")
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     strict_mode: bool = Field(default=False)
