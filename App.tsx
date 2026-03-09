@@ -207,6 +207,7 @@ export default function App() {
 
   // Ref to prevent duplicate session creation
   const sessionCreationInProgressRef = useRef(false);
+  const restoringSessionRef = useRef(false);
 
   // Initialize Supabase auth listener
   useEffect(() => {
@@ -229,12 +230,15 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, session: Session | null) => {
+      (event: AuthChangeEvent, session: Session | null) => {
         setSession(session);
 
         if (session) {
           // If we just logged in, go to upload
-          if (currentStep === "login" || currentStep === "auth_callback") {
+          if (
+            event === "SIGNED_IN" &&
+            (currentStep === "login" || currentStep === "auth_callback")
+          ) {
             // Clean up URL if needed
             if (
               window.location.pathname === "/auth/callback" ||
@@ -244,8 +248,9 @@ export default function App() {
             }
             setCurrentStep("upload");
           }
-        } else {
-          // Session ended, show login
+        } else if (event === "SIGNED_OUT") {
+          // Only redirect to login on explicit sign-out, not on transient
+          // token refresh failures or other null-session events (e.g. alt-tab)
           setCurrentStep("login");
         }
       }
@@ -579,6 +584,8 @@ export default function App() {
   };
 
   const handleRestoreSession = async (sessionId: string) => {
+    if (restoringSessionRef.current) return;
+    restoringSessionRef.current = true;
     try {
       setLoading(true);
       const response = await fetch(
@@ -697,6 +704,9 @@ export default function App() {
         // Restore uploaded files with proper processing status
         uploadedFiles: sessionData.documents.map((doc: any) => {
           const fileConfig = filesConfig[doc.file_hash] || {};
+          console.log(
+            `[restore] Mapping document: ${doc.filename} (id=${doc.id}, hash=${doc.file_hash})`
+          );
 
           return {
             file: new File([""], doc.filename, { type: "application/pdf" }),
@@ -1324,6 +1334,9 @@ export default function App() {
         }),
       };
 
+      console.log(
+        `[restore] Restored ${restoredData.uploadedFiles?.length ?? 0} files, last_step=${sessionData.last_step}`
+      );
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
       sessionCreationInProgressRef.current = false; // Reset in case it was stuck
 
@@ -1389,10 +1402,13 @@ export default function App() {
         setCurrentStep("upload");
       }
     } catch (error) {
-      console.error("Error restoring session:", error);
-      toast.error("Failed to restore session");
+      console.error("Error restoring session:", error, JSON.stringify(error));
+      toast.error(
+        `Failed to restore session: ${error instanceof Error ? error.message : String(error)}`
+      );
     } finally {
       setLoading(false);
+      restoringSessionRef.current = false;
     }
   };
 
