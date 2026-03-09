@@ -78,8 +78,10 @@ async def extract_entities(
     Run entity extraction for a list of entities using Azure OpenAI.
     Includes figure content for comprehensive analysis and figure referencing.
     """
-    # Create a semaphore to limit concurrency
-    sem = asyncio.Semaphore(50)
+    # Limit concurrent LLM calls. Thread pool is 64 (set in main.py lifespan).
+    # Bench showed no provider rate limits at N=24; raised to 48 to double
+    # throughput for large batches (10 docs × 5 models × 16 entities = 800 calls).
+    sem = asyncio.Semaphore(48)
     try:
         # For Azure Document Intelligence, use raw_analysis.content
         # This provides clean markdown without tags
@@ -297,25 +299,22 @@ async def extract_entities(
                         f"Warning: Could not find document with hash {request.conversion_id} "
                         f"in session {request.session_id} — using file_hash fallback"
                     )
-                for entity_res in extracted_entities:
-                    # Skip if error string
+
+                # Persist all extraction results concurrently — previously a
+                # sequential for-loop with one blocking DB call per entity.
+                async def _persist_entity(entity_res: dict) -> None:
                     if isinstance(entity_res.get("extracted"), str) and entity_res[
                         "extracted"
                     ].startswith("Error:"):
-                        continue
+                        return
 
-                    # Extract token, duration, and cost info from meta
                     meta = entity_res.get("meta", {}) or {}
                     prompt_tokens = meta.get("prompt_tokens")
                     completion_tokens = meta.get("completion_tokens")
                     duration = meta.get("duration")
                     duration_ms = int(duration * 1000) if duration else None
-                    # cost was computed in run_extraction() and injected into meta
                     extraction_cost = meta.get("cost")
 
-                    # Convert to ExtractionResult schema.
-                    # file_hash enables add_extraction_result_fast to find document_id
-                    # via fallback when document_id is None (mirrors paragraph pattern).
                     result_obj = ExtractionResult(
                         entity_name=entity_res["name"],
                         model_id=request.model_id
@@ -324,24 +323,26 @@ async def extract_entities(
                         extracted_text=entity_res["extracted"],
                         references=entity_res.get("references"),
                         status="completed",
-                        extracted_at=None,  # will happen in add_extraction_result
+                        extracted_at=None,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         duration_ms=duration_ms,
                         cost=extraction_cost,
-                        file_hash=request.conversion_id,  # enables fallback in add_extraction_result_fast
+                        file_hash=request.conversion_id,
                     )
 
-                    # Save to DB
-                    session_service.add_extraction_result(
-                        user_id=user_id,
-                        session_id=request.session_id,
-                        result=result_obj,
-                        document_id=document_id,  # may be None; fallback uses file_hash
+                    await asyncio.to_thread(
+                        session_service.add_extraction_result,
+                        user_id,
+                        request.session_id,
+                        result_obj,
+                        document_id,
                     )
                     print(
                         f"Persisted extraction for {entity_res['name']} to session {request.session_id}"
                     )
+
+                await asyncio.gather(*[_persist_entity(e) for e in extracted_entities])
 
             except Exception as e:
                 import traceback

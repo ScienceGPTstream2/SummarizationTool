@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -229,15 +230,29 @@ class CostTracker:
             )
         )
 
-        # Update session metrics in database
+        # Update session metrics in database — fire and forget so it never blocks
+        # the asyncio event loop. Previously this was a synchronous HTTP call
+        # inside an async coroutine, stalling all other concurrent tasks.
         try:
             db = self._get_db_service()
             if db:
-                db.increment_session_metrics(
-                    session_id=session_id,
-                    cost=cost,
-                    latency=duration,
-                )
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.run_in_executor(
+                        None,
+                        lambda: db.increment_session_metrics(
+                            session_id=session_id,
+                            cost=cost,
+                            latency=duration,
+                        ),
+                    )
+                except RuntimeError:
+                    # No running event loop (e.g., tests or sync context)
+                    db.increment_session_metrics(
+                        session_id=session_id,
+                        cost=cost,
+                        latency=duration,
+                    )
         except Exception as e:
             print(f"[COST_TRACKER] Failed to update session metrics in DB: {e}")
 

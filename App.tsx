@@ -171,6 +171,13 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(
     isAuthCallback ? "auth_callback" : "upload"
   );
+  // Ref that always holds the current step — used in the onAuthStateChange closure
+  // (which has [] deps and captures the initial value) to avoid stale closure bugs.
+  const currentStepRef = useRef<Step>(currentStep);
+  useEffect(() => {
+    currentStepRef.current = currentStep;
+  }, [currentStep]);
+
   // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
@@ -237,7 +244,8 @@ export default function App() {
           // If we just logged in, go to upload
           if (
             event === "SIGNED_IN" &&
-            (currentStep === "login" || currentStep === "auth_callback")
+            (currentStepRef.current === "login" ||
+              currentStepRef.current === "auth_callback")
           ) {
             // Clean up URL if needed
             if (
