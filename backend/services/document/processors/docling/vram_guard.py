@@ -68,9 +68,11 @@ _OBSERVATION_WINDOW_DEFAULT = 10
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VRAMStatus:
     """Snapshot of current GPU VRAM and worker state."""
+
     total_mb: float
     used_mb: float
     free_mb: float
@@ -92,19 +94,23 @@ class VRAMStatus:
 # VRAM probing helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_gpu_vram_total_mb() -> float:
     """Detect total GPU VRAM via torch (preferred) or nvidia-smi fallback."""
     try:
         import torch
+
         if torch.cuda.is_available():
-            return torch.cuda.get_device_properties(0).total_memory / (1024 ** 2)
+            return torch.cuda.get_device_properties(0).total_memory / (1024**2)
     except ImportError:
         pass
 
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return float(result.stdout.strip())
     except Exception:
@@ -118,7 +124,9 @@ def _nvidia_smi_query(query: str) -> float:
     try:
         result = subprocess.run(
             ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return float(result.stdout.strip().split("\n")[0])
     except Exception:
@@ -128,6 +136,7 @@ def _nvidia_smi_query(query: str) -> float:
 # ---------------------------------------------------------------------------
 # VRAMGuard
 # ---------------------------------------------------------------------------
+
 
 class VRAMGuard:
     """
@@ -174,7 +183,11 @@ class VRAMGuard:
         self._max_workers_cap = (
             max_workers_cap
             if max_workers_cap is not None
-            else (int(os.environ["VRAM_MAX_WORKERS"]) if "VRAM_MAX_WORKERS" in os.environ else None)
+            else (
+                int(os.environ["VRAM_MAX_WORKERS"])
+                if "VRAM_MAX_WORKERS" in os.environ
+                else None
+            )
         )
         self.check_interval_sec = (
             check_interval_sec
@@ -189,8 +202,11 @@ class VRAMGuard:
         self._observation_window = (
             observation_window
             if observation_window is not None
-            else int(os.environ.get("VRAM_OBSERVATION_WINDOW",
-                                    str(_OBSERVATION_WINDOW_DEFAULT)))
+            else int(
+                os.environ.get(
+                    "VRAM_OBSERVATION_WINDOW", str(_OBSERVATION_WINDOW_DEFAULT)
+                )
+            )
         )
 
         # --- Persistence: load learned VRAM estimates from previous runs ---
@@ -210,8 +226,11 @@ class VRAMGuard:
         self._cold_start_max = (
             cold_start_workers
             if cold_start_workers is not None
-            else int(os.environ.get("VRAM_COLD_START_WORKERS",
-                                    str(_COLD_START_WORKERS_DEFAULT)))
+            else int(
+                os.environ.get(
+                    "VRAM_COLD_START_WORKERS", str(_COLD_START_WORKERS_DEFAULT)
+                )
+            )
         )
         self._cold_start_min_jobs = (
             cold_start_min_jobs
@@ -257,10 +276,12 @@ class VRAMGuard:
             f"per_worker={self._per_worker_mb:.0f}MB, "
             f"max_workers={self._max_workers}"
             + (f" (capped at {self._max_workers_cap})" if self._max_workers_cap else "")
-            + (f" [COLD START: max {self._cold_start_max} workers until "
-               f"{self._cold_start_min_jobs} jobs complete]"
-               if self._is_cold_start
-               else " [warm start from persisted state]")
+            + (
+                f" [COLD START: max {self._cold_start_max} workers until "
+                f"{self._cold_start_min_jobs} jobs complete]"
+                if self._is_cold_start
+                else " [warm start from persisted state]"
+            )
         )
 
     # ------------------------------------------------------------------
@@ -308,7 +329,7 @@ class VRAMGuard:
                 "active_workers": self._active_workers,
                 "is_cold_start": self._is_cold_start,
                 "pool_needs_resize": self._pool_needs_resize,
-                "observations": self._peak_observations[-self._observation_window:],
+                "observations": self._peak_observations[-self._observation_window :],
                 "jobs_completed": self._jobs_completed,
                 "updated_at": datetime.now().isoformat(),
             }
@@ -492,7 +513,9 @@ class VRAMGuard:
 
         self._peak_observations.append(peak_vram_mb)
         if len(self._peak_observations) > self._observation_window:
-            self._peak_observations = self._peak_observations[-self._observation_window:]
+            self._peak_observations = self._peak_observations[
+                -self._observation_window :
+            ]
 
         # Per-worker estimate = max of recent observations
         # Floor: Docling models can't use less than ~1.2GB

@@ -111,10 +111,14 @@ def _get_process_vram_mb() -> float:
     try:
         pid = os.getpid()
         result = _sp.run(
-            ["nvidia-smi",
-             "--query-compute-apps=pid,used_gpu_memory",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_gpu_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         for line in result.stdout.strip().split("\n"):
             parts = line.strip().split(",")
@@ -555,16 +559,22 @@ def _docling_worker_process(task_args: dict) -> dict:
 
         error_trace = traceback.format_exc()
         error_str = str(exc).lower()
-        is_oom = any(p in error_str for p in [
-            "cuda out of memory", "outofmemoryerror",
-            "cuda error: out of memory", "cublas_status_alloc_failed",
-        ])
+        is_oom = any(
+            p in error_str
+            for p in [
+                "cuda out of memory",
+                "outofmemoryerror",
+                "cuda error: out of memory",
+                "cublas_status_alloc_failed",
+            ]
+        )
         _log.error(f"Worker process error (oom={is_oom}): {exc}\n{error_trace}")
 
         # On OOM, try to free VRAM so the subprocess can be reused
         if is_oom:
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except Exception:
@@ -583,6 +593,7 @@ def _docling_worker_process(task_args: dict) -> dict:
         # by them.  Peak measurement has already been captured above.
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
