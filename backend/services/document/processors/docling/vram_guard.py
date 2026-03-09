@@ -36,6 +36,7 @@ Usage (inside DoclingService):
 """
 
 import asyncio
+import json
 import logging
 import os
 import subprocess
@@ -43,12 +44,23 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
 # Retry interval when a queued job can't be admitted yet (seconds)
 _QUEUE_RETRY_SEC = 2.0
+
+# Persistence defaults
+_DEFAULT_STATE_PATH = Path(__file__).parent / ".vram_guard_state.json"
+_STATE_VERSION = 1
+_STATE_MAX_AGE_DAYS = 7
+
+# Cold-start ramp-up defaults
+_COLD_START_WORKERS_DEFAULT = 4
+_COLD_START_MIN_JOBS_DEFAULT = 2
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +80,7 @@ class VRAMStatus:
     safety_margin_mb: float
     jobs_completed: int = 0
     jobs_queued: int = 0
+    is_cold_start: bool = False
 
     @property
     def utilization_pct(self) -> float:
@@ -137,6 +150,9 @@ class VRAMGuard:
         max_workers_cap: Optional[int] = None,
         check_interval_sec: Optional[float] = None,
         learning_rate: Optional[float] = None,
+        persistence_path: Optional[Path] = None,
+        cold_start_workers: Optional[int] = None,
+        cold_start_min_jobs: Optional[int] = None,
     ):
         # --- Resolve all parameters (arg → env → default) ---
         self.vram_total_mb = (
@@ -170,6 +186,33 @@ class VRAMGuard:
             else float(os.environ.get("VRAM_LEARNING_RATE", "0.3"))
         )
 
+        # --- Persistence: load learned VRAM estimates from previous runs ---
+        self._persistence_path = (
+            Path(persistence_path) if persistence_path else _DEFAULT_STATE_PATH
+        )
+        loaded_state = self._load_persisted_state()
+        if loaded_state:
+            self._per_worker_mb = loaded_state["per_worker_mb"]
+            _log.info(
+                f"VRAMGuard: restored persisted per_worker estimate: "
+                f"{self._per_worker_mb:.0f}MB "
+                f"({len(loaded_state.get('observations', []))} past observations)"
+            )
+
+        # --- Cold-start ramp-up (active only when no persisted data) ---
+        self._cold_start_max = (
+            cold_start_workers
+            if cold_start_workers is not None
+            else int(os.environ.get("VRAM_COLD_START_WORKERS",
+                                    str(_COLD_START_WORKERS_DEFAULT)))
+        )
+        self._cold_start_min_jobs = (
+            cold_start_min_jobs
+            if cold_start_min_jobs is not None
+            else _COLD_START_MIN_JOBS_DEFAULT
+        )
+        self._is_cold_start = not loaded_state
+
         # --- Compute initial max workers ---
         self._usable_vram_mb = self.vram_total_mb - self.safety_margin_mb
         self._recompute_max_workers()
@@ -191,7 +234,9 @@ class VRAMGuard:
 
         # --- Tracking ---
         self._jobs_completed = 0
-        self._peak_observations: list[float] = []
+        self._peak_observations: list[float] = (
+            loaded_state.get("observations", []) if loaded_state else []
+        )
 
         # --- nvidia-smi throttle ---
         self._last_smi_time = 0.0
@@ -205,6 +250,10 @@ class VRAMGuard:
             f"per_worker={self._per_worker_mb:.0f}MB, "
             f"max_workers={self._max_workers}"
             + (f" (capped at {self._max_workers_cap})" if self._max_workers_cap else "")
+            + (f" [COLD START: max {self._cold_start_max} workers until "
+               f"{self._cold_start_min_jobs} jobs complete]"
+               if self._is_cold_start
+               else " [warm start from persisted state]")
         )
 
     # ------------------------------------------------------------------
@@ -216,7 +265,48 @@ class VRAMGuard:
         computed = max(1, int(self._usable_vram_mb / self._per_worker_mb))
         if self._max_workers_cap is not None:
             computed = min(computed, self._max_workers_cap)
+        if self._is_cold_start:
+            computed = min(computed, self._cold_start_max)
         self._max_workers = computed
+
+    def _load_persisted_state(self) -> Optional[dict]:
+        """Load previously saved VRAM estimates from disk."""
+        try:
+            if not self._persistence_path.exists():
+                return None
+            with open(self._persistence_path, "r") as f:
+                state = json.load(f)
+            if state.get("version") != _STATE_VERSION:
+                _log.info("VRAMGuard: ignoring persisted state (version mismatch)")
+                return None
+            updated_at = datetime.fromisoformat(state["updated_at"])
+            age_days = (datetime.now() - updated_at).days
+            if age_days > _STATE_MAX_AGE_DAYS:
+                _log.info(f"VRAMGuard: ignoring persisted state ({age_days} days old)")
+                return None
+            if not state.get("per_worker_mb") or state["per_worker_mb"] <= 0:
+                return None
+            return state
+        except Exception as exc:
+            _log.debug(f"VRAMGuard: could not load persisted state: {exc}")
+            return None
+
+    def _save_state(self):
+        """Persist current VRAM estimates to disk for future restarts."""
+        try:
+            state = {
+                "version": _STATE_VERSION,
+                "per_worker_mb": self._per_worker_mb,
+                "observations": self._peak_observations[-20:],
+                "jobs_completed": self._jobs_completed,
+                "updated_at": datetime.now().isoformat(),
+            }
+            tmp_path = self._persistence_path.with_suffix(".tmp")
+            with open(tmp_path, "w") as f:
+                json.dump(state, f, indent=2)
+            tmp_path.replace(self._persistence_path)
+        except Exception as exc:
+            _log.debug(f"VRAMGuard: could not save state: {exc}")
 
     def _query_vram(self) -> tuple[float, float]:
         """Return (used_mb, free_mb), throttled to check_interval_sec."""
@@ -352,18 +442,9 @@ class VRAMGuard:
 
         finally:
             if slot["acquired"]:
-                used_after, _ = self._query_vram()
-                slot["vram_used_at_release"] = used_after
-
                 async with self._lock:
                     self._active_workers -= 1
                     self._jobs_completed += 1
-
-                # Update per-worker estimate (learning)
-                if slot["vram_used_at_acquire"] >= 0 and used_after >= 0:
-                    delta = used_after - slot["vram_used_at_acquire"]
-                    if delta > 0:
-                        self._update_per_worker_estimate(delta)
 
                 # Wake up any queued tasks
                 self._slot_available.set()
@@ -371,7 +452,6 @@ class VRAMGuard:
                 _log.info(
                     f"VRAMGuard: slot released (worker #{slot['worker_id']}, "
                     f"active={self._active_workers}/{self._max_workers}, "
-                    f"VRAM used={used_after:.0f}MB, "
                     f"per_worker_estimate={self._per_worker_mb:.0f}MB)"
                 )
             else:
@@ -380,24 +460,29 @@ class VRAMGuard:
                 pass
 
     # ------------------------------------------------------------------
-    # Dynamic learning
+    # Dynamic learning — called by DoclingService after each job
     # ------------------------------------------------------------------
 
-    def _update_per_worker_estimate(self, observed_delta_mb: float):
+    def report_worker_result(self, peak_vram_mb: float):
         """
-        Update per-worker VRAM estimate using exponential moving average.
+        Report a completed worker's actual peak VRAM usage (from
+        torch.cuda.max_memory_allocated inside the subprocess).
 
-        The estimate can move both up and down, but has a floor to prevent
-        unrealistically low values.
+        This is far more accurate than nvidia-smi deltas because it
+        captures the true high-water mark during processing, not just
+        the start/end snapshot.
         """
+        if peak_vram_mb <= 0:
+            return  # no valid measurement
+
         old = self._per_worker_mb
         alpha = self._learning_rate
 
-        self._peak_observations.append(observed_delta_mb)
+        self._peak_observations.append(peak_vram_mb)
         if len(self._peak_observations) > 20:
             self._peak_observations = self._peak_observations[-20:]
 
-        new_estimate = alpha * observed_delta_mb + (1 - alpha) * old
+        new_estimate = alpha * peak_vram_mb + (1 - alpha) * old
 
         # Floor: Docling models can't use less than ~1.2GB
         new_estimate = max(1200.0, new_estimate)
@@ -406,11 +491,20 @@ class VRAMGuard:
             _log.info(
                 f"VRAMGuard: per-worker estimate updated: "
                 f"{old:.0f}MB → {new_estimate:.0f}MB "
-                f"(observed delta={observed_delta_mb:.0f}MB, α={alpha})"
+                f"(peak={peak_vram_mb:.0f}MB, α={alpha})"
             )
 
         old_max = self._max_workers
         self._per_worker_mb = new_estimate
+
+        # Exit cold start once enough jobs have provided real measurements
+        if self._is_cold_start and self._jobs_completed >= self._cold_start_min_jobs:
+            self._is_cold_start = False
+            _log.info(
+                f"VRAMGuard: exiting cold start after {self._jobs_completed} jobs "
+                f"(learned per_worker={self._per_worker_mb:.0f}MB)"
+            )
+
         self._recompute_max_workers()
 
         if self._max_workers != old_max:
@@ -418,6 +512,43 @@ class VRAMGuard:
                 f"VRAMGuard: max_workers adjusted: {old_max} → {self._max_workers} "
                 f"(per_worker={self._per_worker_mb:.0f}MB)"
             )
+
+        # Persist learned state for future restarts
+        self._save_state()
+
+    def report_oom(self):
+        """
+        Called when a worker hits CUDA OOM.  Aggressively bumps the
+        per-worker estimate so subsequent batches use fewer workers.
+
+        Uses 1.5× the current estimate or the P95 of recent peaks,
+        whichever is higher, to quickly prevent repeat OOMs.
+        """
+        old = self._per_worker_mb
+
+        # Use 150% of current estimate as a conservative jump
+        bumped = old * 1.5
+
+        # If we have peak observations, use the max observed as a floor
+        if self._peak_observations:
+            observed_max = max(self._peak_observations)
+            bumped = max(bumped, observed_max * 1.2)
+
+        # Don't exceed usable VRAM (that would set max_workers to 0)
+        bumped = min(bumped, self._usable_vram_mb)
+
+        _log.warning(
+            f"VRAMGuard: OOM detected! Bumping per-worker estimate: "
+            f"{old:.0f}MB → {bumped:.0f}MB"
+        )
+
+        old_max = self._max_workers
+        self._per_worker_mb = bumped
+        self._recompute_max_workers()
+
+        _log.warning(
+            f"VRAMGuard: max_workers reduced after OOM: {old_max} → {self._max_workers}"
+        )
 
     # ------------------------------------------------------------------
     # Status / health
@@ -439,6 +570,7 @@ class VRAMGuard:
             safety_margin_mb=self.safety_margin_mb,
             jobs_completed=self._jobs_completed,
             jobs_queued=self._queued_workers,
+            is_cold_start=self._is_cold_start,
         )
 
     @property

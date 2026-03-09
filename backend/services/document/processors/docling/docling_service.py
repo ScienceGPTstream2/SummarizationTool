@@ -135,10 +135,26 @@ def _docling_worker_process(task_args: dict) -> dict:
     try:
         converter = _get_or_create_converter(image_resolution_scale)
 
+        # Measure peak VRAM usage during conversion
+        peak_vram_mb = -1.0
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+        except Exception:
+            pass
+
         # Phase 1: Convert
         t0 = time.perf_counter()
         result = converter.convert(source)
         parse_duration = time.perf_counter() - t0
+
+        try:
+            import torch
+            if torch.cuda.is_available():
+                peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        except Exception:
+            pass
 
         if source_type == "url":
             base_filename = "url_document"
@@ -443,13 +459,45 @@ def _docling_worker_process(task_args: dict) -> dict:
             "markdown_path": str(markdown_path),
             "page_count": page_count,
             "image_info": image_info,
+            "peak_vram_mb": peak_vram_mb,
         }
 
     except Exception as exc:
         error_trace = traceback.format_exc()
-        _log.error(f"Worker process error: {exc}\n{error_trace}")
-        return {"success": False, "error": str(exc), "error_trace": error_trace}
+        error_str = str(exc).lower()
+        is_oom = any(p in error_str for p in [
+            "cuda out of memory", "outofmemoryerror",
+            "cuda error: out of memory", "cublas_status_alloc_failed",
+        ])
+        _log.error(f"Worker process error (oom={is_oom}): {exc}\n{error_trace}")
+
+        # On OOM, try to free VRAM so the subprocess can be reused
+        if is_oom:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        return {
+            "success": False,
+            "error": str(exc),
+            "error_trace": error_trace,
+            "is_oom": is_oom,
+        }
     finally:
+        # Release PyTorch's cached VRAM blocks back to the GPU driver.
+        # Without this, idle workers hold onto runtime VRAM in PyTorch's
+        # caching allocator — invisible to other processes and unusable
+        # by them.  Peak measurement has already been captured above.
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
         try:
             root_logger.removeHandler(handler)
             handler.close()
@@ -576,6 +624,13 @@ class DoclingService:
                     self.process_pool, _docling_worker_process, task_args
                 )
 
+            # Feed the guard's EMA with the worker's actual peak VRAM
+            peak = worker_result.get("peak_vram_mb", -1)
+            if peak > 0:
+                self.vram_guard.report_worker_result(peak)
+            if worker_result.get("is_oom"):
+                self.vram_guard.report_oom()
+
             if not worker_result.get("success"):
                 raise RuntimeError(
                     worker_result.get("error", "Unknown error in worker process")
@@ -701,6 +756,13 @@ class DoclingService:
                     worker_result = await loop.run_in_executor(
                         self.process_pool, _docling_worker_process, task_args
                     )
+
+                # Feed the guard's EMA with the worker's actual peak VRAM
+                peak = worker_result.get("peak_vram_mb", -1)
+                if peak > 0:
+                    vram_guard.report_worker_result(peak)
+                if worker_result.get("is_oom"):
+                    vram_guard.report_oom()
 
                 conv_dir = output_base_dir / conversion_id
                 meta_path = conv_dir / "metadata.json"
