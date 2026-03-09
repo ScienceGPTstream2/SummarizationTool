@@ -21,7 +21,7 @@ Environment variable overrides (all optional):
   VRAM_PER_WORKER_INIT_MB    — initial per-worker estimate (default: 2800)
   VRAM_MAX_WORKERS           — hard cap on concurrent GPU workers (default: no cap)
   VRAM_CHECK_INTERVAL_SEC    — min seconds between nvidia-smi calls (default: 1.0)
-  VRAM_LEARNING_RATE         — EMA alpha for updating per-worker estimate (default: 0.3)
+  VRAM_OBSERVATION_WINDOW    — number of recent peaks to keep for max estimate (default: 20)
 
 Usage (inside DoclingService):
     guard = VRAMGuard()
@@ -61,6 +61,7 @@ _STATE_MAX_AGE_DAYS = 7
 # Cold-start ramp-up defaults
 _COLD_START_WORKERS_DEFAULT = 4
 _COLD_START_MIN_JOBS_DEFAULT = 2
+_OBSERVATION_WINDOW_DEFAULT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +150,10 @@ class VRAMGuard:
         per_worker_init_mb: Optional[float] = None,
         max_workers_cap: Optional[int] = None,
         check_interval_sec: Optional[float] = None,
-        learning_rate: Optional[float] = None,
         persistence_path: Optional[Path] = None,
         cold_start_workers: Optional[int] = None,
         cold_start_min_jobs: Optional[int] = None,
+        observation_window: Optional[int] = None,
     ):
         # --- Resolve all parameters (arg → env → default) ---
         self.vram_total_mb = (
@@ -180,10 +181,16 @@ class VRAMGuard:
             if check_interval_sec is not None
             else float(os.environ.get("VRAM_CHECK_INTERVAL_SEC", "1.0"))
         )
-        self._learning_rate = (
-            learning_rate
-            if learning_rate is not None
-            else float(os.environ.get("VRAM_LEARNING_RATE", "0.3"))
+
+        # --- Pool resize tracking ---
+        self._pool_needs_resize = False
+
+        # --- Observation window size ---
+        self._observation_window = (
+            observation_window
+            if observation_window is not None
+            else int(os.environ.get("VRAM_OBSERVATION_WINDOW",
+                                    str(_OBSERVATION_WINDOW_DEFAULT)))
         )
 
         # --- Persistence: load learned VRAM estimates from previous runs ---
@@ -297,7 +304,11 @@ class VRAMGuard:
             state = {
                 "version": _STATE_VERSION,
                 "per_worker_mb": self._per_worker_mb,
-                "observations": self._peak_observations[-20:],
+                "max_workers": self._max_workers,
+                "active_workers": self._active_workers,
+                "is_cold_start": self._is_cold_start,
+                "pool_needs_resize": self._pool_needs_resize,
+                "observations": self._peak_observations[-self._observation_window:],
                 "jobs_completed": self._jobs_completed,
                 "updated_at": datetime.now().isoformat(),
             }
@@ -466,32 +477,34 @@ class VRAMGuard:
     def report_worker_result(self, peak_vram_mb: float):
         """
         Report a completed worker's actual peak VRAM usage (from
-        torch.cuda.max_memory_allocated inside the subprocess).
+        nvidia-smi per-PID query inside the subprocess).
 
-        This is far more accurate than nvidia-smi deltas because it
-        captures the true high-water mark during processing, not just
-        the start/end snapshot.
+        Uses **max of last 20 observations** instead of EMA.  EMA is
+        dangerous for mixed workloads: small files finishing first pull
+        the estimate down, then large files cause OOM.  The max
+        ensures the guard always sizes for the worst-case peak.
+        The safety margin provides additional buffer on top.
         """
         if peak_vram_mb <= 0:
             return  # no valid measurement
 
         old = self._per_worker_mb
-        alpha = self._learning_rate
 
         self._peak_observations.append(peak_vram_mb)
-        if len(self._peak_observations) > 20:
-            self._peak_observations = self._peak_observations[-20:]
+        if len(self._peak_observations) > self._observation_window:
+            self._peak_observations = self._peak_observations[-self._observation_window:]
 
-        new_estimate = alpha * peak_vram_mb + (1 - alpha) * old
-
+        # Per-worker estimate = max of recent observations
         # Floor: Docling models can't use less than ~1.2GB
-        new_estimate = max(1200.0, new_estimate)
+        new_estimate = max(max(self._peak_observations), 1200.0)
 
         if abs(new_estimate - old) > 50:
             _log.info(
                 f"VRAMGuard: per-worker estimate updated: "
                 f"{old:.0f}MB → {new_estimate:.0f}MB "
-                f"(peak={peak_vram_mb:.0f}MB, α={alpha})"
+                f"(latest peak={peak_vram_mb:.0f}MB, "
+                f"window max={new_estimate:.0f}MB, "
+                f"n={len(self._peak_observations)} observations)"
             )
 
         old_max = self._max_workers
@@ -512,6 +525,8 @@ class VRAMGuard:
                 f"VRAMGuard: max_workers adjusted: {old_max} → {self._max_workers} "
                 f"(per_worker={self._per_worker_mb:.0f}MB)"
             )
+            if self._max_workers < old_max:
+                self._pool_needs_resize = True
 
         # Persist learned state for future restarts
         self._save_state()

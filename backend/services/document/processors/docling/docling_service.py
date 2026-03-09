@@ -1,4 +1,6 @@
 import os
+import subprocess as _sp
+import threading as _threading
 import uuid
 import time
 import re
@@ -98,6 +100,74 @@ def _calculate_max_workers(vram_per_worker_gb: float = 2.0) -> int:
     return cpu_workers
 
 
+def _get_process_vram_mb() -> float:
+    """Query nvidia-smi for this process's GPU memory usage in MB.
+
+    Unlike torch.cuda.max_memory_allocated(), this captures ALL GPU memory:
+    PyTorch tensors, ONNX Runtime models, CUDA context overhead, and
+    caching-allocator blocks.  This is the number the GPU driver uses to
+    decide OOM, so it is the correct metric for admission control.
+    """
+    try:
+        pid = os.getpid()
+        result = _sp.run(
+            ["nvidia-smi",
+             "--query-compute-apps=pid,used_gpu_memory",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().split("\n"):
+            parts = line.strip().split(",")
+            if len(parts) == 2 and int(parts[0].strip()) == pid:
+                return float(parts[1].strip())
+    except Exception:
+        pass
+    return -1.0
+
+
+class _VRAMPeakTracker:
+    """Poll nvidia-smi in a background thread to capture the true peak VRAM.
+
+    ONNX Runtime (used by Docling for layout/table models) frees GPU memory
+    between inference stages, so a single end-of-job nvidia-smi reading can
+    miss spikes.  This tracker samples every `poll_sec` seconds and keeps
+    the maximum observed value.
+    """
+
+    def __init__(self, poll_sec: float = 1.0):
+        self._poll_sec = poll_sec
+        self._peak: float = -1.0
+        self._stop = _threading.Event()
+        self._thread: _threading.Thread | None = None
+
+    def start(self):
+        self._stop.clear()
+        # Take an initial reading before the thread starts
+        current = _get_process_vram_mb()
+        if current > self._peak:
+            self._peak = current
+        self._thread = _threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while not self._stop.is_set():
+            current = _get_process_vram_mb()
+            if current > self._peak:
+                self._peak = current
+            self._stop.wait(self._poll_sec)
+
+    def stop(self) -> float:
+        """Stop polling and return the peak VRAM in MB."""
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+        # One final reading
+        current = _get_process_vram_mb()
+        if current > self._peak:
+            self._peak = current
+        return self._peak
+
+
 def _serialize_node_item(node) -> Optional[Dict[str, Any]]:
     """Serialize a NodeItem to a dictionary (module-level for subprocess use)."""
     if not node:
@@ -155,26 +225,16 @@ def _docling_worker_process(task_args: dict) -> dict:
     try:
         converter = _get_or_create_converter(image_resolution_scale)
 
-        # Measure peak VRAM usage during conversion
-        peak_vram_mb = -1.0
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
-        except Exception:
-            pass
+        # Start background VRAM peak tracker — polls nvidia-smi every second
+        # to capture the true peak, since ONNX Runtime frees GPU memory
+        # between inference stages.
+        vram_tracker = _VRAMPeakTracker(poll_sec=1.0)
+        vram_tracker.start()
 
         # Phase 1: Convert
         t0 = time.perf_counter()
         result = converter.convert(source)
         parse_duration = time.perf_counter() - t0
-
-        try:
-            import torch
-            if torch.cuda.is_available():
-                peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        except Exception:
-            pass
 
         if source_type == "url":
             base_filename = "url_document"
@@ -471,6 +531,10 @@ def _docling_worker_process(task_args: dict) -> dict:
         except Exception:
             pass
 
+        # Stop the VRAM tracker and capture the true peak across the
+        # entire conversion (not just the final reading).
+        peak_vram_mb = vram_tracker.stop()
+
         return {
             "success": True,
             "parse_duration": parse_duration,
@@ -483,6 +547,12 @@ def _docling_worker_process(task_args: dict) -> dict:
         }
 
     except Exception as exc:
+        # Stop the tracker on error too (may not exist if converter init failed)
+        try:
+            peak_vram_mb = vram_tracker.stop()
+        except Exception:
+            pass
+
         error_trace = traceback.format_exc()
         error_str = str(exc).lower()
         is_oom = any(p in error_str for p in [
@@ -564,6 +634,7 @@ class DoclingService:
         # router) never allocate subprocesses or VRAM.
         self._process_pool: Optional[ProcessPoolExecutor] = None
         self._vram_guard: Optional[VRAMGuard] = None
+        self._pool_size: int = 0
 
     def _ensure_initialized(self):
         """Lazily create the VRAMGuard and ProcessPoolExecutor on first use."""
@@ -573,10 +644,10 @@ class DoclingService:
         # The VRAMGuard auto-detects total VRAM and computes max_workers.
         self._vram_guard = VRAMGuard()
 
-        # Size the pool slightly larger than the guard's max_workers so the
-        # pool itself never blocks — all admission control goes through the
-        # guard's semaphore + real-time VRAM check.
-        pool_size = self._vram_guard.max_workers + 2
+        # Size the pool to exactly max_workers.  The VRAMGuard controls
+        # admission, so the pool itself never needs to be larger.  Each
+        # extra subprocess holds ~700 MB of loaded models when idle.
+        pool_size = self._vram_guard.max_workers
         _log.info(
             f"DoclingService: creating ProcessPoolExecutor with {pool_size} slots "
             f"(VRAMGuard max_workers={self._vram_guard.max_workers})"
@@ -585,6 +656,7 @@ class DoclingService:
             max_workers=pool_size,
             mp_context=multiprocessing.get_context("spawn"),
         )
+        self._pool_size = pool_size
 
     @property
     def process_pool(self) -> ProcessPoolExecutor:
@@ -603,6 +675,47 @@ class DoclingService:
         """Return the VRAM-based worker count from the guard."""
         self._ensure_initialized()
         return self._vram_guard.max_workers
+
+    def _maybe_resize_pool(self):
+        """Shrink the process pool if max_workers has decreased.
+
+        Only acts when (a) the VRAMGuard has flagged a resize, (b) no
+        workers are currently active, and (c) the pool exists.  The old
+        pool is shut down and a new, smaller one is created so that idle
+        subprocesses no longer hold VRAM for nothing.
+        """
+        if (
+            self._vram_guard is None
+            or self._process_pool is None
+            or not self._vram_guard._pool_needs_resize
+        ):
+            return
+        if self._vram_guard.active_workers > 0:
+            return  # can't resize while jobs are running
+
+        new_pool_size = self._vram_guard.max_workers
+        if new_pool_size >= self._pool_size:
+            self._vram_guard._pool_needs_resize = False
+            return
+
+        _log.info(
+            f"DoclingService: resizing pool {self._pool_size} → {new_pool_size} "
+            f"(max_workers={self._vram_guard.max_workers})"
+        )
+        old_pool = self._process_pool
+        self._process_pool = ProcessPoolExecutor(
+            max_workers=new_pool_size,
+            mp_context=multiprocessing.get_context("spawn"),
+        )
+        self._pool_size = new_pool_size
+        self._vram_guard._pool_needs_resize = False
+
+        # Shut down the old pool in the background — its idle workers
+        # will terminate and release their CUDA contexts / VRAM.
+        try:
+            old_pool.shutdown(wait=False, cancel_futures=False)
+        except Exception:
+            pass
 
     async def convert_document_to_markdown(
         self,
@@ -644,12 +757,15 @@ class DoclingService:
                     self.process_pool, _docling_worker_process, task_args
                 )
 
-            # Feed the guard's EMA with the worker's actual peak VRAM
+            # Report the worker's actual peak VRAM
             peak = worker_result.get("peak_vram_mb", -1)
             if peak > 0:
                 self.vram_guard.report_worker_result(peak)
             if worker_result.get("is_oom"):
                 self.vram_guard.report_oom()
+
+            # Shrink pool if max_workers decreased and no jobs are running
+            self._maybe_resize_pool()
 
             if not worker_result.get("success"):
                 raise RuntimeError(
@@ -777,12 +893,15 @@ class DoclingService:
                         self.process_pool, _docling_worker_process, task_args
                     )
 
-                # Feed the guard's EMA with the worker's actual peak VRAM
+                # Report the worker's actual peak VRAM
                 peak = worker_result.get("peak_vram_mb", -1)
                 if peak > 0:
                     vram_guard.report_worker_result(peak)
                 if worker_result.get("is_oom"):
                     vram_guard.report_oom()
+
+                # Shrink pool if max_workers decreased and no jobs are running
+                self._maybe_resize_pool()
 
                 conv_dir = output_base_dir / conversion_id
                 meta_path = conv_dir / "metadata.json"
