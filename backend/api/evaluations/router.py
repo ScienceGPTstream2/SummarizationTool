@@ -18,12 +18,29 @@ from schemas.evaluations import (
     EvaluationResponse,
     BatchEvaluationResponse,
 )
-from services.evaluation.evaluation_service import EvaluationService
+from services.evaluation.evaluation_service import EvaluationService, cancel_session
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 
 # Initialize evaluation service
 evaluation_service = EvaluationService()
+
+
+@router.post("/cancel", dependencies=[Depends(get_current_user)])
+async def cancel_evaluation(http_request: Request):
+    """
+    Cancel an in-progress batch evaluation for the given session.
+    The session_id is read from the X-Session-Id header (same header
+    used when starting the batch).  Any queued entities in
+    evaluate_multiple_extractions() will be skipped immediately.
+    """
+    session_id = http_request.headers.get("X-Session-Id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="X-Session-Id header required")
+    cancel_session(session_id)
+    return JSONResponse(
+        status_code=200, content={"cancelled": True, "session_id": session_id}
+    )
 
 
 @router.post("/evaluate", dependencies=[Depends(get_current_user)])
@@ -85,7 +102,6 @@ async def evaluate_extraction(request: EvaluationRequest, http_request: Request)
             extraction_prompt=request.extraction_prompt,
             actual_output=request.actual_output,
             expected_output=request.expected_output,
-            retrieval_context=request.retrieval_context,
             metrics=request.metrics,
             provider=request.provider,
             threshold=request.threshold,
@@ -179,6 +195,7 @@ async def evaluate_batch(request: BatchEvaluationRequest, http_request: Request)
             provider=request.provider,
             threshold=request.threshold,
             metrics=request.metrics,
+            custom_evaluation_steps=request.custom_evaluation_steps,
             session_id=session_id,
             **model_kwargs,
         )
@@ -258,9 +275,6 @@ async def evaluate_with_custom_metric(request: CustomMetricRequest):
             input=request.extraction_prompt,
             actual_output=request.actual_output,
             expected_output=request.expected_output,
-            retrieval_context=(
-                [request.retrieval_context] if request.retrieval_context else None
-            ),
         )
 
         await custom_metric.a_measure(test_case)
