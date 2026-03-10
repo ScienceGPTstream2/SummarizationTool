@@ -1213,6 +1213,10 @@ export function EvaluationPage({
   ) => {
     try {
       // Prepare evaluation request
+      // NOTE: retrieval_context intentionally omitted — it contained the ENTIRE
+      // document markdown (5-10MB for large papers), bloating each evaluation
+      // request to 11MB+. The G-Eval judge only needs actual_output vs
+      // expected_output and the extraction_prompt for context.
       const requestBody: any = {
         entity_name: entity.name,
         extraction_prompt: entity.prompt,

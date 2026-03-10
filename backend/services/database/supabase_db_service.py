@@ -671,35 +671,20 @@ class SupabaseDBService:
         cost: float = 0.0,
         latency: float = 0.0,
     ) -> bool:
-        """Increment session metrics (total_cost, total_latency, total_calls)"""
+        """Atomically increment session metrics using a single DB UPDATE via RPC.
+
+        Replaces the previous SELECT + UPDATE pattern which had a race condition
+        when many concurrent extraction calls all incremented the same session.
+        """
         try:
-            # Use RPC to atomically increment values
-            # First get current values
-            result = (
-                self.client.table("sessions")
-                .select("total_cost, total_latency, total_calls")
-                .eq("id", session_id)
-                .execute()
-            )
-
-            if not result.data:
-                print(f"[DB] Session {session_id} not found for metrics update")
-                return False
-
-            current = result.data[0]
-            new_cost = float(current.get("total_cost") or 0) + cost
-            new_latency = float(current.get("total_latency") or 0) + latency
-            new_calls = int(current.get("total_calls") or 0) + 1
-
-            # Update with new values
-            self.client.table("sessions").update(
+            self.client.rpc(
+                "increment_session_metrics",
                 {
-                    "total_cost": new_cost,
-                    "total_latency": new_latency,
-                    "total_calls": new_calls,
-                }
-            ).eq("id", session_id).execute()
-
+                    "p_session_id": session_id,
+                    "p_cost": cost,
+                    "p_latency": latency,
+                },
+            ).execute()
             return True
         except Exception as e:
             print(f"[DB] Failed to increment session metrics: {e}")

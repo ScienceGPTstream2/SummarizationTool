@@ -14,6 +14,8 @@ from core.logging_config import setup_logging
 
 setup_logging()
 
+import asyncio
+import concurrent.futures
 import logging
 import traceback
 import uvicorn
@@ -98,6 +100,13 @@ from api import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The default asyncio thread pool is min(32, cpu_count+4) — on this server
+    # that is only 8 threads. Every LLM provider call uses asyncio.to_thread(),
+    # so with the extraction semaphore allowing up to 50 concurrent tasks, 42 of
+    # them would queue waiting for a thread. Increasing to 64 eliminates that
+    # queuing entirely.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=64))
     yield
 
 
