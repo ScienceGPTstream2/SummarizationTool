@@ -26,6 +26,7 @@ import { Checkbox } from "./ui/checkbox";
 import { Badge } from "./ui/badge";
 import {
   ArrowLeft,
+  ArrowRight,
   Play,
   Settings,
   FileText,
@@ -36,7 +37,18 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
+  AlertTriangle,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "./ui/alert-dialog";
 import { DocumentData } from "../App";
 import { loadStudyTypeTemplate } from "./TemplateLoader";
 import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
@@ -48,7 +60,10 @@ import { Label } from "./ui/label";
 interface BatchStudySelectionPageProps {
   onBack: () => void;
   onComplete: (data: Partial<DocumentData>) => void;
+  onNavigateForward?: () => void;
   documentData: DocumentData;
+  hasExtractionResults?: boolean;
+  onInvalidateDownstream?: () => void;
 }
 
 interface EntityConfig {
@@ -66,8 +81,12 @@ interface FileConfig {
 export function BatchStudySelectionPage({
   onBack,
   onComplete,
+  onNavigateForward,
   documentData,
+  hasExtractionResults,
+  onInvalidateDownstream,
 }: BatchStudySelectionPageProps) {
+  const [showRerunWarning, setShowRerunWarning] = useState(false);
   const [files] = useState(documentData.uploadedFiles || []);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>(
@@ -178,7 +197,6 @@ export function BatchStudySelectionPage({
     studyType: string,
     resolved?: ResolvedTemplate
   ) => {
-    // Save current config before switching
     const currentConfig = fileConfigs[fileId];
     if (currentConfig) {
       setSavedConfigs((prev) => ({
@@ -190,11 +208,9 @@ export function BatchStudySelectionPage({
       }));
     }
 
-    // Check if we have a saved config for the new study type
     const savedConfig = savedConfigs[fileId]?.[studyType];
 
     if (savedConfig) {
-      // Restore saved config
       const newConfigs = {
         ...fileConfigs,
         [fileId]: savedConfig,
@@ -204,7 +220,6 @@ export function BatchStudySelectionPage({
         syncSessionConfigs(documentData.sessionId, newConfigs);
       }
     } else {
-      // Use pre-resolved template from TemplatePicker, or fall back to built-in loader
       const template = resolved ?? loadStudyTypeTemplate(studyType);
       const newConfigs = {
         ...fileConfigs,
@@ -218,6 +233,10 @@ export function BatchStudySelectionPage({
       if (documentData.sessionId) {
         syncSessionConfigs(documentData.sessionId, newConfigs);
       }
+    }
+
+    if (hasExtractionResults) {
+      onInvalidateDownstream?.();
     }
   };
 
@@ -356,19 +375,23 @@ export function BatchStudySelectionPage({
         ? prev.filter((id) => id !== modelId)
         : [...prev, modelId]
     );
+    if (hasExtractionResults) {
+      onInvalidateDownstream?.();
+    }
   };
 
   const toggleCategory = (modelIds: string[], selectAll: boolean) => {
     setSelectedModels((prev) => {
       if (selectAll) {
-        // Add all models in category that aren't already selected
         const newModels = modelIds.filter((id) => !prev.includes(id));
         return [...prev, ...newModels];
       } else {
-        // Remove all models in category
         return prev.filter((id) => !modelIds.includes(id));
       }
     });
+    if (hasExtractionResults) {
+      onInvalidateDownstream?.();
+    }
   };
 
   const getCategorySelection = (modelIds: string[]) => {
@@ -383,54 +406,71 @@ export function BatchStudySelectionPage({
     };
   };
 
-  const handleBatchRun = () => {
-    // Validate that all files have a study type selected
-    const missingConfigs = files.filter((f) => !fileConfigs[f.fileId]);
-    if (missingConfigs.length > 0) {
-      alert("Please select a study type for all files.");
-      return;
-    }
-
-    // Validate that at least one model is selected
-    if (selectedModels.length === 0) {
-      alert("Please select at least one AI model.");
-      return;
-    }
-
-    // Update documentData with selected study types and models
+  const executeBatchRun = () => {
     const updatedFiles = files.map((f) => {
       const config = fileConfigs[f.fileId];
-
       return {
         ...f,
         studyType: config.studyType,
-        selectedModels: selectedModels, // Pass array of selected models
+        selectedModels: selectedModels,
         entities: config.entities,
         summaryPrompt: config.summaryPrompt,
-        // Reset extraction results if study type changed (though here we assume fresh start or overwrite)
         finalSummary: undefined,
       };
     });
 
     onComplete({
       uploadedFiles: updatedFiles,
-      selectedModels: selectedModels, // Also store at document level
+      selectedModels: selectedModels,
     });
+  };
+
+  const handleBatchRun = () => {
+    const missingConfigs = files.filter((f) => !fileConfigs[f.fileId]);
+    if (missingConfigs.length > 0) {
+      alert("Please select a study type for all files.");
+      return;
+    }
+
+    if (selectedModels.length === 0) {
+      alert("Please select at least one AI model.");
+      return;
+    }
+
+    if (hasExtractionResults) {
+      setShowRerunWarning(true);
+      return;
+    }
+
+    executeBatchRun();
   };
 
   return (
     <div className="container mx-auto max-w-5xl">
-      <div className="flex items-center gap-4 mb-6">
-        <Button variant="outline" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <h2 className="text-2xl font-semibold">Batch Study Selection</h2>
-          <p className="text-muted-foreground">
-            Configure study types for your documents before extraction
-          </p>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h2 className="text-2xl font-semibold">Batch Study Selection</h2>
+            <p className="text-muted-foreground">
+              Configure study types for your documents before extraction
+            </p>
+          </div>
         </div>
+        {onNavigateForward && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onNavigateForward}
+            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+          >
+            Continue to Extraction
+            <ArrowRight className="h-4 w-4 ml-2" />
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-6">
@@ -945,16 +985,30 @@ export function BatchStudySelectionPage({
           </CardContent>
         </Card>
 
-        <div className="flex justify-end pt-4">
-          <Button
-            size="lg"
-            onClick={handleBatchRun}
-            className="w-full md:w-auto gap-2"
-            disabled={files.length === 0}
-          >
-            <Play className="h-4 w-4" />
-            Batch Run ({files.length} documents)
-          </Button>
+        <div className="flex items-center justify-between pt-4 gap-4">
+          {onNavigateForward && (
+            <p className="text-sm text-muted-foreground">
+              Previous extraction results are available.{" "}
+              <button
+                onClick={onNavigateForward}
+                className="text-green-600 hover:underline font-medium"
+              >
+                Skip to Extraction →
+              </button>
+            </p>
+          )}
+          <div className="flex-shrink-0 ml-auto">
+            <Button
+              size="lg"
+              onClick={handleBatchRun}
+              className="gap-2"
+              disabled={files.length === 0}
+            >
+              <Play className="h-4 w-4" />
+              {hasExtractionResults ? "Re-run Extraction" : "Batch Run"} (
+              {files.length} documents)
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1069,6 +1123,38 @@ export function BatchStudySelectionPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Rerun confirmation dialog */}
+      <AlertDialog
+        open={showRerunWarning}
+        onOpenChange={(open) => !open && setShowRerunWarning(false)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              Overwrite Existing Results?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Running extraction again will overwrite your existing extraction
+              results and invalidate any evaluation results. This action cannot
+              be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowRerunWarning(false);
+                executeBatchRun();
+              }}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              Yes, Re-run Extraction
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

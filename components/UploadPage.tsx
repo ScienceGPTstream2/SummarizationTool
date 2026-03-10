@@ -26,9 +26,16 @@ import {
 interface UploadPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
   documentData: DocumentData;
+  onInFlightChange?: (step: "upload" | null) => void;
+  onInvalidateDownstream?: () => void;
 }
 
-export function UploadPage({ onComplete, documentData }: UploadPageProps) {
+export function UploadPage({
+  onComplete,
+  documentData,
+  onInFlightChange,
+  onInvalidateDownstream,
+}: UploadPageProps) {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>(
     documentData.uploadedFiles?.map((f) => f.file) ||
@@ -56,10 +63,22 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   const [processingFiles, setProcessingFiles] = useState<Set<string>>(
     new Set()
   );
-  const [processedFiles, setProcessedFiles] = useState<Record<string, any>>({});
+  // Initialize processedFiles from documentData so returning to this page
+  // shows previously processed files as already completed.
+  const [processedFiles, setProcessedFiles] = useState<Record<string, any>>(
+    () => {
+      const initial: Record<string, any> = {};
+      if (documentData.uploadedFiles) {
+        for (const f of documentData.uploadedFiles) {
+          if (f.processingResult) {
+            initial[f.file.name] = f.processingResult;
+          }
+        }
+      }
+      return initial;
+    }
+  );
   const processedFilesRef = useRef<Record<string, any>>({});
-  // Keep ref in sync so handleProceed always reads latest results even if
-  // the user clicks Proceed before React flushes the batched state update.
   useEffect(() => {
     processedFilesRef.current = processedFiles;
   }, [processedFiles]);
@@ -67,6 +86,13 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
     Record<string, string>
   >({});
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+
+  // Report in-flight status to parent for navigation guards
+  useEffect(() => {
+    const busy = processingFiles.size > 0 || uploadingFiles.size > 0;
+    onInFlightChange?.(busy ? "upload" : null);
+    return () => onInFlightChange?.(null);
+  }, [processingFiles.size, uploadingFiles.size]);
 
   const MAX_FILES = 10;
 
@@ -271,18 +297,43 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
   };
 
   const handleProcessAll = async () => {
+    await processFiles(false);
+  };
+
+  const handleReprocessAll = async () => {
+    await processFiles(true);
+  };
+
+  const processFiles = async (force: boolean) => {
     if (selectedFiles.length === 0) return;
 
-    // Mark all as processing initially and clear errors
-    // Only process files that have been uploaded but NOT yet processed
+    // If this is a restored session without original upload metadata,
+    // we won't have file_ids to call the processing API with.
+    const hasAnyFileIds = selectedFiles.some(
+      (f) => !!uploadResults[f.name]?.file_id
+    );
+    if (!hasAnyFileIds) {
+      toast.info(
+        "Original files for this restored session are not available to reprocess."
+      );
+      return;
+    }
+
     const filesToProcess = selectedFiles.filter(
-      (f) => uploadResults[f.name]?.file_id && !processedFiles[f.name]
+      (f) =>
+        uploadResults[f.name]?.file_id && (force || !processedFiles[f.name])
     );
 
-    // If all files are already processed, show message and return
     if (filesToProcess.length === 0) {
-      toast.info("All files have already been processed");
+      if (!force) {
+        toast.info("All files have already been processed");
+      }
       return;
+    }
+
+    // Reprocessing because parser or inputs changed: invalidate downstream steps
+    if (force) {
+      onInvalidateDownstream?.();
     }
 
     setProcessingFiles(new Set(filesToProcess.map((f) => f.name)));
@@ -516,16 +567,29 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
                       </p>
                       <div className="flex items-center text-xs text-gray-500 mt-0.5">
                         <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                        {uploadResults[file.name] && (
-                          <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-medium flex items-center">
+                        {processedFiles[file.name] && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-medium flex items-center">
                             <CheckCircle className="h-3 w-3 mr-1" />
-                            Uploaded
+                            Processed
                           </span>
                         )}
+                        {uploadResults[file.name] &&
+                          !processedFiles[file.name] && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-medium flex items-center">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Uploaded
+                            </span>
+                          )}
                         {uploadingFiles.has(file.name) && (
                           <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium flex items-center">
                             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                             Uploading...
+                          </span>
+                        )}
+                        {processingFiles.has(file.name) && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium flex items-center">
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            Processing...
                           </span>
                         )}
                         {fileParsers[file.name] && (
@@ -650,28 +714,85 @@ export function UploadPage({ onComplete, documentData }: UploadPageProps) {
           {/* Process All Button */}
           {/* Process All / Proceed Button */}
           {selectedFiles.length > 0 &&
-          Object.keys(processedFiles).length === selectedFiles.length ? (
-            <Button
-              onClick={handleProceed}
-              className="w-full mb-6 bg-green-600 hover:bg-green-700"
-              size="lg"
-            >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              View Processed Documents
-            </Button>
-          ) : (
-            <Button
-              onClick={handleProcessAll}
-              disabled={processingFiles.size > 0}
-              className="w-full mb-6"
-              size="lg"
-            >
-              <Play className="h-4 w-4 mr-2" />
-              {processingFiles.size > 0
-                ? "Processing..."
-                : `Process All Files (${selectedFiles.length})`}
-            </Button>
-          )}
+            (() => {
+              const allProcessed =
+                selectedFiles.length > 0 &&
+                selectedFiles.every((f) => processedFiles[f.name]);
+              const someProcessed =
+                Object.keys(processedFiles).length > 0 && !allProcessed;
+              const hasAnyFileIds = selectedFiles.some(
+                (f) => !!uploadResults[f.name]?.file_id
+              );
+
+              // When we don't have file_ids (restored session without upload metadata),
+              // disable processing/reprocessing controls to avoid confusing no-ops.
+              const canProcess = hasAnyFileIds;
+
+              return allProcessed ? (
+                <div className="space-y-2 mb-6">
+                  <Button
+                    onClick={handleProceed}
+                    className="w-full bg-green-600 hover:bg-green-700"
+                    size="lg"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    View Processed Documents
+                  </Button>
+                  <Button
+                    onClick={handleReprocessAll}
+                    variant="outline"
+                    className="w-full"
+                    size="sm"
+                    disabled={processingFiles.size > 0 || !canProcess}
+                    title={
+                      canProcess
+                        ? undefined
+                        : "Cannot re-process: original upload metadata is not available for this restored session."
+                    }
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    {processingFiles.size > 0
+                      ? "Re-processing..."
+                      : "Re-process All Files"}
+                  </Button>
+                  {!canProcess && (
+                    <p className="text-xs text-muted-foreground">
+                      This session was restored without original upload metadata
+                      or the uploaded files are not available anymore, so the
+                      documents cannot be reprocessed from here. Please upload
+                      the files again.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="mb-6 space-y-1">
+                  <Button
+                    onClick={handleProcessAll}
+                    disabled={processingFiles.size > 0 || !canProcess}
+                    className="w-full"
+                    size="lg"
+                    title={
+                      canProcess
+                        ? undefined
+                        : "Cannot process: original upload metadata is not available for this restored session."
+                    }
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    {processingFiles.size > 0
+                      ? "Processing..."
+                      : someProcessed
+                        ? `Process Remaining Files (${selectedFiles.filter((f) => !processedFiles[f.name]).length})`
+                        : `Process All Files (${selectedFiles.length})`}
+                  </Button>
+                  {!canProcess && (
+                    <p className="text-xs text-muted-foreground">
+                      This session was restored without original upload
+                      metadata, so new processing runs cannot be triggered.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
           {/* Processing Status */}
           {(processingFiles.size > 0 ||

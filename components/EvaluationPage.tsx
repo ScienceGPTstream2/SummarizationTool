@@ -83,6 +83,7 @@ interface EvaluationPageProps {
   setDocumentData: (
     data: DocumentData | ((prev: DocumentData) => DocumentData)
   ) => void;
+  onInFlightChange?: (step: "evaluation" | null) => void;
 }
 
 // Available evaluation providers
@@ -195,6 +196,7 @@ export function EvaluationPage({
   onBack,
   documentData,
   setDocumentData,
+  onInFlightChange,
 }: EvaluationPageProps) {
   // Initialize files from documentData
   const [files, setFiles] = useState<any[]>(() => {
@@ -402,6 +404,12 @@ export function EvaluationPage({
 
   // Evaluation state
   const [isEvaluating, setIsEvaluating] = useState(false);
+
+  // Report in-flight status to parent for navigation guards
+  useEffect(() => {
+    onInFlightChange?.(isEvaluating ? "evaluation" : null);
+    return () => onInFlightChange?.(null);
+  }, [isEvaluating]);
   const [evaluationProgress, setEvaluationProgress] = useState(0);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [evaluationComplete, setEvaluationComplete] = useState(false);

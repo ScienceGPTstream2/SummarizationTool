@@ -137,15 +137,21 @@ type FileStatus = {
 interface EntityExtractionPageProps {
   onBack: () => void;
   onComplete?: (data: Partial<DocumentData>) => void;
+  onNavigateForward?: () => void;
   documentData: DocumentData;
   setDocumentData: React.Dispatch<React.SetStateAction<DocumentData>>;
+  onInFlightChange?: (step: "extraction" | null) => void;
+  onInvalidateDownstream?: () => void;
 }
 
 export function EntityExtractionPage({
   onBack,
   onComplete,
+  onNavigateForward,
   documentData,
   setDocumentData,
+  onInFlightChange,
+  onInvalidateDownstream,
 }: EntityExtractionPageProps) {
   const sessionIdRef = useRef<string | null>(documentData.sessionId || null);
 
@@ -288,6 +294,13 @@ export function EntityExtractionPage({
 
   // Batch processing state
   const [isBatchRunning, setIsBatchRunning] = useState(false);
+
+  // Report in-flight status to parent for navigation guards
+  useEffect(() => {
+    const busy = isExtracting || isGeneratingParagraph || isBatchRunning;
+    onInFlightChange?.(busy ? "extraction" : null);
+    return () => onInFlightChange?.(null);
+  }, [isExtracting, isGeneratingParagraph, isBatchRunning]);
 
   // Helper to create session
   const createSession = async () => {
@@ -577,9 +590,9 @@ export function EntityExtractionPage({
 
   // Parallel Batch Processing
   const startBatchProcessing = async () => {
-    // Ensure session exists
     await createSession();
     setIsBatchRunning(true);
+    onInvalidateDownstream?.();
     const pendingFiles = files.filter((f) => f.studyType && !f.finalSummary);
 
     // Initialize status for all pending files
@@ -1370,17 +1383,18 @@ export function EntityExtractionPage({
     const updated = entities.filter((_, i) => i !== index);
     setEntities(updated);
 
-    // Update files state
     setFiles((prev) =>
       prev.map((f) =>
         f.fileId === selectedFileId ? { ...f, entities: updated } : f
       )
     );
 
-    // Sync with backend if session active
     if (sessionIdRef.current) {
       updateSessionConfiguration(sessionIdRef.current, updated);
     }
+
+    // Entity list changed — downstream evaluation results are now stale
+    onInvalidateDownstream?.();
   };
 
   const handleReferenceFocus = (entityIdx: number, refIdx: number) => {
@@ -1768,7 +1782,8 @@ export function EntityExtractionPage({
     if (!entity.name || !entity.prompt) return;
 
     setIsExtracting(true);
-    setShowResults(true); // Show results section immediately so user can see progress/continue
+    setShowResults(true);
+    onInvalidateDownstream?.();
     // Don't reset all completed entities, just this one if it was completed
     setCompletedEntities((prev) => {
       const newSet = new Set(prev);
@@ -2126,9 +2141,12 @@ export function EntityExtractionPage({
   };
 
   const handleRunSummarization = async (rerunAll = true) => {
-    setShowRerunDialog(false); // Close dialog if it was open
+    setShowRerunDialog(false);
     setIsExtracting(true);
-    setShowResults(true); // Show results section immediately
+    setShowResults(true);
+
+    // Re-running extraction invalidates evaluation results
+    onInvalidateDownstream?.();
 
     if (rerunAll) {
       setExtractingEntities(new Set());
@@ -2426,17 +2444,33 @@ export function EntityExtractionPage({
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="flex items-center gap-4 mb-6">
-        <Button variant="outline" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <h2 className="text-xl">Entity Extraction & Prompt Catalogue</h2>
-          <p className="text-muted-foreground">
-            Configure entity extraction prompts and select AI model
-          </p>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h2 className="text-xl">Entity Extraction & Prompt Catalogue</h2>
+            <p className="text-muted-foreground">
+              Configure entity extraction prompts and select AI model
+            </p>
+          </div>
         </div>
+        {onNavigateForward &&
+          !isExtracting &&
+          !isGeneratingParagraph &&
+          !isBatchRunning && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onNavigateForward}
+              className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+            >
+              Continue to Evaluation
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          )}
       </div>
 
       {/* File Selector for Batch */}

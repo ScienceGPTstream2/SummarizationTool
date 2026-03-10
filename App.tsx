@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import LoginPage from "./components/LoginPage";
 import { AuthCallback } from "./components/AuthCallback";
 import { UploadPage } from "./components/UploadPage";
@@ -13,7 +13,25 @@ import { GroupManagementPage } from "./components/GroupManagement/GroupManagemen
 
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
-import { Briefcase, LogOut, Clock, FileText, Users } from "lucide-react";
+import {
+  Briefcase,
+  LogOut,
+  Clock,
+  FileText,
+  Users,
+  Check,
+  AlertTriangle,
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "./components/ui/alert-dialog";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
@@ -157,6 +175,26 @@ interface UserInfo {
   avatar: string | undefined;
 }
 
+const WORKFLOW_STEPS: Step[] = [
+  "upload",
+  "processing",
+  "study_selection",
+  "extraction",
+  "evaluation",
+];
+
+const WORKFLOW_STEP_LABELS: Record<string, string> = {
+  upload: "Upload",
+  processing: "Processing",
+  study_selection: "Study Selection",
+  extraction: "Entity Extraction",
+  evaluation: "Evaluation",
+};
+
+function getStepIndex(step: Step): number {
+  return WORKFLOW_STEPS.indexOf(step);
+}
+
 export default function App() {
   // Supabase session state
   const [session, setSession] = useState<Session | null>(null);
@@ -182,6 +220,52 @@ export default function App() {
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
     useState<Step>("upload");
+
+  // Track which workflow step currently has an in-flight operation
+  const [inFlightStep, setInFlightStep] = useState<Step | null>(null);
+  // Confirmation dialog for rerunning intermediate stages
+  const [rerunConfirm, setRerunConfirm] = useState<{
+    open: boolean;
+    targetStep: Step;
+    message: string;
+  }>({ open: false, targetStep: "upload", message: "" });
+  // Confirmation dialog for navigating away while a request is in flight
+  const [navAwayConfirm, setNavAwayConfirm] = useState<{
+    open: boolean;
+    targetStep: Step;
+    message: string;
+  }>({ open: false, targetStep: "upload", message: "" });
+
+  // Tracks steps whose downstream results have been invalidated by user changes
+  // (e.g. deleting an entity on extraction invalidates evaluation)
+  const [staleDownstream, setStaleDownstream] = useState<Set<Step>>(new Set());
+
+  // Called by child pages when they make changes that invalidate later stages
+  const invalidateDownstream = useCallback((fromStep: Step) => {
+    const fromIdx = getStepIndex(fromStep);
+    if (fromIdx < 0) return;
+    setStaleDownstream((prev) => {
+      const next = new Set(prev);
+      for (let i = fromIdx + 1; i < WORKFLOW_STEPS.length; i++) {
+        next.add(WORKFLOW_STEPS[i]);
+      }
+      return next;
+    });
+  }, []);
+
+  // Clear stale flags when a step completes (producing fresh results)
+  const clearStaleFrom = useCallback((fromStep: Step) => {
+    const fromIdx = getStepIndex(fromStep);
+    if (fromIdx < 0) return;
+    setStaleDownstream((prev) => {
+      const next = new Set(prev);
+      next.delete(fromStep);
+      for (let i = fromIdx + 1; i < WORKFLOW_STEPS.length; i++) {
+        next.delete(WORKFLOW_STEPS[i]);
+      }
+      return next;
+    });
+  }, []);
 
   // Wrapper so navigating to a tool page always records where we came from
   const navigateTo = (step: Step) => {
@@ -211,6 +295,86 @@ export default function App() {
     finalSummary: "",
     uploadedFiles: [],
   });
+
+  // Derive which workflow steps have been completed from documentData
+  const completedSteps = useMemo(() => {
+    const completed = new Set<Step>();
+    const files = documentData.uploadedFiles || [];
+
+    // Upload is complete if we have files
+    if (files.length > 0) {
+      completed.add("upload");
+    }
+
+    // Processing is complete if all files have processingResult
+    if (files.length > 0 && files.every((f) => f.processingResult)) {
+      completed.add("processing");
+    }
+
+    // Study selection is complete if files have studyType and at least one model is selected
+    if (
+      files.length > 0 &&
+      files.every((f) => f.studyType) &&
+      (documentData.selectedModels?.length ||
+        files.some((f) => f.selectedModels?.length))
+    ) {
+      completed.add("study_selection");
+    }
+
+    // Extraction is complete if any file has extracted entities
+    if (
+      files.length > 0 &&
+      files.some(
+        (f) =>
+          f.entities?.some(
+            (e: any) =>
+              e.extracted ||
+              (e.extractionsByModel &&
+                Object.keys(e.extractionsByModel).length > 0)
+          ) ||
+          f.finalSummary ||
+          (f.summariesByModel && Object.keys(f.summariesByModel).length > 0)
+      )
+    ) {
+      completed.add("extraction");
+    }
+
+    // Evaluation is complete if any entity has evaluationResults
+    if (
+      files.length > 0 &&
+      files.some((f) =>
+        f.entities?.some(
+          (e: any) =>
+            e.evaluationResults?.length > 0 ||
+            (e.extractionsByModel &&
+              Object.values(e.extractionsByModel).some(
+                (ext: any) => ext.evaluationResults?.length > 0
+              ))
+        )
+      )
+    ) {
+      completed.add("evaluation");
+    }
+
+    return completed;
+  }, [documentData]);
+
+  // The highest step index that has been completed (for determining reachable steps)
+  const highestReachableStepIndex = useMemo(() => {
+    let highest = -1;
+    for (let i = 0; i < WORKFLOW_STEPS.length; i++) {
+      if (completedSteps.has(WORKFLOW_STEPS[i])) {
+        // Can reach the next step after a completed one
+        highest = Math.max(highest, i + 1);
+      }
+    }
+    // Also consider the current step as reachable
+    const currentIdx = getStepIndex(currentStep);
+    if (currentIdx >= 0) {
+      highest = Math.max(highest, currentIdx);
+    }
+    return Math.min(highest, WORKFLOW_STEPS.length - 1);
+  }, [completedSteps, currentStep]);
 
   // Ref to prevent duplicate session creation
   const sessionCreationInProgressRef = useRef(false);
@@ -508,6 +672,9 @@ export default function App() {
 
     setDocumentData((prev) => ({ ...prev, ...updatedData }));
 
+    // This step just produced fresh results — clear stale flags for it and downstream
+    clearStaleFrom(step);
+
     if (step === "upload") {
       setCurrentStep("processing");
     } else if (step === "processing") {
@@ -561,7 +728,45 @@ export default function App() {
     [documentData.sessionId, currentStep]
   );
 
+  // Navigate to a workflow step via the progress stepper
+  const handleStepNavigate = useCallback(
+    (targetStep: Step) => {
+      const targetIdx = getStepIndex(targetStep);
+      if (targetIdx < 0 || targetIdx > highestReachableStepIndex) return;
+      if (targetStep === currentStep) return;
+
+      // Warn if there's an in-flight operation on the current step
+      if (inFlightStep) {
+        setNavAwayConfirm({
+          open: true,
+          targetStep,
+          message:
+            "An operation is currently in progress. Navigating away may cause it to fail or produce incomplete results. Are you sure you want to leave?",
+        });
+        return;
+      }
+
+      setCurrentStep(targetStep);
+    },
+    [currentStep, highestReachableStepIndex, inFlightStep]
+  );
+
   const handleBack = () => {
+    // Warn if there's an in-flight operation
+    if (inFlightStep && WORKFLOW_STEPS.includes(currentStep)) {
+      const currentIdx = getStepIndex(currentStep);
+      const prevStep = currentIdx > 0 ? WORKFLOW_STEPS[currentIdx - 1] : null;
+      if (prevStep) {
+        setNavAwayConfirm({
+          open: true,
+          targetStep: prevStep,
+          message:
+            "An operation is currently in progress. Navigating away may cause it to fail or produce incomplete results. Are you sure you want to go back?",
+        });
+        return;
+      }
+    }
+
     if (currentStep === "processing") {
       setCurrentStep("upload");
     } else if (currentStep === "study_selection") {
@@ -576,9 +781,7 @@ export default function App() {
       currentStep === "groups" ||
       currentStep === "history"
     ) {
-      // Return to the workflow step the user came from
       if (currentStep === "executive" || currentStep === "history") {
-        // Clear document data and start fresh when leaving executive/history
         setDocumentData({
           file: null,
           parser: "",
@@ -596,11 +799,41 @@ export default function App() {
         });
         setCurrentStep("upload");
       } else {
-        // templates / groups: just go back to where the user was
         setCurrentStep(previousWorkflowStep);
       }
     }
   };
+
+  // Navigate forward to the next step (used by child pages)
+  const handleForward = useCallback(() => {
+    const currentIdx = getStepIndex(currentStep);
+    if (currentIdx >= 0 && currentIdx < WORKFLOW_STEPS.length - 1) {
+      const nextStep = WORKFLOW_STEPS[currentIdx + 1];
+      if (getStepIndex(nextStep) <= highestReachableStepIndex) {
+        // Warn if in-flight
+        if (inFlightStep) {
+          setNavAwayConfirm({
+            open: true,
+            targetStep: nextStep,
+            message:
+              "An operation is currently in progress. Navigating away may cause it to fail or produce incomplete results. Are you sure you want to continue?",
+          });
+          return;
+        }
+        setCurrentStep(nextStep);
+      }
+    }
+  }, [currentStep, highestReachableStepIndex, inFlightStep]);
+
+  // Check if moving forward is possible (for child pages to show forward button)
+  // Blocked if the next step has been invalidated by upstream changes
+  const canNavigateForward = useMemo(() => {
+    const currentIdx = getStepIndex(currentStep);
+    if (currentIdx < 0 || currentIdx >= WORKFLOW_STEPS.length - 1) return false;
+    const nextStep = WORKFLOW_STEPS[currentIdx + 1];
+    if (staleDownstream.has(nextStep)) return false;
+    return currentIdx + 1 <= highestReachableStepIndex;
+  }, [currentStep, highestReachableStepIndex, staleDownstream]);
 
   const handleRestoreSession = async (sessionId: string) => {
     if (restoringSessionRef.current) return;
@@ -1462,6 +1695,8 @@ export default function App() {
           <UploadPage
             onComplete={(data) => handleStepComplete("upload", data)}
             documentData={documentData}
+            onInFlightChange={setInFlightStep}
+            onInvalidateDownstream={() => invalidateDownstream("upload")}
           />
         );
       case "processing":
@@ -1469,7 +1704,10 @@ export default function App() {
           <ProcessingPage
             onComplete={(data) => handleStepComplete("processing", data)}
             onBack={handleBack}
+            onNavigateForward={canNavigateForward ? handleForward : undefined}
             documentData={documentData}
+            hasDownstreamResults={completedSteps.has("study_selection")}
+            onInvalidateDownstream={() => invalidateDownstream("processing")}
           />
         );
       case "study_selection":
@@ -1477,7 +1715,12 @@ export default function App() {
           <BatchStudySelectionPage
             onBack={handleBack}
             onComplete={(data) => handleStepComplete("study_selection", data)}
+            onNavigateForward={canNavigateForward ? handleForward : undefined}
             documentData={documentData}
+            hasExtractionResults={completedSteps.has("extraction")}
+            onInvalidateDownstream={() =>
+              invalidateDownstream("study_selection")
+            }
           />
         );
       case "extraction":
@@ -1485,8 +1728,11 @@ export default function App() {
           <EntityExtractionPage
             onBack={handleBack}
             onComplete={(data) => handleStepComplete("extraction", data)}
+            onNavigateForward={canNavigateForward ? handleForward : undefined}
             documentData={documentData}
             setDocumentData={setDocumentData}
+            onInFlightChange={setInFlightStep}
+            onInvalidateDownstream={() => invalidateDownstream("extraction")}
           />
         );
       case "evaluation":
@@ -1495,6 +1741,7 @@ export default function App() {
             onBack={handleBack}
             documentData={documentData}
             setDocumentData={setDocumentData}
+            onInFlightChange={setInFlightStep}
           />
         );
 
@@ -1609,47 +1856,95 @@ export default function App() {
               </div>
             </div>
             {currentStep !== "executive" && (
-              <div className="flex flex-wrap items-center gap-4 mt-2">
-                <div
-                  className={`flex items-center gap-2 ${currentStep === "upload" ? "text-foreground" : "text-muted-foreground"}`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full ${currentStep === "upload" ? "bg-red-500" : "bg-muted"}`}
-                  />
-                  <span className="text-sm">Upload</span>
-                </div>
-                <div
-                  className={`flex items-center gap-2 ${currentStep === "processing" ? "text-foreground" : "text-muted-foreground"}`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full ${currentStep === "processing" ? "bg-red-500" : "bg-muted"}`}
-                  />
-                  <span className="text-sm">Processing</span>
-                </div>
-                <div
-                  className={`flex items-center gap-2 ${currentStep === "study_selection" ? "text-foreground" : "text-muted-foreground"}`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full ${currentStep === "study_selection" ? "bg-red-500" : "bg-muted"}`}
-                  />
-                  <span className="text-sm">Study Selection</span>
-                </div>
-                <div
-                  className={`flex items-center gap-2 ${currentStep === "extraction" ? "text-foreground" : "text-muted-foreground"}`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full ${currentStep === "extraction" ? "bg-red-500" : "bg-muted"}`}
-                  />
-                  <span className="text-sm">Entity Extraction</span>
-                </div>
-                <div
-                  className={`flex items-center gap-2 ${currentStep === "evaluation" ? "text-foreground" : "text-muted-foreground"}`}
-                >
-                  <div
-                    className={`w-3 h-3 rounded-full ${currentStep === "evaluation" ? "bg-red-500" : "bg-muted"}`}
-                  />
-                  <span className="text-sm">Evaluation</span>
-                </div>
+              <div className="flex items-center mt-4">
+                {WORKFLOW_STEPS.map((step, idx) => {
+                  const isCurrent = currentStep === step;
+                  const isCompleted = completedSteps.has(step);
+                  const isStale = staleDownstream.has(step);
+                  const isReachable =
+                    idx <= highestReachableStepIndex && !isStale;
+                  const isClickable = isReachable && !isCurrent;
+                  const hasInFlight = inFlightStep === step;
+
+                  return (
+                    <div
+                      key={step}
+                      className="flex items-center flex-1 last:flex-none"
+                    >
+                      <button
+                        onClick={() => isClickable && handleStepNavigate(step)}
+                        disabled={!isClickable}
+                        className={`
+                          flex items-center gap-2 group relative
+                          transition-colors duration-150
+                          ${isClickable ? "cursor-pointer" : "cursor-default"}
+                          ${isCurrent ? "text-foreground" : isCompleted ? "text-foreground" : isReachable ? "text-muted-foreground" : "text-muted-foreground/50"}
+                        `}
+                        title={
+                          isStale && isCompleted
+                            ? `${WORKFLOW_STEP_LABELS[step]} — results may be outdated`
+                            : isClickable
+                              ? `Go to ${WORKFLOW_STEP_LABELS[step]}`
+                              : isCurrent
+                                ? "Current step"
+                                : !isReachable
+                                  ? "Complete previous steps first"
+                                  : ""
+                        }
+                      >
+                        <div
+                          className={`
+                            w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold
+                            transition-all duration-200 shrink-0
+                            ${
+                              isCurrent
+                                ? hasInFlight
+                                  ? "bg-amber-500 text-white ring-2 ring-amber-300 animate-pulse"
+                                  : "bg-primary text-primary-foreground ring-2 ring-primary/30"
+                                : isStale && isCompleted
+                                  ? "bg-amber-500/60 text-white"
+                                  : isCompleted
+                                    ? "bg-green-600 text-white"
+                                    : isReachable
+                                      ? "bg-muted-foreground/20 text-muted-foreground"
+                                      : "bg-muted text-muted-foreground/50"
+                            }
+                            ${isClickable ? "group-hover:ring-2 group-hover:ring-primary/40 group-hover:scale-110" : ""}
+                          `}
+                        >
+                          {isStale && isCompleted && !isCurrent ? (
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                          ) : isCompleted && !isCurrent ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            idx + 1
+                          )}
+                        </div>
+                        <span
+                          className={`text-sm font-medium whitespace-nowrap hidden sm:inline
+                            ${isClickable ? "group-hover:text-primary" : ""}
+                          `}
+                        >
+                          {WORKFLOW_STEP_LABELS[step]}
+                        </span>
+                      </button>
+                      {idx < WORKFLOW_STEPS.length - 1 && (
+                        <div className="flex-1 mx-2 sm:mx-3">
+                          <div
+                            className={`h-0.5 rounded-full transition-colors duration-300 ${
+                              completedSteps.has(step) &&
+                              !staleDownstream.has(WORKFLOW_STEPS[idx + 1])
+                                ? "bg-green-600/60"
+                                : staleDownstream.has(WORKFLOW_STEPS[idx + 1])
+                                  ? "bg-amber-400/60"
+                                  : "bg-border"
+                            }`}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {currentStep !== "executive" && (
@@ -1662,6 +1957,70 @@ export default function App() {
         <main className="container mx-auto px-4 py-8 bg-background">
           {renderStep()}
         </main>
+
+        {/* Confirmation dialog: navigate away from in-flight operation */}
+        <AlertDialog
+          open={navAwayConfirm.open}
+          onOpenChange={(open) =>
+            !open && setNavAwayConfirm((p) => ({ ...p, open: false }))
+          }
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                Operation In Progress
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {navAwayConfirm.message}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Stay Here</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setCurrentStep(navAwayConfirm.targetStep);
+                  setNavAwayConfirm((p) => ({ ...p, open: false }));
+                }}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                Leave Anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmation dialog: rerunning intermediate stage */}
+        <AlertDialog
+          open={rerunConfirm.open}
+          onOpenChange={(open) =>
+            !open && setRerunConfirm((p) => ({ ...p, open: false }))
+          }
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-orange-500" />
+                Overwrite Downstream Results?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {rerunConfirm.message}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setRerunConfirm((p) => ({ ...p, open: false }));
+                }}
+                className="bg-orange-600 hover:bg-orange-700"
+              >
+                Yes, Re-run
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         <Toaster />
       </div>
     </ThemeProvider>
