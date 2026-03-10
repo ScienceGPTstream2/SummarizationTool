@@ -763,7 +763,8 @@ export function EntityExtractionPage({
 
       // Fire all models concurrently — each request contains ALL entities
       let completedModels = 0;
-      const processorUsed = file.processingResult?.processorUsed || documentData.processorUsed;
+      const processorUsed =
+        file.processingResult?.processorUsed || documentData.processorUsed;
 
       const modelResults = await Promise.all(
         modelsToUse.map(async (modelId: string) => {
@@ -782,7 +783,8 @@ export function EntityExtractionPage({
               [file.fileId]: {
                 ...prev[file.fileId],
                 currentEntityIndex: Math.round(
-                  (completedModels / modelsToUse.length) * updatedEntities.length
+                  (completedModels / modelsToUse.length) *
+                    updatedEntities.length
                 ),
                 statusMessage: `Model ${completedModels}/${modelsToUse.length} complete`,
               },
@@ -805,7 +807,8 @@ export function EntityExtractionPage({
       for (let i = 0; i < updatedEntities.length; i++) {
         const entity = updatedEntities[i];
         // Skip entities that were already successfully extracted
-        if (entity.extracted && !entity.extracted.startsWith("Error:")) continue;
+        if (entity.extracted && !entity.extracted.startsWith("Error:"))
+          continue;
 
         const extractionsByModel: Record<string, any> = {
           ...(entity.extractionsByModel || {}),
@@ -1490,15 +1493,20 @@ export function EntityExtractionPage({
     processorUsed?: string,
     signal?: AbortSignal,
     sessionId?: string
-  ): Promise<Record<string, {
-    extracted: string;
-    answer?: string;
-    references?: Reference[];
-    duration?: number;
-    promptTokens?: number;
-    completionTokens?: number;
-    cost?: number;
-  }>> => {
+  ): Promise<
+    Record<
+      string,
+      {
+        extracted: string;
+        answer?: string;
+        references?: Reference[];
+        duration?: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        cost?: number;
+      }
+    >
+  > => {
     const modelObj = availableModels.find((m) => m.id === modelId);
     if (!modelObj) {
       console.warn(`Model ${modelId} not found in available models`);
