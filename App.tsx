@@ -231,9 +231,7 @@ export default function App() {
 
   // Tracks steps whose downstream results have been invalidated by user changes
   // (e.g. deleting an entity on extraction invalidates evaluation)
-  const [staleDownstream, setStaleDownstream] = useState<Set<Step>>(
-    new Set()
-  );
+  const [staleDownstream, setStaleDownstream] = useState<Set<Step>>(new Set());
 
   // Called by child pages when they make changes that invalidate later stages
   const invalidateDownstream = useCallback((fromStep: Step) => {
@@ -302,10 +300,7 @@ export default function App() {
     }
 
     // Processing is complete if all files have processingResult
-    if (
-      files.length > 0 &&
-      files.every((f) => f.processingResult)
-    ) {
+    if (files.length > 0 && files.every((f) => f.processingResult)) {
       completed.add("processing");
     }
 
@@ -331,8 +326,7 @@ export default function App() {
                 Object.keys(e.extractionsByModel).length > 0)
           ) ||
           f.finalSummary ||
-          (f.summariesByModel &&
-            Object.keys(f.summariesByModel).length > 0)
+          (f.summariesByModel && Object.keys(f.summariesByModel).length > 0)
       )
     ) {
       completed.add("extraction");
@@ -341,16 +335,15 @@ export default function App() {
     // Evaluation is complete if any entity has evaluationResults
     if (
       files.length > 0 &&
-      files.some(
-        (f) =>
-          f.entities?.some(
-            (e: any) =>
-              e.evaluationResults?.length > 0 ||
-              (e.extractionsByModel &&
-                Object.values(e.extractionsByModel).some(
-                  (ext: any) => ext.evaluationResults?.length > 0
-                ))
-          )
+      files.some((f) =>
+        f.entities?.some(
+          (e: any) =>
+            e.evaluationResults?.length > 0 ||
+            (e.extractionsByModel &&
+              Object.values(e.extractionsByModel).some(
+                (ext: any) => ext.evaluationResults?.length > 0
+              ))
+        )
       )
     ) {
       completed.add("evaluation");
@@ -1706,7 +1699,9 @@ export default function App() {
             onNavigateForward={canNavigateForward ? handleForward : undefined}
             documentData={documentData}
             hasExtractionResults={completedSteps.has("extraction")}
-            onInvalidateDownstream={() => invalidateDownstream("study_selection")}
+            onInvalidateDownstream={() =>
+              invalidateDownstream("study_selection")
+            }
           />
         );
       case "extraction":
@@ -1847,12 +1842,16 @@ export default function App() {
                   const isCurrent = currentStep === step;
                   const isCompleted = completedSteps.has(step);
                   const isStale = staleDownstream.has(step);
-                  const isReachable = idx <= highestReachableStepIndex && !isStale;
+                  const isReachable =
+                    idx <= highestReachableStepIndex && !isStale;
                   const isClickable = isReachable && !isCurrent;
                   const hasInFlight = inFlightStep === step;
 
                   return (
-                    <div key={step} className="flex items-center flex-1 last:flex-none">
+                    <div
+                      key={step}
+                      className="flex items-center flex-1 last:flex-none"
+                    >
                       <button
                         onClick={() => isClickable && handleStepNavigate(step)}
                         disabled={!isClickable}
@@ -1914,7 +1913,8 @@ export default function App() {
                         <div className="flex-1 mx-2 sm:mx-3">
                           <div
                             className={`h-0.5 rounded-full transition-colors duration-300 ${
-                              completedSteps.has(step) && !staleDownstream.has(WORKFLOW_STEPS[idx + 1])
+                              completedSteps.has(step) &&
+                              !staleDownstream.has(WORKFLOW_STEPS[idx + 1])
                                 ? "bg-green-600/60"
                                 : staleDownstream.has(WORKFLOW_STEPS[idx + 1])
                                   ? "bg-amber-400/60"

@@ -2307,17 +2307,20 @@ export function EntityExtractionPage({
             </p>
           </div>
         </div>
-        {onNavigateForward && !isExtracting && !isGeneratingParagraph && !isBatchRunning && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onNavigateForward}
-            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
-          >
-            Continue to Evaluation
-            <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        )}
+        {onNavigateForward &&
+          !isExtracting &&
+          !isGeneratingParagraph &&
+          !isBatchRunning && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onNavigateForward}
+              className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+            >
+              Continue to Evaluation
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          )}
       </div>
 
       {/* File Selector for Batch */}

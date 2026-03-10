@@ -1005,7 +1005,8 @@ export function BatchStudySelectionPage({
               disabled={files.length === 0}
             >
               <Play className="h-4 w-4" />
-              {hasExtractionResults ? "Re-run Extraction" : "Batch Run"} ({files.length} documents)
+              {hasExtractionResults ? "Re-run Extraction" : "Batch Run"} (
+              {files.length} documents)
             </Button>
           </div>
         </div>
