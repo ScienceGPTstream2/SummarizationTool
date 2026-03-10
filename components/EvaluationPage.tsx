@@ -72,7 +72,7 @@ import {
 } from "./ui/table";
 
 import { DocumentData } from "../App";
-import { authenticatedFetch, getValidToken } from "../utils/authUtils";
+import { getValidToken } from "../utils/authUtils";
 import { toast } from "sonner";
 import BatchResultsPage from "./BatchResultsPage";
 import { MarkdownViewer } from "./MarkdownViewer";
@@ -1222,6 +1222,10 @@ export function EvaluationPage({
         extraction_prompt: entity.prompt,
         actual_output: actualOutput,
         expected_output: entityGroundTruths[entity.name] || undefined,
+        // retrieval_context intentionally omitted — none of the GEval metrics
+        // (correctness, completeness, relevance, safety) declare
+        // LLMTestCaseParams.RETRIEVAL_CONTEXT in their evaluation_params.
+        // Sending the full document markdown here was inflating every request by 5–10MB.
         metrics: selectedMetrics,
         threshold: 0.7,
         custom_evaluation_steps: customEvaluationSteps,
@@ -1374,9 +1378,30 @@ export function EvaluationPage({
   const handleStopEvaluation = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+      // Don't null the ref here — the finally block does it.
+      // Keeping the ref alive lets signal.aborted checks work until cleanup.
       setIsEvaluating(false);
-      setEvaluatingEntities(new Set()); // Clear evaluating status
+      setEvaluatingEntities(new Set());
+      toast("Evaluation Stopped", {
+        description: "Cancelling in-flight requests...",
+      });
+
+      // Tell the backend to skip any queued entity evaluations for this session.
+      // Fire-and-forget — we don't block the UI on this.
+      getValidToken().then((token) => {
+        if (!token) return;
+        import("../utils/session").then(({ getSessionId }) => {
+          fetch("/api/evaluations/cancel", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "X-Session-Id": getSessionId(),
+            },
+          }).catch((err) =>
+            console.warn("[Stop] Backend cancel request failed:", err)
+          );
+        });
+      });
     }
   };
 
@@ -1570,72 +1595,319 @@ export function EvaluationPage({
     setEvaluatingEntities(new Set());
     setCompletedEntities(new Set());
 
-    // IMPORTANT: Save ground truths to files_config before running evaluation
-    // This ensures the latest edits are persisted for session restore
-    hasUserEditedGroundTruthRef.current = true; // Force save even if not manually edited
+    // IMPORTANT: Save ground truths before running evaluation
+    hasUserEditedGroundTruthRef.current = true;
     await saveGroundTruthsToSession();
 
-    // Create new abort controller
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const token = await getValidToken();
-      if (!token) throw new Error("No token found");
-
-      // Filter entities that have extractions
+      // Build tasks for the current file only (single-file mode)
+      // Structure: entity × source-model × judge-model
       const entitiesToEvaluate = (currentFile.entities || []).filter(
         (e: any) => e.extracted
       );
-
       if (entitiesToEvaluate.length === 0) {
         throw new Error("No extracted entities to evaluate");
       }
 
-      const totalEvaluations =
-        selectedProviders.length * entitiesToEvaluate.length;
-      let completedEvaluations = 0;
+      type EvalTask = {
+        fileId: string;
+        entityName: string;
+        prompt: string;
+        sourceModel: string;
+        extractedContent: string;
+        groundTruth?: string;
+        judgeModel: string;
+      };
+      const tasks: EvalTask[] = [];
 
-      // Evaluate entity-by-entity (sequential entities, parallel models per entity)
-      for (const entity of entitiesToEvaluate) {
-        if (controller.signal.aborted) break;
+      entitiesToEvaluate.forEach((entity: any) => {
+        const groundTruth = entityGroundTruths[entity.name] || undefined;
+        const sourceModel = singleModeSourceModel || currentFile.selectedModel;
+        const extraction =
+          entity.extractionsByModel?.[sourceModel]?.extracted ||
+          entity.extracted;
 
-        await evaluateSingleEntity(
-          entity,
-          selectedProviders,
-          token,
-          controller.signal
-        );
+        if (!extraction) return;
 
-        // Update progress
-        if (!controller.signal.aborted) {
-          completedEvaluations += selectedProviders.length;
-          setEvaluationProgress(
-            Math.round((completedEvaluations / totalEvaluations) * 100)
-          );
-        }
+        selectedProviders.forEach((judgeModelId) => {
+          tasks.push({
+            fileId: currentFile.fileId,
+            entityName: entity.name,
+            prompt: entity.prompt,
+            sourceModel,
+            extractedContent: extraction,
+            groundTruth,
+            judgeModel: judgeModelId,
+          });
+        });
+      });
+
+      if (tasks.length === 0) {
+        throw new Error("No evaluation tasks could be built");
       }
 
-      if (!controller.signal.aborted) {
-        // Show success message only if not aborted
-        setEvaluationComplete(true);
+      let completedCount = 0;
+      const totalTasks = tasks.length;
 
-        // Mark session as completed in the database
+      // Immediately mark all entities as Evaluating so the user sees
+      // spinning badges right away — not silence for 30+ seconds
+      const allEntityNames = new Set(tasks.map((t) => t.entityName));
+      setEvaluatingEntities(allEntityNames);
+
+      const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
+
+      // Get token ONCE before launching judges — avoids authenticatedFetch
+      // calling clearTokenAndReload() mid-eval if a parallel judge triggers auth
+      let evalToken = await getValidToken();
+      if (!evalToken) {
+        throw new Error("No valid session — please refresh and try again");
+      }
+
+      const fetchWithRetry = async (
+        url: string,
+        options: any,
+        retries = 3,
+        backoff = 1000
+      ): Promise<Response> => {
         try {
-          const token = await getValidToken();
+          const headers = new Headers(options.headers || {});
+          headers.set("Authorization", `Bearer ${evalToken}`);
+          // X-Session-Id lets the backend match this request to a cancel call
+          try {
+            const { getSessionId } = await import("../utils/session");
+            headers.set("X-Session-Id", getSessionId());
+          } catch {}
+          const res = await fetch(url, { ...options, headers });
+          if (res.status === 401) {
+            // Token may have expired mid-eval — try refreshing once
+            const newToken = await getValidToken();
+            if (newToken) {
+              evalToken = newToken;
+              headers.set("Authorization", `Bearer ${evalToken}`);
+              return fetch(url, { ...options, headers });
+            }
+            throw new Error("Authentication failed (401)");
+          }
+          if (res.status === 429) {
+            if (retries <= 0) throw new Error("Rate limit exceeded (429)");
+            const retryAfter = res.headers.get("Retry-After");
+            const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : backoff;
+            console.warn(`Rate limit hit. Retrying in ${waitTime}ms...`);
+            await new Promise((r) => setTimeout(r, waitTime));
+            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+          }
+          return res;
+        } catch (err: any) {
+          if (err.name === "AbortError") throw err; // never retry a user-cancelled request
+          if (retries <= 0) throw err;
+          await new Promise((r) => setTimeout(r, backoff));
+          return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+      };
+
+      // Group by judge model → one batch request per judge (judges run in parallel)
+      const tasksByJudge = new Map<string, EvalTask[]>();
+      for (const task of tasks) {
+        if (!tasksByJudge.has(task.judgeModel))
+          tasksByJudge.set(task.judgeModel, []);
+        tasksByJudge.get(task.judgeModel)!.push(task);
+      }
+
+      const judgePromises = Array.from(tasksByJudge.entries()).map(
+        async ([judgeModelId, judgeTasks]) => {
+          if (controller.signal.aborted) return;
+
+          const provider = allProviders.find((p) => p.id === judgeModelId);
+          if (!provider) {
+            console.error(`[EvalPage] Provider not found: ${judgeModelId}`);
+            completedCount += judgeTasks.length;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+            return;
+          }
+
+          const batchRequestBody: any = {
+            extractions: judgeTasks.map((task) => ({
+              entity_name: task.entityName,
+              extraction_prompt: task.prompt,
+              actual_output: task.extractedContent,
+              expected_output: task.groundTruth ?? undefined,
+              // retrieval_context intentionally omitted — metrics don't use it
+            })),
+            metrics: selectedMetrics,
+            threshold: 0.7,
+            strict_mode: false,
+            custom_evaluation_steps: customEvaluationSteps,
+          };
+
+          if (judgeModelId.startsWith("azure-")) {
+            batchRequestBody.provider = "azure_openai";
+            batchRequestBody.azure_deployment =
+              provider.deployment || provider.model;
+            batchRequestBody.azure_model_name = provider.model;
+          } else if (
+            judgeModelId === "vertex_ai_pro" ||
+            judgeModelId === "vertex_ai_lite"
+          ) {
+            batchRequestBody.provider = "vertex_ai";
+            batchRequestBody.vertex_model_name = provider.model;
+          } else if (judgeModelId.startsWith("anthropic_")) {
+            batchRequestBody.provider = "anthropic";
+            batchRequestBody.model_name = provider.model;
+          } else {
+            batchRequestBody.provider = judgeModelId;
+          }
+
+          try {
+            console.log(
+              `[Single-file batch] Sending ${judgeTasks.length} entities to ${provider.name}`
+            );
+            const response = await fetchWithRetry(
+              "/api/evaluations/evaluate/batch",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(batchRequestBody),
+                signal: controller.signal,
+              }
+            );
+
+            if (!response.ok) {
+              const errText = await response.text().catch(() => "(no body)");
+              throw new Error(
+                `Batch API failed for judge ${provider.name} (${response.status}): ${errText}`
+              );
+            }
+
+            const batchResponse = await response.json();
+            const results: any[] = batchResponse.results || [];
+
+            // Process results one by one with yields so React renders
+            // progressively (entities flip Done one-by-one, not all at once)
+            for (let idx = 0; idx < results.length; idx++) {
+              // Stop processing results if user clicked Stop
+              if (controller.signal.aborted) break;
+              const result = results[idx];
+              const task = judgeTasks[idx];
+              if (!task || result?.status === "error") {
+                if (result?.status === "error") {
+                  console.warn(
+                    `[Single-file batch] Entity error for ${task?.entityName}:`,
+                    result.error
+                  );
+                }
+                completedCount++;
+                setEvaluationProgress(
+                  Math.round((completedCount / totalTasks) * 100)
+                );
+                // Yield every 5 entities so React can render
+                if (idx % 5 === 4) await new Promise((r) => setTimeout(r, 0));
+                continue;
+              }
+
+              // Update files/entities state
+              setFiles((prevFiles) =>
+                prevFiles.map((f) => {
+                  if (f.fileId !== task.fileId) return f;
+                  return {
+                    ...f,
+                    entities: f.entities.map((e: any) => {
+                      if (e.name !== task.entityName) return e;
+                      const currentExtractions = e.extractionsByModel || {};
+                      const currentSourceExtraction = currentExtractions[
+                        task.sourceModel
+                      ] || { extracted: task.extractedContent };
+                      const currentEvalResults =
+                        currentSourceExtraction.evaluationResults || [];
+                      return {
+                        ...e,
+                        // Also set top-level evaluationResults for backward compat
+                        evaluationResults: [
+                          ...(e.evaluationResults || []).filter(
+                            (r: any) => r.model !== result.model
+                          ),
+                          result,
+                        ],
+                        extractionsByModel: {
+                          ...currentExtractions,
+                          [task.sourceModel]: {
+                            ...currentSourceExtraction,
+                            evaluationResults: [
+                              ...currentEvalResults.filter(
+                                (r: any) => r.model !== result.model
+                              ),
+                              result,
+                            ],
+                          },
+                        },
+                      };
+                    }),
+                  };
+                })
+              );
+
+              // 50ms stagger: let React render this entity's Done flip before the next
+              await new Promise((r) => setTimeout(r, 50));
+
+              // Flip entity: Evaluating → Completed
+              setEvaluatingEntities((prev) => {
+                const next = new Set(prev);
+                next.delete(task.entityName);
+                return next;
+              });
+              setCompletedEntities(
+                (prev) => new Set([...prev, task.entityName])
+              );
+
+              // Persist to PostgreSQL
+              saveEvaluationResult(
+                task.entityName,
+                task.sourceModel,
+                task.groundTruth,
+                [result],
+                undefined,
+                task.fileId
+              );
+
+              completedCount++;
+              setEvaluationProgress(
+                Math.round((completedCount / totalTasks) * 100)
+              );
+            }
+          } catch (err: any) {
+            if (err.name === "AbortError") throw err;
+            console.error(
+              `[Single-file batch] ❌ Error for judge ${provider.name}:`,
+              err.message || err
+            );
+            completedCount += judgeTasks.length;
+            setEvaluationProgress(
+              Math.round((completedCount / totalTasks) * 100)
+            );
+          }
+        }
+      );
+
+      await Promise.all(judgePromises);
+
+      if (!controller.signal.aborted) {
+        // Patch session status to completed
+        try {
+          const tok = await getValidToken();
           const { getCurrentUser } = await import("../utils/authUtils");
           const user = await getCurrentUser();
-          if (token && user && documentData.sessionId) {
+          if (tok && user && documentData.sessionId) {
             await fetch(`/api/sessions/${documentData.sessionId}`, {
               method: "PATCH",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${tok}`,
               },
-              body: JSON.stringify({
-                user_id: user.id,
-                status: "completed",
-              }),
+              body: JSON.stringify({ user_id: user.id, status: "completed" }),
             });
             console.log("✅ Session status set to completed");
           }
@@ -1649,7 +1921,12 @@ export function EvaluationPage({
         alert(`Evaluation failed: ${error.message}`);
       }
     } finally {
+      // Always clear isEvaluating first, then mark complete —
+      // both in finally so they fire together (no 'Done + Stop' overlap)
       setIsEvaluating(false);
+      if (!abortControllerRef.current?.signal.aborted) {
+        setEvaluationComplete(true);
+      }
       setEvaluationProgress(0);
       abortControllerRef.current = null;
     }
@@ -1812,10 +2089,15 @@ export function EvaluationPage({
     setEvaluationProgress(0);
     setEvaluationComplete(false);
 
-    try {
-      const token = await getValidToken();
-      if (!token) throw new Error("No token available");
+    // Create AbortController so the Stop button can cancel this run
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
+    // Hoist outside try so finally block can reference them
+    let completedCount = 0;
+    let totalTasks = 0;
+
+    try {
       // 1. Identify all evaluation tasks (File x Entity x SourceModel x JudgeModel)
       const tasks: Array<{
         fileId: string;
@@ -1871,9 +2153,19 @@ export function EvaluationPage({
       console.log(
         `Starting batch processing of ${tasks.length} evaluations...`
       );
-      let completedCount = 0;
-      const totalTasks = tasks.length;
-      const BATCH_SIZE = 10;
+      completedCount = 0;
+      totalTasks = tasks.length;
+
+      // Immediately mark all entities as Evaluating
+      const allBatchEntityNames = new Set(tasks.map((t) => t.entityName));
+      setEvaluatingEntities(allBatchEntityNames);
+
+      // Get token ONCE before launching judges — avoids authenticatedFetch
+      // calling clearTokenAndReload() mid-eval if a parallel judge triggers auth
+      let evalToken = await getValidToken();
+      if (!evalToken) {
+        throw new Error("No valid session — please refresh and try again");
+      }
 
       const fetchWithRetry = async (
         url: string,
@@ -1882,7 +2174,23 @@ export function EvaluationPage({
         backoff = 1000
       ) => {
         try {
-          const res = await authenticatedFetch(url, options);
+          const headers = new Headers(options.headers || {});
+          headers.set("Authorization", `Bearer ${evalToken}`);
+          // X-Session-Id lets the backend match this request to a cancel call
+          try {
+            const { getSessionId } = await import("../utils/session");
+            headers.set("X-Session-Id", getSessionId());
+          } catch {}
+          const res = await fetch(url, { ...options, headers });
+          if (res.status === 401) {
+            const newToken = await getValidToken();
+            if (newToken) {
+              evalToken = newToken;
+              headers.set("Authorization", `Bearer ${evalToken}`);
+              return fetch(url, { ...options, headers });
+            }
+            throw new Error("Authentication failed (401)");
+          }
           if (res.status === 429) {
             if (retries <= 0) throw new Error("Rate limit exceeded (429)");
             const retryAfter = res.headers.get("Retry-After");
@@ -1892,7 +2200,8 @@ export function EvaluationPage({
             return fetchWithRetry(url, options, retries - 1, backoff * 2);
           }
           return res;
-        } catch (err) {
+        } catch (err: any) {
+          if (err.name === "AbortError") throw err; // never retry a user-cancelled request
           if (retries <= 0) throw err;
           console.warn(`Fetch error. Retrying... (${retries} left)`);
           await new Promise((resolve) => setTimeout(resolve, backoff));
@@ -1900,152 +2209,210 @@ export function EvaluationPage({
         }
       };
 
-      // 2. Execute tasks in batches
+      // 2. Group tasks by judge model for provider config lookup.
+      //    tasksByJudge[judgeId] has the same entities in the same order
+      //    for each judge (just with a different judgeModel field).
       const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
-
-      for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-        if (abortControllerRef.current?.signal.aborted) break;
-
-        const batch = tasks.slice(i, i + BATCH_SIZE);
-        const batchPromises = batch.map(async (task) => {
-          try {
-            const providerId = task.judgeModel;
-            const provider = allProviders.find((p) => p.id === providerId);
-
-            if (!provider) {
-              console.error(`Provider not found: ${providerId}`);
-              // return skipped or error task result
-              completedCount++;
-              setEvaluationProgress(
-                Math.round((completedCount / totalTasks) * 100)
-              );
-              return null;
-            }
-
-            const requestBody: any = {
-              entity_name: task.entityName,
-              extraction_prompt: task.prompt,
-              actual_output: task.extractedContent,
-              expected_output: task.groundTruth,
-              metrics: selectedMetrics,
-              // provider: task.judgeModel, // REMOVE OLD incorrect assignment
-              threshold: 0.7,
-              strict_mode: false,
-              custom_evaluation_steps: customEvaluationSteps,
-            };
-
-            // Add provider-specific config (Copied from evaluateSingleEntity)
-            if (providerId.startsWith("azure-")) {
-              // Azure OpenAI models
-              requestBody.provider = "azure_openai";
-              requestBody.azure_deployment =
-                provider.deployment || provider.model;
-              requestBody.azure_model_name = provider.model;
-            } else if (
-              providerId === "vertex_ai_pro" ||
-              providerId === "vertex_ai_lite"
-            ) {
-              requestBody.provider = "vertex_ai"; // Backend expects "vertex_ai"
-              requestBody.vertex_model_name = provider.model; // gemini-2.5-pro or gemini-2.5-flash-lite
-            } else if (providerId.startsWith("anthropic_")) {
-              requestBody.provider = "anthropic"; // Backend expects "anthropic"
-              requestBody.model_name = provider.model; // claude-sonnet-4-5@20250929, etc.
-            } else {
-              // Fallback for other providers or if using just the ID
-              requestBody.provider = providerId;
-            }
-
-            const response = await fetchWithRetry("/api/evaluations/evaluate", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(requestBody),
-              signal: abortControllerRef.current?.signal,
-            });
-
-            if (!response.ok)
-              throw new Error(`API failed for ${task.entityName}`);
-            const result = await response.json();
-
-            // Update state with result (Atomic state updates are tricky in loops, but we use functional update)
-            setFiles((prevFiles) =>
-              prevFiles.map((f) => {
-                if (f.fileId !== task.fileId) return f;
-
-                return {
-                  ...f,
-                  entities: f.entities.map((e: any) => {
-                    if (e.name !== task.entityName) return e;
-
-                    const currentExtractions = e.extractionsByModel || {};
-                    const currentSourceExtraction = currentExtractions[
-                      task.sourceModel
-                    ] || {
-                      extracted: task.extractedContent,
-                    };
-
-                    const currentEvalResults =
-                      currentSourceExtraction.evaluationResults || [];
-                    const updatedEvalResults = [
-                      ...currentEvalResults.filter(
-                        (r: any) => r.model !== task.judgeModel
-                      ),
-                      result,
-                    ];
-
-                    return {
-                      ...e,
-                      extractionsByModel: {
-                        ...currentExtractions,
-                        [task.sourceModel]: {
-                          ...currentSourceExtraction,
-                          evaluationResults: updatedEvalResults,
-                        },
-                      },
-                    };
-                  }),
-                };
-              })
-            );
-
-            // Persist to PostgreSQL - include document_id for multi-file support
-            saveEvaluationResult(
-              task.entityName,
-              task.sourceModel,
-              task.groundTruth,
-              [result],
-              undefined, // humanScore
-              task.fileId // document_id
-            );
-
-            completedCount++;
-            // Update progress immediately after each task completes
-            setEvaluationProgress(
-              Math.round((completedCount / totalTasks) * 100)
-            );
-          } catch (err) {
-            console.error(
-              `Error evaluating ${task.entityName} on ${task.fileName}:`,
-              err
-            );
-            completedCount++;
-            setEvaluationProgress(
-              Math.round((completedCount / totalTasks) * 100)
-            );
-          }
-        });
-
-        await Promise.all(batchPromises);
+      const tasksByJudge = new Map<string, typeof tasks>();
+      for (const task of tasks) {
+        if (!tasksByJudge.has(task.judgeModel))
+          tasksByJudge.set(task.judgeModel, []);
+        tasksByJudge.get(task.judgeModel)!.push(task);
       }
 
-      setEvaluationComplete(true);
-      setEvaluationProgress(100); // Ensure progress shows 100% on completion
-      toast.success("Batch Evaluation Complete", {
-        description: `Successfully processed ${completedCount} evaluations.`,
-      });
+      // Chunk size: how many entities per round sent to the backend.
+      // Smaller = more progressive UI updates; larger = less HTTP overhead.
+      const CHUNK_SIZE = 20;
+      const numEntities = Math.max(
+        ...Array.from(tasksByJudge.values()).map((t) => t.length)
+      );
 
-      // Mark session as completed in the database
+      // ── Chunk-first loop ─────────────────────────────────────
+      // Each round: send CHUNK_SIZE entities to ALL judges in parallel.
+      // Results arrive chunk-by-chunk so entities flip Done progressively
+      // (roughly every CHUNK_SIZE×judgeTime) instead of all at the end.
+      for (
+        let chunkStart = 0;
+        chunkStart < numEntities;
+        chunkStart += CHUNK_SIZE
+      ) {
+        if (controller.signal.aborted) break;
+        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, numEntities);
+
+        // All judges process this chunk in parallel
+        await Promise.all(
+          Array.from(tasksByJudge.entries()).map(
+            async ([judgeModelId, judgeTasks]) => {
+              if (controller.signal.aborted) return;
+
+              const chunkTasks = judgeTasks.slice(chunkStart, chunkEnd);
+              if (chunkTasks.length === 0) return;
+
+              const provider = allProviders.find((p) => p.id === judgeModelId);
+              if (!provider) {
+                console.error(`[EvalPage] Provider not found: ${judgeModelId}`);
+                completedCount += chunkTasks.length;
+                setEvaluationProgress(
+                  Math.round((completedCount / totalTasks) * 100)
+                );
+                return;
+              }
+
+              // Build batch request for this chunk
+              const batchRequestBody: any = {
+                extractions: chunkTasks.map((task) => ({
+                  entity_name: task.entityName,
+                  extraction_prompt: task.prompt,
+                  actual_output: task.extractedContent,
+                  expected_output: task.groundTruth ?? undefined,
+                })),
+                metrics: selectedMetrics,
+                threshold: 0.7,
+                strict_mode: false,
+                custom_evaluation_steps: customEvaluationSteps,
+              };
+
+              if (judgeModelId.startsWith("azure-")) {
+                batchRequestBody.provider = "azure_openai";
+                batchRequestBody.azure_deployment =
+                  provider.deployment || provider.model;
+                batchRequestBody.azure_model_name = provider.model;
+              } else if (
+                judgeModelId === "vertex_ai_pro" ||
+                judgeModelId === "vertex_ai_lite"
+              ) {
+                batchRequestBody.provider = "vertex_ai";
+                batchRequestBody.vertex_model_name = provider.model;
+              } else if (judgeModelId.startsWith("anthropic_")) {
+                batchRequestBody.provider = "anthropic";
+                batchRequestBody.model_name = provider.model;
+              } else {
+                batchRequestBody.provider = judgeModelId;
+              }
+
+              try {
+                console.log(
+                  `[Batch] Sending ${chunkTasks.length} entities (${chunkStart + 1}–${chunkEnd}) to ${provider.name}`
+                );
+                const response = await fetchWithRetry(
+                  "/api/evaluations/evaluate/batch",
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(batchRequestBody),
+                    signal: controller.signal,
+                  }
+                );
+
+                if (!response.ok)
+                  throw new Error(
+                    `Batch API failed for ${provider.name}: ${response.status}`
+                  );
+
+                const batchResponse = await response.json();
+                const results: any[] = batchResponse.results || [];
+
+                for (let idx = 0; idx < results.length; idx++) {
+                  if (controller.signal.aborted) break;
+                  const result = results[idx];
+                  const task = chunkTasks[idx];
+
+                  if (
+                    !task ||
+                    result?.status === "error" ||
+                    result?.status === "cancelled"
+                  ) {
+                    if (result?.status === "error")
+                      console.warn(
+                        `[Batch] Entity error for ${task?.entityName}:`,
+                        result.error
+                      );
+                    completedCount++;
+                    setEvaluationProgress(
+                      Math.round((completedCount / totalTasks) * 100)
+                    );
+                    continue;
+                  }
+
+                  // Update files state
+                  setFiles((prevFiles) =>
+                    prevFiles.map((f) => {
+                      if (f.fileId !== task.fileId) return f;
+                      return {
+                        ...f,
+                        entities: f.entities.map((e: any) => {
+                          if (e.name !== task.entityName) return e;
+                          const currentExtractions = e.extractionsByModel || {};
+                          const currentSourceExtraction = currentExtractions[
+                            task.sourceModel
+                          ] || {
+                            extracted: task.extractedContent,
+                          };
+                          const currentEvalResults =
+                            currentSourceExtraction.evaluationResults || [];
+                          return {
+                            ...e,
+                            extractionsByModel: {
+                              ...currentExtractions,
+                              [task.sourceModel]: {
+                                ...currentSourceExtraction,
+                                evaluationResults: [
+                                  ...currentEvalResults.filter(
+                                    (r: any) => r.model !== result.model
+                                  ),
+                                  result,
+                                ],
+                              },
+                            },
+                          };
+                        }),
+                      };
+                    })
+                  );
+
+                  // Persist to PostgreSQL
+                  saveEvaluationResult(
+                    task.entityName,
+                    task.sourceModel,
+                    task.groundTruth,
+                    [result],
+                    undefined,
+                    task.fileId
+                  );
+
+                  completedCount++;
+                  setEvaluationProgress(
+                    Math.round((completedCount / totalTasks) * 100)
+                  );
+
+                  // 50ms stagger: Evaluating → Completed one-by-one
+                  await new Promise((r) => setTimeout(r, 50));
+                  setEvaluatingEntities((prev) => {
+                    const next = new Set(prev);
+                    next.delete(task.entityName);
+                    return next;
+                  });
+                  setCompletedEntities(
+                    (prev) => new Set([...prev, task.entityName])
+                  );
+                }
+              } catch (err: any) {
+                if (err.name === "AbortError") throw err;
+                console.error(`Error in batch eval for ${provider.name}:`, err);
+                completedCount += chunkTasks.length;
+                setEvaluationProgress(
+                  Math.round((completedCount / totalTasks) * 100)
+                );
+              }
+            }
+          )
+        );
+      }
+
+      await Promise.resolve(); // flush React state updates
+      setEvaluationProgress(100);
+
+      // Patch session status to completed
       try {
         const token = await getValidToken();
         const { getCurrentUser } = await import("../utils/authUtils");
@@ -2079,7 +2446,17 @@ export function EvaluationPage({
         });
       }
     } finally {
+      // Fire isEvaluating and evaluationComplete together so the UI
+      // never shows "Done" while the Stop button is still visible
+      const wasAborted = controller.signal.aborted;
       setIsEvaluating(false);
+      if (!wasAborted) {
+        setEvaluationComplete(true);
+        toast.success("Batch Evaluation Complete", {
+          description: `Successfully processed ${completedCount} evaluations.`,
+        });
+      }
+      abortControllerRef.current = null;
     }
   };
 
@@ -3684,7 +4061,24 @@ export function EvaluationPage({
                             (file.entities || [])
                               .filter((e: any) => e.extracted)
                               .map((entity: any) => {
-                                // Check status
+                                // Check if entity has any extraction for the selected source models
+                                const hasExtraction = (
+                                  selectedSourceModels.length > 0
+                                    ? selectedSourceModels
+                                    : availableSourceModels
+                                ).some((model) => {
+                                  const ext =
+                                    entity.extractionsByModel?.[model]
+                                      ?.extracted;
+                                  return (
+                                    ext ||
+                                    (entity.extracted &&
+                                      (availableSourceModels.length === 0 ||
+                                        model === file.selectedModel))
+                                  );
+                                });
+
+                                // Check completion status
                                 const modelsToCheck =
                                   selectedSourceModels.length > 0
                                     ? selectedSourceModels
@@ -3843,6 +4237,13 @@ export function EvaluationPage({
                                             View →
                                           </Button>
                                         </div>
+                                      ) : !hasExtraction ? (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs px-2 py-0.5 text-muted-foreground/50 border-dashed"
+                                        >
+                                          No extraction
+                                        </Badge>
                                       ) : (
                                         <Badge
                                           variant="outline"

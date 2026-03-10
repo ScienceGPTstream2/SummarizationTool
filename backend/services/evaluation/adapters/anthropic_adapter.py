@@ -76,15 +76,23 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
 
     def _extract_usage(self, message) -> Dict[str, Any]:
         usage = getattr(message, "usage", None) or {}
+
+        # Anthropic SDK returns a Pydantic Usage model — use getattr, not .get()
+        def _get(obj, *keys):
+            for k in keys:
+                v = getattr(obj, k, None)
+                if v is not None:
+                    return v
+                if hasattr(obj, "get"):
+                    v = obj.get(k)
+                    if v is not None:
+                        return v
+            return None
+
         extracted = {
-            "prompt_tokens": getattr(usage, "input_tokens", None)
-            or usage.get("input_tokens")
-            or usage.get("prompt_tokens"),
-            "completion_tokens": getattr(usage, "output_tokens", None)
-            or usage.get("output_tokens")
-            or usage.get("completion_tokens"),
-            "total_tokens": getattr(usage, "total_tokens", None)
-            or usage.get("total_tokens"),
+            "prompt_tokens": _get(usage, "input_tokens", "prompt_tokens"),
+            "completion_tokens": _get(usage, "output_tokens", "completion_tokens"),
+            "total_tokens": _get(usage, "total_tokens"),
         }
         if not extracted.get("prompt_tokens") and not extracted.get(
             "completion_tokens"
