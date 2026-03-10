@@ -209,33 +209,24 @@ export function SessionMetrics() {
     return { providerRows, modelRows, docRows, batchRows };
   }, [metrics]);
 
+  const fetchMetrics = async () => {
+    setLoading(true);
+    try {
+      const response = await authenticatedFetch("/api/server/session-metrics");
+      const data = await response.json();
+      setMetrics(data.metrics || null);
+    } catch (error) {
+      console.warn("Failed to fetch session metrics:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch once on mount for the header summary badge.
+  // No polling — data only changes during active evals/extractions.
+  // The dialog triggers a fresh fetch on open via onOpenChange.
   useEffect(() => {
-    let mounted = true;
-
-    const fetchMetrics = async () => {
-      setLoading(true);
-      try {
-        const response = await authenticatedFetch(
-          "/api/server/session-metrics"
-        );
-        const data = await response.json();
-        if (!mounted) return;
-        setMetrics(data.metrics || null);
-      } catch (error) {
-        console.warn("Failed to fetch session metrics:", error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
   }, []);
 
   const handleClear = async () => {
@@ -405,7 +396,11 @@ export function SessionMetrics() {
       </Dialog>
 
       {/* Main metrics modal */}
-      <Dialog>
+      <Dialog
+        onOpenChange={(open) => {
+          if (open) fetchMetrics();
+        }}
+      >
         <DialogTrigger asChild>
           <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
             <div className="flex flex-wrap items-center gap-3 text-sm">
