@@ -60,6 +60,9 @@ import {
   RotateCcw,
   CheckSquare,
   Square,
+  Download,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 
 import {
@@ -71,11 +74,22 @@ import {
   TableRow,
 } from "./ui/table";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+
 import { DocumentData } from "../App";
 import { getValidToken } from "../utils/authUtils";
 import { toast } from "sonner";
 import BatchResultsPage from "./BatchResultsPage";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { downloadExcelReport } from "../utils/excelExport";
+import { downloadEvaluationReport } from "../utils/wordExport";
 
 interface EvaluationPageProps {
   onBack: () => void;
@@ -2566,7 +2580,44 @@ export function EvaluationPage({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4"></div>
+          <div className="flex items-center gap-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Export Options</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="flex flex-col items-start gap-1 p-3 cursor-pointer"
+                  onClick={() => downloadExcelReport(documentData)}
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                    <span>Export to Excel</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground ml-6">
+                    Spreadsheet with extraction data and scores
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="flex flex-col items-start gap-1 p-3 cursor-pointer"
+                  onClick={() => downloadEvaluationReport(documentData)}
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <span>Export Report (Word)</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground ml-6">
+                    Formatted Word doc with summary stats
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       )}
 
