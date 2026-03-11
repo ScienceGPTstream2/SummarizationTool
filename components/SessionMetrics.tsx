@@ -404,8 +404,8 @@ export function SessionMetrics() {
               <span className="text-muted-foreground">
                 Calls: <strong>{displayMetrics.total_calls}</strong>
               </span>
-              <span className="text-xs text-muted-foreground">
-                Click for details · Use Refresh to update
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Click to view & refresh
               </span>
             </div>
           </Card>
