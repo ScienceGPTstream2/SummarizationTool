@@ -431,16 +431,18 @@ export function EvaluationPage({
         // Also tell the backend to skip any queued work for this session (fire-and-forget)
         getValidToken().then((token) => {
           if (!token) return;
-          import("../utils/session").then(({ getSessionId }) => {
-            fetch("/api/evaluations/cancel", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ session_id: getSessionId() }),
-            }).catch(() => { }); // best-effort
-          }).catch(() => { });
+          import("../utils/session")
+            .then(({ getSessionId }) => {
+              fetch("/api/evaluations/cancel", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ session_id: getSessionId() }),
+              }).catch(() => {}); // best-effort
+            })
+            .catch(() => {});
         });
         abortControllerRef.current = null;
       }
@@ -457,7 +459,7 @@ export function EvaluationPage({
     isOpen: false,
     title: "",
     description: "",
-    action: () => { },
+    action: () => {},
   });
 
   // Validation dialog state
@@ -673,8 +675,8 @@ export function EvaluationPage({
       // Also update legacy fields for backward compatibility if single file
       ...(files.length === 1
         ? {
-          entities: files[0].entities,
-        }
+            entities: files[0].entities,
+          }
         : {}),
     }));
   }, [files]);
@@ -877,13 +879,13 @@ export function EvaluationPage({
             // Include judge_model in scores to update specific judge's human_score
             scores: params.judgeModel
               ? [
-                {
-                  metric: "human_score_update",
-                  score: null,
-                  reasoning: null,
-                  judge_model: params.judgeModel,
-                },
-              ]
+                  {
+                    metric: "human_score_update",
+                    score: null,
+                    reasoning: null,
+                    judge_model: params.judgeModel,
+                  },
+                ]
               : [],
             human_score: normalizedScore,
           }),
@@ -1131,7 +1133,7 @@ export function EvaluationPage({
       ...prev,
       [metricId]:
         DEFAULT_EVALUATION_STEPS[
-        metricId as keyof typeof DEFAULT_EVALUATION_STEPS
+          metricId as keyof typeof DEFAULT_EVALUATION_STEPS
         ] || [],
     }));
   };
@@ -1707,7 +1709,7 @@ export function EvaluationPage({
           try {
             const { getSessionId } = await import("../utils/session");
             headers.set("X-Session-Id", getSessionId());
-          } catch { }
+          } catch {}
           const res = await fetch(url, { ...options, headers });
           if (res.status === 401) {
             // Token may have expired mid-eval — try refreshing once
@@ -2224,7 +2226,9 @@ export function EvaluationPage({
     await executeBatchEvaluation();
   };
 
-  const executeBatchEvaluation = async (options?: { pendingOnly?: boolean }) => {
+  const executeBatchEvaluation = async (options?: {
+    pendingOnly?: boolean;
+  }) => {
     setIsEvaluating(true);
     setEvaluationProgress(0);
     setEvaluationComplete(false);
@@ -2251,17 +2255,16 @@ export function EvaluationPage({
       }> = [];
 
       // When pendingOnly, pre-compute the set of pending file×entity pairs
-      const pendingSet = options?.pendingOnly ? new Set(
-        getPendingEntities().map((p) => `${p.fileId}::${p.entityName}`)
-      ) : null;
+      const pendingSet = options?.pendingOnly
+        ? new Set(
+            getPendingEntities().map((p) => `${p.fileId}::${p.entityName}`)
+          )
+        : null;
 
       files.forEach((file) => {
         (file.entities || []).forEach((entity: any) => {
           // Skip non-pending entities when running in pending-only mode
-          if (
-            pendingSet &&
-            !pendingSet.has(`${file.fileId}::${entity.name}`)
-          )
+          if (pendingSet && !pendingSet.has(`${file.fileId}::${entity.name}`))
             return;
 
           const groundTruth = entity.groundTruth;
@@ -2368,7 +2371,7 @@ export function EvaluationPage({
           try {
             const { getSessionId } = await import("../utils/session");
             headers.set("X-Session-Id", getSessionId());
-          } catch { }
+          } catch {}
           const res = await fetch(url, { ...options, headers });
           if (res.status === 401) {
             const newToken = await getValidToken();
@@ -3537,12 +3540,13 @@ export function EvaluationPage({
                             <Card
                               key={index}
                               id={`entity-card-${entity.name}`}
-                              className={`border-2 transition-all duration-300 ${isEvaluating
-                                ? "border-blue-400 shadow-lg"
-                                : isCompleted
-                                  ? "border-green-400"
-                                  : ""
-                                }`}
+                              className={`border-2 transition-all duration-300 ${
+                                isEvaluating
+                                  ? "border-blue-400 shadow-lg"
+                                  : isCompleted
+                                    ? "border-green-400"
+                                    : ""
+                              }`}
                             >
                               <CardHeader className="pb-3">
                                 <CardTitle className="text-lg flex items-center gap-2">
@@ -3611,7 +3615,7 @@ export function EvaluationPage({
                                         singleModeSourceModel &&
                                         entity.extractionsByModel &&
                                         !entity.extractionsByModel[
-                                        singleModeSourceModel
+                                          singleModeSourceModel
                                         ]
                                       ) {
                                         return (
@@ -3666,10 +3670,10 @@ export function EvaluationPage({
                                         m === "correctness" ||
                                         m === "completeness"
                                     ) && (
-                                        <span className="ml-2 text-xs text-orange-600 font-normal">
-                                          (required for Correctness/Completeness)
-                                        </span>
-                                      )}
+                                      <span className="ml-2 text-xs text-orange-600 font-normal">
+                                        (required for Correctness/Completeness)
+                                      </span>
+                                    )}
                                   </Label>
                                   <Textarea
                                     id={`ground-truth-${index}`}
@@ -3705,26 +3709,26 @@ export function EvaluationPage({
                                             {resolvedEvaluationResults.length}{" "}
                                             model
                                             {resolvedEvaluationResults.length >
-                                              1
+                                            1
                                               ? "s"
                                               : ""}
                                             )
                                             {resolvedEvaluationResults.length >
                                               1 && (
-                                                <span className="ml-2 text-sm font-semibold text-primary">
-                                                  Avg:{" "}
-                                                  {(
-                                                    (resolvedEvaluationResults.reduce(
-                                                      (sum: number, r: any) =>
-                                                        sum + r.aggregate_score,
-                                                      0
-                                                    ) /
-                                                      resolvedEvaluationResults.length) *
-                                                    100
-                                                  ).toFixed(1)}
-                                                  %
-                                                </span>
-                                              )}
+                                              <span className="ml-2 text-sm font-semibold text-primary">
+                                                Avg:{" "}
+                                                {(
+                                                  (resolvedEvaluationResults.reduce(
+                                                    (sum: number, r: any) =>
+                                                      sum + r.aggregate_score,
+                                                    0
+                                                  ) /
+                                                    resolvedEvaluationResults.length) *
+                                                  100
+                                                ).toFixed(1)}
+                                                %
+                                              </span>
+                                            )}
                                             {isCompleted && !isEvaluating && (
                                               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -3746,7 +3750,7 @@ export function EvaluationPage({
                                             </DialogTitle>
                                             <DialogDescription>
                                               {resolvedEvaluationResults.length >
-                                                1 ? (
+                                              1 ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                   <span>
                                                     Compare how different LLM
@@ -3844,7 +3848,7 @@ export function EvaluationPage({
                                                         <p className="text-sm text-blue-800 leading-relaxed">
                                                           {
                                                             metricDefinitions[
-                                                            metricName
+                                                              metricName
                                                             ]
                                                           }
                                                         </p>
@@ -3885,7 +3889,7 @@ export function EvaluationPage({
                                                                         "Entity Extraction ",
                                                                         ""
                                                                       ) ===
-                                                                      metricName ||
+                                                                        metricName ||
                                                                       m.metric_name
                                                                         .toLowerCase()
                                                                         .includes(
@@ -3926,36 +3930,39 @@ export function EvaluationPage({
 
                                                         return (
                                                           <div
-                                                            className={`border rounded-lg p-4 ${avgPercentage >=
+                                                            className={`border rounded-lg p-4 ${
+                                                              avgPercentage >=
                                                               70
-                                                              ? "bg-green-50 border-green-200"
-                                                              : avgPercentage >=
-                                                                50
-                                                                ? "bg-yellow-50 border-yellow-200"
-                                                                : "bg-red-50 border-red-200"
-                                                              }`}
+                                                                ? "bg-green-50 border-green-200"
+                                                                : avgPercentage >=
+                                                                    50
+                                                                  ? "bg-yellow-50 border-yellow-200"
+                                                                  : "bg-red-50 border-red-200"
+                                                            }`}
                                                           >
                                                             <div className="flex items-center justify-between">
                                                               <div className="flex items-center gap-2">
                                                                 <BarChart3
-                                                                  className={`h-5 w-5 ${avgPercentage >=
+                                                                  className={`h-5 w-5 ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-600"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-600"
-                                                                      : "text-red-600"
-                                                                    }`}
+                                                                      ? "text-green-600"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-600"
+                                                                        : "text-red-600"
+                                                                  }`}
                                                                 />
                                                                 <span
-                                                                  className={`font-semibold ${avgPercentage >=
+                                                                  className={`font-semibold ${
+                                                                    avgPercentage >=
                                                                     70
-                                                                    ? "text-green-900"
-                                                                    : avgPercentage >=
-                                                                      50
-                                                                      ? "text-yellow-900"
-                                                                      : "text-red-900"
-                                                                    }`}
+                                                                      ? "text-green-900"
+                                                                      : avgPercentage >=
+                                                                          50
+                                                                        ? "text-yellow-900"
+                                                                        : "text-red-900"
+                                                                  }`}
                                                                 >
                                                                   Average{" "}
                                                                   {metricName}{" "}
@@ -3964,14 +3971,15 @@ export function EvaluationPage({
                                                                 </span>
                                                               </div>
                                                               <span
-                                                                className={`text-2xl font-bold ${avgPercentage >=
+                                                                className={`text-2xl font-bold ${
+                                                                  avgPercentage >=
                                                                   70
-                                                                  ? "text-green-700"
-                                                                  : avgPercentage >=
-                                                                    50
-                                                                    ? "text-yellow-700"
-                                                                    : "text-red-700"
-                                                                  }`}
+                                                                    ? "text-green-700"
+                                                                    : avgPercentage >=
+                                                                        50
+                                                                      ? "text-yellow-700"
+                                                                      : "text-red-700"
+                                                                }`}
                                                               >
                                                                 {avgPercentage.toFixed(
                                                                   1
@@ -3980,14 +3988,15 @@ export function EvaluationPage({
                                                               </span>
                                                             </div>
                                                             <p
-                                                              className={`text-xs mt-2 ${avgPercentage >=
+                                                              className={`text-xs mt-2 ${
+                                                                avgPercentage >=
                                                                 70
-                                                                ? "text-green-700"
-                                                                : avgPercentage >=
-                                                                  50
-                                                                  ? "text-yellow-700"
-                                                                  : "text-red-700"
-                                                                }`}
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                      50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                              }`}
                                                             >
                                                               Based on
                                                               evaluations from{" "}
@@ -3996,7 +4005,7 @@ export function EvaluationPage({
                                                               }{" "}
                                                               model
                                                               {metricScores.length >
-                                                                1
+                                                              1
                                                                 ? "s"
                                                                 : ""}
                                                             </p>
@@ -4199,7 +4208,9 @@ export function EvaluationPage({
                         });
 
                       const singlePendingCount = singlePendingEntities.length;
-                      const singleHasResults = (currentFile.entities || []).some(
+                      const singleHasResults = (
+                        currentFile.entities || []
+                      ).some(
                         (e: any) =>
                           (e.evaluationResults &&
                             e.evaluationResults.length > 0) ||
@@ -4264,7 +4275,9 @@ export function EvaluationPage({
                             );
 
                           const pendingEntityNames = new Set<string>(
-                            singlePendingEntities.map((e: any) => e.name as string)
+                            singlePendingEntities.map(
+                              (e: any) => e.name as string
+                            )
                           );
                           setEvaluatingEntities(pendingEntityNames);
 
@@ -4280,7 +4293,9 @@ export function EvaluationPage({
                             backoff = 1000
                           ): Promise<Response> => {
                             try {
-                              const headers = new Headers(options.headers || {});
+                              const headers = new Headers(
+                                options.headers || {}
+                              );
                               headers.set(
                                 "Authorization",
                                 `Bearer ${evalToken}`
@@ -4380,7 +4395,9 @@ export function EvaluationPage({
                               ) {
                                 requestBody.provider = "vertex_ai";
                                 requestBody.vertex_model_name = provider.model;
-                              } else if (judgeModelId.startsWith("anthropic_")) {
+                              } else if (
+                                judgeModelId.startsWith("anthropic_")
+                              ) {
                                 requestBody.provider = "anthropic";
                                 requestBody.model_name = provider.model;
                               }
@@ -4428,7 +4445,7 @@ export function EvaluationPage({
                                                 (r: any) =>
                                                   !(
                                                     r.provider ===
-                                                    result.provider &&
+                                                      result.provider &&
                                                     r.model === result.model
                                                   )
                                               ),
@@ -4451,18 +4468,18 @@ export function EvaluationPage({
                                                 extByModel[
                                                   sourceModel
                                                 ].evaluationResults = [
-                                                    ...extByModel[
-                                                      sourceModel
-                                                    ].evaluationResults.filter(
-                                                      (r: any) =>
-                                                        !(
-                                                          r.provider ===
+                                                  ...extByModel[
+                                                    sourceModel
+                                                  ].evaluationResults.filter(
+                                                    (r: any) =>
+                                                      !(
+                                                        r.provider ===
                                                           result.provider &&
-                                                          r.model === result.model
-                                                        )
-                                                    ),
-                                                    newResult,
-                                                  ];
+                                                        r.model === result.model
+                                                      )
+                                                  ),
+                                                  newResult,
+                                                ];
                                               }
                                             }
                                             if (
@@ -4585,8 +4602,9 @@ export function EvaluationPage({
                                   <Play className="h-5 w-5 mr-2" />
                                   {singleHasResults
                                     ? "Rerun All"
-                                    : `Run Evaluation for This PDF with ${selectedProviders.length} LLM Judge${selectedProviders.length > 1 ? "s" : ""
-                                    }`}
+                                    : `Run Evaluation for This PDF with ${selectedProviders.length} LLM Judge${
+                                        selectedProviders.length > 1 ? "s" : ""
+                                      }`}
                                 </>
                               )}
                             </Button>
@@ -4612,20 +4630,26 @@ export function EvaluationPage({
 
                           {!isEvaluating && (
                             <p className="text-sm text-muted-foreground text-center mt-3">
-                              {singlePendingCount > 0 && singleHasResults
-                                ? `${singlePendingCount} entity(ies) pending evaluation`
-                                : <>Evaluating{" "}
+                              {singlePendingCount > 0 && singleHasResults ? (
+                                `${singlePendingCount} entity(ies) pending evaluation`
+                              ) : (
+                                <>
+                                  Evaluating{" "}
                                   {
                                     (currentFile.entities || []).filter(
                                       (e: any) => e.extracted
                                     ).length
                                   }{" "}
-                                  entities from "{currentFile.file?.name || "current document"}" with{" "}
-                                  {selectedMetrics.length} metric
-                                  {selectedMetrics.length > 1 ? "s" : ""} using{" "}
-                                  {selectedProviders.length} LLM judge
+                                  entities from "
+                                  {currentFile.file?.name || "current document"}
+                                  " with {selectedMetrics.length} metric
+                                  {selectedMetrics.length > 1
+                                    ? "s"
+                                    : ""} using {selectedProviders.length} LLM
+                                  judge
                                   {selectedProviders.length > 1 ? "s" : ""}
-                                </>}
+                                </>
+                              )}
                             </p>
                           )}
                         </>
@@ -4732,7 +4756,7 @@ export function EvaluationPage({
                                                 // Special cases for Vertex AI
                                                 if (
                                                   judgeId ===
-                                                  "vertex_ai_lite" &&
+                                                    "vertex_ai_lite" &&
                                                   r.model.includes("flash-lite")
                                                 )
                                                   return true;
@@ -4744,7 +4768,7 @@ export function EvaluationPage({
                                                   return true;
                                                 if (
                                                   judgeId ===
-                                                  "vertex_ai_3_pro" &&
+                                                    "vertex_ai_3_pro" &&
                                                   r.model.includes(
                                                     "gemini-2.5-pro"
                                                   )
@@ -4882,8 +4906,7 @@ export function EvaluationPage({
                             e.evaluationResults?.length > 0 ||
                             (e.extractionsByModel &&
                               Object.values(e.extractionsByModel).some(
-                                (ext: any) =>
-                                  ext.evaluationResults?.length > 0
+                                (ext: any) => ext.evaluationResults?.length > 0
                               ))
                         )
                       );
@@ -4891,24 +4914,26 @@ export function EvaluationPage({
                         <>
                           <div className="flex gap-3 flex-wrap">
                             {/* Run Pending Button - only shown when there are pending entities AND some already have results */}
-                            {pendingCount > 0 && hasAnyResults && !isEvaluating && (
-                              <Button
-                                type="button"
-                                onClick={handleRunPendingBatchEvaluation}
-                                disabled={
-                                  isEvaluating ||
-                                  selectedMetrics.length === 0 ||
-                                  selectedProviders.length === 0 ||
-                                  selectedSourceModels.length === 0
-                                }
-                                variant="default"
-                                size="lg"
-                                className="flex-1"
-                              >
-                                <Play className="h-5 w-5 mr-2" />
-                                Run Pending ({pendingCount})
-                              </Button>
-                            )}
+                            {pendingCount > 0 &&
+                              hasAnyResults &&
+                              !isEvaluating && (
+                                <Button
+                                  type="button"
+                                  onClick={handleRunPendingBatchEvaluation}
+                                  disabled={
+                                    isEvaluating ||
+                                    selectedMetrics.length === 0 ||
+                                    selectedProviders.length === 0 ||
+                                    selectedSourceModels.length === 0
+                                  }
+                                  variant="default"
+                                  size="lg"
+                                  className="flex-1"
+                                >
+                                  <Play className="h-5 w-5 mr-2" />
+                                  Run Pending ({pendingCount})
+                                </Button>
+                              )}
 
                             {/* Rerun/Run All Button */}
                             <Button
