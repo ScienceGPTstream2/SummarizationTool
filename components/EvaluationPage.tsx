@@ -423,6 +423,30 @@ export function EvaluationPage({
   // Abort controller for stopping evaluation
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Cancel any in-flight evaluation if the component unmounts (e.g. user navigates back)
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        // Also tell the backend to skip any queued work for this session (fire-and-forget)
+        getValidToken().then((token) => {
+          if (!token) return;
+          import("../utils/session").then(({ getSessionId }) => {
+            fetch("/api/evaluations/cancel", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ session_id: getSessionId() }),
+            }).catch(() => { }); // best-effort
+          }).catch(() => { });
+        });
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
   // Confirmation dialog state
   const [confirmationDialog, setConfirmationDialog] = useState<{
     isOpen: boolean;
@@ -433,7 +457,7 @@ export function EvaluationPage({
     isOpen: false,
     title: "",
     description: "",
-    action: () => {},
+    action: () => { },
   });
 
   // Validation dialog state
@@ -649,8 +673,8 @@ export function EvaluationPage({
       // Also update legacy fields for backward compatibility if single file
       ...(files.length === 1
         ? {
-            entities: files[0].entities,
-          }
+          entities: files[0].entities,
+        }
         : {}),
     }));
   }, [files]);
@@ -853,13 +877,13 @@ export function EvaluationPage({
             // Include judge_model in scores to update specific judge's human_score
             scores: params.judgeModel
               ? [
-                  {
-                    metric: "human_score_update",
-                    score: null,
-                    reasoning: null,
-                    judge_model: params.judgeModel,
-                  },
-                ]
+                {
+                  metric: "human_score_update",
+                  score: null,
+                  reasoning: null,
+                  judge_model: params.judgeModel,
+                },
+              ]
               : [],
             human_score: normalizedScore,
           }),
@@ -1107,7 +1131,7 @@ export function EvaluationPage({
       ...prev,
       [metricId]:
         DEFAULT_EVALUATION_STEPS[
-          metricId as keyof typeof DEFAULT_EVALUATION_STEPS
+        metricId as keyof typeof DEFAULT_EVALUATION_STEPS
         ] || [],
     }));
   };
@@ -1683,7 +1707,7 @@ export function EvaluationPage({
           try {
             const { getSessionId } = await import("../utils/session");
             headers.set("X-Session-Id", getSessionId());
-          } catch {}
+          } catch { }
           const res = await fetch(url, { ...options, headers });
           if (res.status === 401) {
             // Token may have expired mid-eval — try refreshing once
@@ -2019,6 +2043,118 @@ export function EvaluationPage({
     }
   };
 
+  // Helper: determine which file×entity pairs are "pending" (have extraction but no eval results
+  // for ALL of the currently-selected source-models × judge providers).
+  const getPendingEntities = () => {
+    const pending: Array<{ fileId: string; entityName: string }> = [];
+
+    files.forEach((file) => {
+      (file.entities || []).forEach((entity: any) => {
+        const modelsToCheck =
+          selectedSourceModels.length > 0
+            ? selectedSourceModels
+            : availableSourceModels;
+
+        const isPending = modelsToCheck.some((sourceModelId) => {
+          const extraction =
+            entity.extractionsByModel?.[sourceModelId]?.extracted ||
+            (file.selectedModel === sourceModelId ? entity.extracted : null);
+          if (!extraction) return false; // no extraction → not pending, skip
+
+          const evalResults =
+            entity.extractionsByModel?.[sourceModelId]?.evaluationResults ||
+            (file.selectedModel === sourceModelId
+              ? entity.evaluationResults
+              : []) ||
+            [];
+
+          if (evalResults.length === 0) return true; // no results at all → pending
+
+          // If providers are selected, check that ALL chosen judges have a result
+          if (selectedProviders.length > 0) {
+            return !selectedProviders.every((judgeId) =>
+              evalResults.some((r: any) => {
+                if (!r.model) return false;
+                const provider = allProviders.find((p) => p.id === judgeId);
+                if (provider && r.model === provider.model) return true;
+                if (r.model === judgeId) return true;
+                if (judgeId.toLowerCase().includes(r.model.toLowerCase()))
+                  return true;
+                if (
+                  judgeId === "vertex_ai_lite" &&
+                  r.model.includes("flash-lite")
+                )
+                  return true;
+                if (
+                  judgeId === "vertex_ai_pro" &&
+                  r.model.includes("gemini") &&
+                  r.model.includes("pro")
+                )
+                  return true;
+                return false;
+              })
+            );
+          }
+          return false;
+        });
+
+        if (isPending) {
+          pending.push({ fileId: file.fileId, entityName: entity.name });
+        }
+      });
+    });
+
+    return pending;
+  };
+
+  const handleRunPendingBatchEvaluation = async () => {
+    const pending = getPendingEntities();
+    if (pending.length === 0) {
+      toast("No pending entities", {
+        description: "All entities already have evaluation results.",
+      });
+      return;
+    }
+
+    // Validate ground truth if required
+    const requiresGroundTruth =
+      selectedMetrics.includes("correctness") ||
+      selectedMetrics.includes("completeness");
+    if (requiresGroundTruth) {
+      const missingGroundTruth: { fileName: string; entityName: string }[] = [];
+      pending.forEach(({ fileId, entityName }) => {
+        const file = files.find((f) => f.fileId === fileId);
+        const entity = (file?.entities || []).find(
+          (e: any) => e.name === entityName
+        );
+        if (!entity?.groundTruth?.trim()) {
+          missingGroundTruth.push({
+            fileName: file?.file?.name || "Unknown File",
+            entityName,
+          });
+        }
+      });
+      if (missingGroundTruth.length > 0) {
+        const entityList = missingGroundTruth
+          .slice(0, 5)
+          .map((e) => `${e.entityName} (${e.fileName})`);
+        const moreCount = missingGroundTruth.length - 5;
+        setValidationMessage({
+          title: "Ground Truth Required",
+          description: `Correctness and/or Completeness metrics require ground truth data for comparison. The following pending entities are missing ground truth:`,
+          missingEntities:
+            moreCount > 0
+              ? [...entityList, `...and ${moreCount} more`]
+              : entityList,
+        });
+        setShowValidationDialog(true);
+        return;
+      }
+    }
+
+    await executeBatchEvaluation({ pendingOnly: true });
+  };
+
   const handleRunBatchEvaluation = async () => {
     // Check if correctness or completeness metrics are selected (require ground truth)
     const requiresGroundTruth =
@@ -2088,7 +2224,7 @@ export function EvaluationPage({
     await executeBatchEvaluation();
   };
 
-  const executeBatchEvaluation = async () => {
+  const executeBatchEvaluation = async (options?: { pendingOnly?: boolean }) => {
     setIsEvaluating(true);
     setEvaluationProgress(0);
     setEvaluationComplete(false);
@@ -2114,8 +2250,20 @@ export function EvaluationPage({
         judgeModel: string;
       }> = [];
 
+      // When pendingOnly, pre-compute the set of pending file×entity pairs
+      const pendingSet = options?.pendingOnly ? new Set(
+        getPendingEntities().map((p) => `${p.fileId}::${p.entityName}`)
+      ) : null;
+
       files.forEach((file) => {
         (file.entities || []).forEach((entity: any) => {
+          // Skip non-pending entities when running in pending-only mode
+          if (
+            pendingSet &&
+            !pendingSet.has(`${file.fileId}::${entity.name}`)
+          )
+            return;
+
           const groundTruth = entity.groundTruth;
 
           selectedSourceModels.forEach((sourceModelId) => {
@@ -2130,6 +2278,42 @@ export function EvaluationPage({
 
             if (extraction) {
               selectedProviders.forEach((judgeModelId) => {
+                // In pending-only mode, also skip source-model×judge combos that already have results
+                if (options?.pendingOnly && judgeModelId) {
+                  const evalResults =
+                    entity.extractionsByModel?.[sourceModelId]
+                      ?.evaluationResults ||
+                    (file.selectedModel === sourceModelId
+                      ? entity.evaluationResults
+                      : []) ||
+                    [];
+                  const provider = allProviders.find(
+                    (p) => p.id === judgeModelId
+                  );
+                  const alreadyDone = evalResults.some((r: any) => {
+                    if (!r.model) return false;
+                    if (provider && r.model === provider.model) return true;
+                    if (r.model === judgeModelId) return true;
+                    if (
+                      judgeModelId.toLowerCase().includes(r.model.toLowerCase())
+                    )
+                      return true;
+                    if (
+                      judgeModelId === "vertex_ai_lite" &&
+                      r.model.includes("flash-lite")
+                    )
+                      return true;
+                    if (
+                      judgeModelId === "vertex_ai_pro" &&
+                      r.model.includes("gemini") &&
+                      r.model.includes("pro")
+                    )
+                      return true;
+                    return false;
+                  });
+                  if (alreadyDone) return; // skip already-evaluated combo
+                }
+
                 tasks.push({
                   fileId: file.fileId,
                   fileName: file.file?.name || "Unknown",
@@ -2184,7 +2368,7 @@ export function EvaluationPage({
           try {
             const { getSessionId } = await import("../utils/session");
             headers.set("X-Session-Id", getSessionId());
-          } catch {}
+          } catch { }
           const res = await fetch(url, { ...options, headers });
           if (res.status === 401) {
             const newToken = await getValidToken();
@@ -2216,7 +2400,6 @@ export function EvaluationPage({
       // 2. Group tasks by judge model for provider config lookup.
       //    tasksByJudge[judgeId] has the same entities in the same order
       //    for each judge (just with a different judgeModel field).
-      const allProviders = [...azureModels, ...STATIC_EVAL_PROVIDERS];
       const tasksByJudge = new Map<string, typeof tasks>();
       for (const task of tasks) {
         if (!tasksByJudge.has(task.judgeModel))
@@ -3354,13 +3537,12 @@ export function EvaluationPage({
                             <Card
                               key={index}
                               id={`entity-card-${entity.name}`}
-                              className={`border-2 transition-all duration-300 ${
-                                isEvaluating
-                                  ? "border-blue-400 shadow-lg"
-                                  : isCompleted
-                                    ? "border-green-400"
-                                    : ""
-                              }`}
+                              className={`border-2 transition-all duration-300 ${isEvaluating
+                                ? "border-blue-400 shadow-lg"
+                                : isCompleted
+                                  ? "border-green-400"
+                                  : ""
+                                }`}
                             >
                               <CardHeader className="pb-3">
                                 <CardTitle className="text-lg flex items-center gap-2">
@@ -3429,7 +3611,7 @@ export function EvaluationPage({
                                         singleModeSourceModel &&
                                         entity.extractionsByModel &&
                                         !entity.extractionsByModel[
-                                          singleModeSourceModel
+                                        singleModeSourceModel
                                         ]
                                       ) {
                                         return (
@@ -3484,10 +3666,10 @@ export function EvaluationPage({
                                         m === "correctness" ||
                                         m === "completeness"
                                     ) && (
-                                      <span className="ml-2 text-xs text-orange-600 font-normal">
-                                        (required for Correctness/Completeness)
-                                      </span>
-                                    )}
+                                        <span className="ml-2 text-xs text-orange-600 font-normal">
+                                          (required for Correctness/Completeness)
+                                        </span>
+                                      )}
                                   </Label>
                                   <Textarea
                                     id={`ground-truth-${index}`}
@@ -3523,26 +3705,26 @@ export function EvaluationPage({
                                             {resolvedEvaluationResults.length}{" "}
                                             model
                                             {resolvedEvaluationResults.length >
-                                            1
+                                              1
                                               ? "s"
                                               : ""}
                                             )
                                             {resolvedEvaluationResults.length >
                                               1 && (
-                                              <span className="ml-2 text-sm font-semibold text-primary">
-                                                Avg:{" "}
-                                                {(
-                                                  (resolvedEvaluationResults.reduce(
-                                                    (sum: number, r: any) =>
-                                                      sum + r.aggregate_score,
-                                                    0
-                                                  ) /
-                                                    resolvedEvaluationResults.length) *
-                                                  100
-                                                ).toFixed(1)}
-                                                %
-                                              </span>
-                                            )}
+                                                <span className="ml-2 text-sm font-semibold text-primary">
+                                                  Avg:{" "}
+                                                  {(
+                                                    (resolvedEvaluationResults.reduce(
+                                                      (sum: number, r: any) =>
+                                                        sum + r.aggregate_score,
+                                                      0
+                                                    ) /
+                                                      resolvedEvaluationResults.length) *
+                                                    100
+                                                  ).toFixed(1)}
+                                                  %
+                                                </span>
+                                              )}
                                             {isCompleted && !isEvaluating && (
                                               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -3564,7 +3746,7 @@ export function EvaluationPage({
                                             </DialogTitle>
                                             <DialogDescription>
                                               {resolvedEvaluationResults.length >
-                                              1 ? (
+                                                1 ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                   <span>
                                                     Compare how different LLM
@@ -3662,7 +3844,7 @@ export function EvaluationPage({
                                                         <p className="text-sm text-blue-800 leading-relaxed">
                                                           {
                                                             metricDefinitions[
-                                                              metricName
+                                                            metricName
                                                             ]
                                                           }
                                                         </p>
@@ -3703,7 +3885,7 @@ export function EvaluationPage({
                                                                         "Entity Extraction ",
                                                                         ""
                                                                       ) ===
-                                                                        metricName ||
+                                                                      metricName ||
                                                                       m.metric_name
                                                                         .toLowerCase()
                                                                         .includes(
@@ -3744,39 +3926,36 @@ export function EvaluationPage({
 
                                                         return (
                                                           <div
-                                                            className={`border rounded-lg p-4 ${
-                                                              avgPercentage >=
+                                                            className={`border rounded-lg p-4 ${avgPercentage >=
                                                               70
-                                                                ? "bg-green-50 border-green-200"
-                                                                : avgPercentage >=
-                                                                    50
-                                                                  ? "bg-yellow-50 border-yellow-200"
-                                                                  : "bg-red-50 border-red-200"
-                                                            }`}
+                                                              ? "bg-green-50 border-green-200"
+                                                              : avgPercentage >=
+                                                                50
+                                                                ? "bg-yellow-50 border-yellow-200"
+                                                                : "bg-red-50 border-red-200"
+                                                              }`}
                                                           >
                                                             <div className="flex items-center justify-between">
                                                               <div className="flex items-center gap-2">
                                                                 <BarChart3
-                                                                  className={`h-5 w-5 ${
-                                                                    avgPercentage >=
+                                                                  className={`h-5 w-5 ${avgPercentage >=
                                                                     70
-                                                                      ? "text-green-600"
-                                                                      : avgPercentage >=
-                                                                          50
-                                                                        ? "text-yellow-600"
-                                                                        : "text-red-600"
-                                                                  }`}
+                                                                    ? "text-green-600"
+                                                                    : avgPercentage >=
+                                                                      50
+                                                                      ? "text-yellow-600"
+                                                                      : "text-red-600"
+                                                                    }`}
                                                                 />
                                                                 <span
-                                                                  className={`font-semibold ${
-                                                                    avgPercentage >=
+                                                                  className={`font-semibold ${avgPercentage >=
                                                                     70
-                                                                      ? "text-green-900"
-                                                                      : avgPercentage >=
-                                                                          50
-                                                                        ? "text-yellow-900"
-                                                                        : "text-red-900"
-                                                                  }`}
+                                                                    ? "text-green-900"
+                                                                    : avgPercentage >=
+                                                                      50
+                                                                      ? "text-yellow-900"
+                                                                      : "text-red-900"
+                                                                    }`}
                                                                 >
                                                                   Average{" "}
                                                                   {metricName}{" "}
@@ -3785,15 +3964,14 @@ export function EvaluationPage({
                                                                 </span>
                                                               </div>
                                                               <span
-                                                                className={`text-2xl font-bold ${
-                                                                  avgPercentage >=
+                                                                className={`text-2xl font-bold ${avgPercentage >=
                                                                   70
-                                                                    ? "text-green-700"
-                                                                    : avgPercentage >=
-                                                                        50
-                                                                      ? "text-yellow-700"
-                                                                      : "text-red-700"
-                                                                }`}
+                                                                  ? "text-green-700"
+                                                                  : avgPercentage >=
+                                                                    50
+                                                                    ? "text-yellow-700"
+                                                                    : "text-red-700"
+                                                                  }`}
                                                               >
                                                                 {avgPercentage.toFixed(
                                                                   1
@@ -3802,15 +3980,14 @@ export function EvaluationPage({
                                                               </span>
                                                             </div>
                                                             <p
-                                                              className={`text-xs mt-2 ${
-                                                                avgPercentage >=
+                                                              className={`text-xs mt-2 ${avgPercentage >=
                                                                 70
-                                                                  ? "text-green-700"
-                                                                  : avgPercentage >=
-                                                                      50
-                                                                    ? "text-yellow-700"
-                                                                    : "text-red-700"
-                                                              }`}
+                                                                ? "text-green-700"
+                                                                : avgPercentage >=
+                                                                  50
+                                                                  ? "text-yellow-700"
+                                                                  : "text-red-700"
+                                                                }`}
                                                             >
                                                               Based on
                                                               evaluations from{" "}
@@ -3819,7 +3996,7 @@ export function EvaluationPage({
                                                               }{" "}
                                                               model
                                                               {metricScores.length >
-                                                              1
+                                                                1
                                                                 ? "s"
                                                                 : ""}
                                                             </p>
@@ -3969,64 +4146,491 @@ export function EvaluationPage({
                 {/* Run Evaluation Button (Single) */}
                 <Card>
                   <CardContent className="pt-6">
-                    <Button
-                      type="button"
-                      onClick={handleRunEvaluation}
-                      disabled={
-                        isEvaluating ||
-                        evaluatingEntities.size > 0 ||
-                        selectedMetrics.length === 0 ||
-                        selectedProviders.length === 0
-                      }
-                      className="w-full"
-                      size="lg"
-                    >
-                      {isEvaluating ? (
-                        <>
-                          <Sparkles className="h-5 w-5 mr-2 animate-spin" />
-                          Running Evaluation... {evaluationProgress}%
-                        </>
-                      ) : (
-                        <>
-                          <Play className="h-5 w-5 mr-2" />
-                          Run Evaluation for This PDF with{" "}
-                          {selectedProviders.length} LLM Judge
-                          {selectedProviders.length > 1 ? "s" : ""}
-                        </>
-                      )}
-                    </Button>
+                    {(() => {
+                      // Count pending entities for THIS file in single mode
+                      const singlePendingEntities = (currentFile.entities || [])
+                        .filter((e: any) => e.extracted)
+                        .filter((entity: any) => {
+                          const sourceModel =
+                            singleModeSourceModel ||
+                            currentFile.selectedModel ||
+                            (entity.extractionsByModel
+                              ? Object.keys(entity.extractionsByModel)[0]
+                              : undefined);
+                          const evalResults =
+                            (sourceModel &&
+                              entity.extractionsByModel?.[sourceModel]
+                                ?.evaluationResults) ||
+                            entity.evaluationResults ||
+                            [];
+                          if (evalResults.length === 0) return true;
+                          if (selectedProviders.length > 0) {
+                            return !selectedProviders.every((judgeId) =>
+                              evalResults.some((r: any) => {
+                                if (!r.model) return false;
+                                const provider = allProviders.find(
+                                  (p) => p.id === judgeId
+                                );
+                                if (provider && r.model === provider.model)
+                                  return true;
+                                if (r.model === judgeId) return true;
+                                if (
+                                  judgeId
+                                    .toLowerCase()
+                                    .includes(r.model.toLowerCase())
+                                )
+                                  return true;
+                                if (
+                                  judgeId === "vertex_ai_lite" &&
+                                  r.model.includes("flash-lite")
+                                )
+                                  return true;
+                                if (
+                                  judgeId === "vertex_ai_pro" &&
+                                  r.model.includes("gemini") &&
+                                  r.model.includes("pro")
+                                )
+                                  return true;
+                                return false;
+                              })
+                            );
+                          }
+                          return false;
+                        });
 
-                    {isEvaluating && (
-                      <div className="mt-4 space-y-2">
-                        <Progress value={evaluationProgress} className="h-2" />
-                        <p className="text-xs text-muted-foreground text-center">
-                          {completedEntities.size} of{" "}
-                          {
-                            (currentFile.entities || []).filter(
-                              (e: any) => e.extracted
-                            ).length
-                          }{" "}
-                          entities completed
-                        </p>
-                      </div>
-                    )}
+                      const singlePendingCount = singlePendingEntities.length;
+                      const singleHasResults = (currentFile.entities || []).some(
+                        (e: any) =>
+                          (e.evaluationResults &&
+                            e.evaluationResults.length > 0) ||
+                          (e.extractionsByModel &&
+                            Object.values(e.extractionsByModel).some(
+                              (ext: any) =>
+                                (ext as any).evaluationResults?.length > 0
+                            ))
+                      );
 
-                    {!isEvaluating && (
-                      <p className="text-sm text-muted-foreground text-center mt-3">
-                        Evaluating{" "}
-                        {
-                          (currentFile.entities || []).filter(
-                            (e: any) => e.extracted
-                          ).length
-                        }{" "}
-                        entities from "
-                        {currentFile.file?.name || "current document"}" with{" "}
-                        {selectedMetrics.length} metric
-                        {selectedMetrics.length > 1 ? "s" : ""} using{" "}
-                        {selectedProviders.length} LLM judge
-                        {selectedProviders.length > 1 ? "s" : ""}
-                      </p>
-                    )}
+                      const handleRunPendingSingle = async () => {
+                        if (singlePendingCount === 0) return;
+
+                        // Validate ground truth if required
+                        if (
+                          selectedMetrics.includes("correctness") ||
+                          selectedMetrics.includes("completeness")
+                        ) {
+                          const missing = singlePendingEntities.filter(
+                            (e: any) => !entityGroundTruths[e.name]?.trim()
+                          );
+                          if (missing.length > 0) {
+                            setValidationMessage({
+                              title: "Ground Truth Required",
+                              description: `Correctness/Completeness metrics require ground truth. The following pending entities are missing it:`,
+                              missingEntities: missing
+                                .slice(0, 5)
+                                .map((e: any) => e.name),
+                            });
+                            setShowValidationDialog(true);
+                            return;
+                          }
+                        }
+
+                        if (selectedProviders.length === 0) {
+                          setValidationMessage({
+                            title: "No Evaluation Provider Selected",
+                            description:
+                              "Please select at least one LLM judge to run evaluation.",
+                            missingEntities: [],
+                          });
+                          setShowValidationDialog(true);
+                          return;
+                        }
+
+                        setIsEvaluating(true);
+                        setEvaluationProgress(0);
+                        setEvaluatingEntities(new Set());
+                        setCompletedEntities(new Set());
+
+                        hasUserEditedGroundTruthRef.current = true;
+                        await saveGroundTruthsToSession();
+
+                        const controller = new AbortController();
+                        abortControllerRef.current = controller;
+
+                        try {
+                          const token = await getValidToken();
+                          if (!token)
+                            throw new Error(
+                              "No valid session — please refresh and try again"
+                            );
+
+                          const pendingEntityNames = new Set<string>(
+                            singlePendingEntities.map((e: any) => e.name as string)
+                          );
+                          setEvaluatingEntities(pendingEntityNames);
+
+                          let evalToken = token;
+                          let completedCountLocal = 0;
+                          const totalTasks =
+                            singlePendingCount * selectedProviders.length;
+
+                          const fetchWithRetry = async (
+                            url: string,
+                            options: any,
+                            retries = 3,
+                            backoff = 1000
+                          ): Promise<Response> => {
+                            try {
+                              const headers = new Headers(options.headers || {});
+                              headers.set(
+                                "Authorization",
+                                `Bearer ${evalToken}`
+                              );
+                              const res = await fetch(url, {
+                                ...options,
+                                headers,
+                              });
+                              if (res.status === 401) {
+                                const newToken = await getValidToken();
+                                if (newToken) {
+                                  evalToken = newToken;
+                                  headers.set(
+                                    "Authorization",
+                                    `Bearer ${evalToken}`
+                                  );
+                                  return fetch(url, { ...options, headers });
+                                }
+                                throw new Error("Authentication failed (401)");
+                              }
+                              if (res.status === 429) {
+                                if (retries <= 0)
+                                  throw new Error("Rate limit exceeded (429)");
+                                const waitTime = backoff;
+                                await new Promise((r) =>
+                                  setTimeout(r, waitTime)
+                                );
+                                return fetchWithRetry(
+                                  url,
+                                  options,
+                                  retries - 1,
+                                  backoff * 2
+                                );
+                              }
+                              return res;
+                            } catch (err: any) {
+                              if (err.name === "AbortError") throw err;
+                              if (retries <= 0) throw err;
+                              await new Promise((r) => setTimeout(r, backoff));
+                              return fetchWithRetry(
+                                url,
+                                options,
+                                retries - 1,
+                                backoff * 2
+                              );
+                            }
+                          };
+
+                          const localAllProviders = [
+                            ...azureModels,
+                            ...STATIC_EVAL_PROVIDERS,
+                          ];
+
+                          // For each pending entity, evaluate with all selected judges
+                          for (const entity of singlePendingEntities) {
+                            if (controller.signal.aborted) break;
+
+                            const sourceModel =
+                              singleModeSourceModel ||
+                              currentFile.selectedModel ||
+                              (entity.extractionsByModel
+                                ? Object.keys(entity.extractionsByModel)[0]
+                                : undefined) ||
+                              "unknown";
+                            const extractedText =
+                              entity.extractionsByModel?.[sourceModel]
+                                ?.extracted || entity.extracted;
+                            if (!extractedText) continue;
+
+                            for (const judgeModelId of selectedProviders) {
+                              if (controller.signal.aborted) break;
+
+                              const provider = localAllProviders.find(
+                                (p) => p.id === judgeModelId
+                              );
+                              if (!provider) continue;
+
+                              const requestBody: any = {
+                                entity_name: entity.name,
+                                extraction_prompt: entity.prompt,
+                                actual_output: extractedText,
+                                expected_output:
+                                  entityGroundTruths[entity.name] || undefined,
+                                metrics: selectedMetrics,
+                                threshold: 0.7,
+                                custom_evaluation_steps: customEvaluationSteps,
+                              };
+
+                              if (judgeModelId.startsWith("azure-")) {
+                                requestBody.provider = "azure_openai";
+                                requestBody.azure_deployment =
+                                  provider.deployment || provider.model;
+                                requestBody.azure_model_name = provider.model;
+                              } else if (
+                                judgeModelId === "vertex_ai_pro" ||
+                                judgeModelId === "vertex_ai_lite"
+                              ) {
+                                requestBody.provider = "vertex_ai";
+                                requestBody.vertex_model_name = provider.model;
+                              } else if (judgeModelId.startsWith("anthropic_")) {
+                                requestBody.provider = "anthropic";
+                                requestBody.model_name = provider.model;
+                              }
+
+                              try {
+                                const response = await fetchWithRetry(
+                                  "/api/evaluations/evaluate",
+                                  {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify(requestBody),
+                                    signal: controller.signal,
+                                  }
+                                );
+
+                                if (response.ok) {
+                                  const result = await response.json();
+                                  const newResult = {
+                                    provider: result.provider,
+                                    model: result.model,
+                                    metrics: result.metrics,
+                                    aggregate_score: result.aggregate_score,
+                                    all_passed: result.all_passed,
+                                    evaluation_time: result.evaluation_time,
+                                    evaluation_cost: result.evaluation_cost,
+                                  };
+
+                                  setFiles((prevFiles) =>
+                                    prevFiles.map((file) => {
+                                      if (file.fileId !== selectedFileId)
+                                        return file;
+                                      return {
+                                        ...file,
+                                        entities: file.entities.map(
+                                          (ent: any) => {
+                                            if (ent.name !== entity.name)
+                                              return ent;
+                                            const updatedEnt = { ...ent };
+                                            if (!updatedEnt.evaluationResults)
+                                              updatedEnt.evaluationResults = [];
+                                            updatedEnt.evaluationResults = [
+                                              ...updatedEnt.evaluationResults.filter(
+                                                (r: any) =>
+                                                  !(
+                                                    r.provider ===
+                                                    result.provider &&
+                                                    r.model === result.model
+                                                  )
+                                              ),
+                                              newResult,
+                                            ];
+                                            if (
+                                              updatedEnt.extractionsByModel &&
+                                              sourceModel
+                                            ) {
+                                              const extByModel =
+                                                updatedEnt.extractionsByModel;
+                                              if (extByModel[sourceModel]) {
+                                                if (
+                                                  !extByModel[sourceModel]
+                                                    .evaluationResults
+                                                )
+                                                  extByModel[
+                                                    sourceModel
+                                                  ].evaluationResults = [];
+                                                extByModel[
+                                                  sourceModel
+                                                ].evaluationResults = [
+                                                    ...extByModel[
+                                                      sourceModel
+                                                    ].evaluationResults.filter(
+                                                      (r: any) =>
+                                                        !(
+                                                          r.provider ===
+                                                          result.provider &&
+                                                          r.model === result.model
+                                                        )
+                                                    ),
+                                                    newResult,
+                                                  ];
+                                              }
+                                            }
+                                            if (
+                                              entityGroundTruths[entity.name]
+                                            ) {
+                                              updatedEnt.groundTruth =
+                                                entityGroundTruths[entity.name];
+                                            }
+                                            return updatedEnt;
+                                          }
+                                        ),
+                                      };
+                                    })
+                                  );
+
+                                  saveEvaluationResult(
+                                    entity.name,
+                                    sourceModel,
+                                    entityGroundTruths[entity.name],
+                                    [newResult],
+                                    undefined,
+                                    currentFile.fileId
+                                  );
+                                }
+                              } catch (err: any) {
+                                if (err.name === "AbortError") break;
+                                console.error(
+                                  `[Pending Eval] Error for ${entity.name}/${judgeModelId}:`,
+                                  err
+                                );
+                              }
+
+                              completedCountLocal++;
+                              setEvaluationProgress(
+                                Math.round(
+                                  (completedCountLocal / totalTasks) * 100
+                                )
+                              );
+                            }
+
+                            // Mark this entity as completed
+                            setEvaluatingEntities((prev) => {
+                              const next = new Set(prev);
+                              next.delete(entity.name);
+                              return next;
+                            });
+                            setCompletedEntities(
+                              (prev) => new Set([...prev, entity.name])
+                            );
+                          }
+
+                          setEvaluationProgress(100);
+                        } catch (error: any) {
+                          if (error.name !== "AbortError") {
+                            console.error(
+                              "[Pending Eval] Error:",
+                              error.message
+                            );
+                          }
+                        } finally {
+                          setIsEvaluating(false);
+                          abortControllerRef.current = null;
+                        }
+                      };
+
+                      return (
+                        <>
+                          <div className="flex gap-3 flex-wrap">
+                            {/* Run Pending button — only shown when some entities are pending AND some already have results */}
+                            {singlePendingCount > 0 &&
+                              singleHasResults &&
+                              !isEvaluating && (
+                                <Button
+                                  type="button"
+                                  onClick={handleRunPendingSingle}
+                                  disabled={
+                                    isEvaluating ||
+                                    evaluatingEntities.size > 0 ||
+                                    selectedMetrics.length === 0 ||
+                                    selectedProviders.length === 0
+                                  }
+                                  variant="default"
+                                  size="lg"
+                                  className="flex-1"
+                                >
+                                  <Play className="h-5 w-5 mr-2" />
+                                  Run Pending ({singlePendingCount})
+                                </Button>
+                              )}
+
+                            {/* Main Run / Rerun All button */}
+                            <Button
+                              type="button"
+                              onClick={handleRunEvaluation}
+                              disabled={
+                                isEvaluating ||
+                                evaluatingEntities.size > 0 ||
+                                selectedMetrics.length === 0 ||
+                                selectedProviders.length === 0
+                              }
+                              className={
+                                singlePendingCount > 0 && singleHasResults
+                                  ? "flex-1"
+                                  : "w-full"
+                              }
+                              variant={
+                                singlePendingCount > 0 && singleHasResults
+                                  ? "outline"
+                                  : "default"
+                              }
+                              size="lg"
+                            >
+                              {isEvaluating ? (
+                                <>
+                                  <Sparkles className="h-5 w-5 mr-2 animate-spin" />
+                                  Running Evaluation... {evaluationProgress}%
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-5 w-5 mr-2" />
+                                  {singleHasResults
+                                    ? "Rerun All"
+                                    : `Run Evaluation for This PDF with ${selectedProviders.length} LLM Judge${selectedProviders.length > 1 ? "s" : ""
+                                    }`}
+                                </>
+                              )}
+                            </Button>
+                          </div>
+
+                          {isEvaluating && (
+                            <div className="mt-4 space-y-2">
+                              <Progress
+                                value={evaluationProgress}
+                                className="h-2"
+                              />
+                              <p className="text-xs text-muted-foreground text-center">
+                                {completedEntities.size} of{" "}
+                                {
+                                  (currentFile.entities || []).filter(
+                                    (e: any) => e.extracted
+                                  ).length
+                                }{" "}
+                                entities completed
+                              </p>
+                            </div>
+                          )}
+
+                          {!isEvaluating && (
+                            <p className="text-sm text-muted-foreground text-center mt-3">
+                              {singlePendingCount > 0 && singleHasResults
+                                ? `${singlePendingCount} entity(ies) pending evaluation`
+                                : <>Evaluating{" "}
+                                  {
+                                    (currentFile.entities || []).filter(
+                                      (e: any) => e.extracted
+                                    ).length
+                                  }{" "}
+                                  entities from "{currentFile.file?.name || "current document"}" with{" "}
+                                  {selectedMetrics.length} metric
+                                  {selectedMetrics.length > 1 ? "s" : ""} using{" "}
+                                  {selectedProviders.length} LLM judge
+                                  {selectedProviders.length > 1 ? "s" : ""}
+                                </>}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               </>
@@ -4128,7 +4732,7 @@ export function EvaluationPage({
                                                 // Special cases for Vertex AI
                                                 if (
                                                   judgeId ===
-                                                    "vertex_ai_lite" &&
+                                                  "vertex_ai_lite" &&
                                                   r.model.includes("flash-lite")
                                                 )
                                                   return true;
@@ -4140,7 +4744,7 @@ export function EvaluationPage({
                                                   return true;
                                                 if (
                                                   judgeId ===
-                                                    "vertex_ai_3_pro" &&
+                                                  "vertex_ai_3_pro" &&
                                                   r.model.includes(
                                                     "gemini-2.5-pro"
                                                   )
@@ -4270,103 +4874,95 @@ export function EvaluationPage({
                 {/* Batch Evaluation & Results Action Area */}
                 <Card>
                   <CardContent className="pt-6">
-                    <div className="flex gap-4">
-                      {/* Rerun/Run Button */}
-                      <Button
-                        type="button"
-                        onClick={handleRunBatchEvaluation}
-                        disabled={
-                          isEvaluating ||
-                          selectedMetrics.length === 0 ||
-                          selectedProviders.length === 0 ||
-                          selectedSourceModels.length === 0
-                        }
-                        className={
-                          files.some((f) =>
-                            (f.entities || []).some(
-                              (e: any) =>
-                                e.evaluationResults?.length > 0 ||
-                                (e.extractionsByModel &&
-                                  Object.values(e.extractionsByModel).some(
-                                    (ext: any) =>
-                                      ext.evaluationResults?.length > 0
-                                  ))
-                            )
-                          )
-                            ? "flex-1"
-                            : "w-full"
-                        }
-                        variant={
-                          files.some((f) =>
-                            (f.entities || []).some(
-                              (e: any) =>
-                                e.evaluationResults?.length > 0 ||
-                                (e.extractionsByModel &&
-                                  Object.values(e.extractionsByModel).some(
-                                    (ext: any) =>
-                                      ext.evaluationResults?.length > 0
-                                  ))
-                            )
-                          )
-                            ? "outline"
-                            : "default"
-                        }
-                        size="lg"
-                      >
-                        {isEvaluating ? (
-                          <>
-                            <Sparkles className="h-5 w-5 mr-2 animate-spin" />
-                            Running...
-                          </>
-                        ) : (
-                          <>
-                            <Play className="h-5 w-5 mr-2" />
-                            {files.some((f) =>
-                              (f.entities || []).some(
-                                (e: any) =>
-                                  e.evaluationResults?.length > 0 ||
-                                  (e.extractionsByModel &&
-                                    Object.values(e.extractionsByModel).some(
-                                      (ext: any) =>
-                                        ext.evaluationResults?.length > 0
-                                    ))
-                              )
-                            )
-                              ? "Rerun Evaluation"
-                              : "Run Batch Evaluation"}
-                          </>
-                        )}
-                      </Button>
-
-                      {/* View Results Button - only shown if we have results */}
-                      {files.some((f) =>
+                    {(() => {
+                      const pendingCount = getPendingEntities().length;
+                      const hasAnyResults = files.some((f) =>
                         (f.entities || []).some(
                           (e: any) =>
                             e.evaluationResults?.length > 0 ||
                             (e.extractionsByModel &&
                               Object.values(e.extractionsByModel).some(
-                                (ext: any) => ext.evaluationResults?.length > 0
+                                (ext: any) =>
+                                  ext.evaluationResults?.length > 0
                               ))
                         )
-                      ) &&
-                        !isEvaluating && (
-                          <Button
-                            variant="default"
-                            size="lg"
-                            className="flex-1"
-                            onClick={() => setActiveTab("results")}
-                          >
-                            <BarChart3 className="h-5 w-5 mr-2" />
-                            View Results
-                          </Button>
-                        )}
-                    </div>
+                      );
+                      return (
+                        <>
+                          <div className="flex gap-3 flex-wrap">
+                            {/* Run Pending Button - only shown when there are pending entities AND some already have results */}
+                            {pendingCount > 0 && hasAnyResults && !isEvaluating && (
+                              <Button
+                                type="button"
+                                onClick={handleRunPendingBatchEvaluation}
+                                disabled={
+                                  isEvaluating ||
+                                  selectedMetrics.length === 0 ||
+                                  selectedProviders.length === 0 ||
+                                  selectedSourceModels.length === 0
+                                }
+                                variant="default"
+                                size="lg"
+                                className="flex-1"
+                              >
+                                <Play className="h-5 w-5 mr-2" />
+                                Run Pending ({pendingCount})
+                              </Button>
+                            )}
 
-                    <p className="text-sm text-muted-foreground text-center mt-3">
-                      {isEvaluating
-                        ? `Processing ${files.length} documents...`
-                        : `Evaluating ${selectedSourceModels.length} models with ${selectedProviders.length} judges`}
-                    </p>
+                            {/* Rerun/Run All Button */}
+                            <Button
+                              type="button"
+                              onClick={handleRunBatchEvaluation}
+                              disabled={
+                                isEvaluating ||
+                                selectedMetrics.length === 0 ||
+                                selectedProviders.length === 0 ||
+                                selectedSourceModels.length === 0
+                              }
+                              className={hasAnyResults ? "flex-1" : "w-full"}
+                              variant={hasAnyResults ? "outline" : "default"}
+                              size="lg"
+                            >
+                              {isEvaluating ? (
+                                <>
+                                  <Sparkles className="h-5 w-5 mr-2 animate-spin" />
+                                  Running...
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-5 w-5 mr-2" />
+                                  {hasAnyResults
+                                    ? "Rerun All"
+                                    : "Run Batch Evaluation"}
+                                </>
+                              )}
+                            </Button>
+
+                            {/* View Results Button - only shown if we have results */}
+                            {hasAnyResults && !isEvaluating && (
+                              <Button
+                                variant="default"
+                                size="lg"
+                                className="flex-1"
+                                onClick={() => setActiveTab("results")}
+                              >
+                                <BarChart3 className="h-5 w-5 mr-2" />
+                                View Results
+                              </Button>
+                            )}
+                          </div>
+
+                          <p className="text-sm text-muted-foreground text-center mt-3">
+                            {isEvaluating
+                              ? `Processing ${files.length} documents...`
+                              : pendingCount > 0 && hasAnyResults
+                                ? `${pendingCount} entity(ies) pending evaluation · ${selectedSourceModels.length} model(s) · ${selectedProviders.length} judge(s)`
+                                : `Evaluating ${selectedSourceModels.length} models with ${selectedProviders.length} judges`}
+                          </p>
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               </div>
