@@ -21,6 +21,7 @@ import {
   Users,
   Check,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -246,16 +247,11 @@ export default function App() {
     });
   }, []);
 
-  // Clear stale flags when a step completes (producing fresh results)
-  const clearStaleFrom = useCallback((fromStep: Step) => {
-    const fromIdx = getStepIndex(fromStep);
-    if (fromIdx < 0) return;
+  // Clear stale flag only for the step that just completed
+  const clearStaleFrom = useCallback((completedStep: Step) => {
     setStaleDownstream((prev) => {
       const next = new Set(prev);
-      next.delete(fromStep);
-      for (let i = fromIdx + 1; i < WORKFLOW_STEPS.length; i++) {
-        next.delete(WORKFLOW_STEPS[i]);
-      }
+      next.delete(completedStep);
       return next;
     });
   }, []);
@@ -653,7 +649,7 @@ export default function App() {
 
     setDocumentData((prev) => ({ ...prev, ...updatedData }));
 
-    // This step just produced fresh results — clear stale flags for it and downstream
+    // This step just produced fresh results — clear stale flag for it
     clearStaleFrom(step);
 
     if (step === "upload") {
@@ -1880,7 +1876,7 @@ export default function App() {
                             ${
                               isCurrent
                                 ? hasInFlight
-                                  ? "bg-amber-500 text-white ring-2 ring-amber-300 animate-pulse"
+                                  ? "bg-amber-100 text-amber-700 ring-2 ring-amber-400"
                                   : "bg-primary text-primary-foreground ring-2 ring-primary/30"
                                 : isStale && isCompleted
                                   ? "bg-amber-500/60 text-white"
@@ -1893,7 +1889,9 @@ export default function App() {
                             ${isClickable ? "group-hover:ring-2 group-hover:ring-primary/40 group-hover:scale-110" : ""}
                           `}
                         >
-                          {isStale && isCompleted && !isCurrent ? (
+                          {hasInFlight && isCurrent ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                          ) : isStale && isCompleted && !isCurrent ? (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           ) : isCompleted && !isCurrent ? (
                             <Check className="h-3.5 w-3.5" />
