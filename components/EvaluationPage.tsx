@@ -743,7 +743,6 @@ export function EvaluationPage({
     setSelectedFileId(newFileId);
   };
 
-
   // Helper to save just the human score for an evaluation (used by BatchResultsPage)
   const saveHumanScore = async (params: {
     fileId?: string;
@@ -1115,7 +1114,7 @@ export function EvaluationPage({
           for (const r of entityResults) {
             const newResult = {
               provider: r.provider,
-              provider_id: r.provider_id,  // store for exact isComplete matching
+              provider_id: r.provider_id, // store for exact isComplete matching
               model: r.model,
               metrics: r.metrics,
               aggregate_score: r.aggregate_score,
@@ -1125,8 +1124,10 @@ export function EvaluationPage({
             };
             // Update top-level evaluationResults (backward compat)
             updatedEntity.evaluationResults = [
-              ...(updatedEntity.evaluationResults || []).filter(
-                (x: any) => x.provider_id ? x.provider_id !== r.provider_id : x.model !== r.model
+              ...(updatedEntity.evaluationResults || []).filter((x: any) =>
+                x.provider_id
+                  ? x.provider_id !== r.provider_id
+                  : x.model !== r.model
               ),
               newResult,
             ];
@@ -1141,8 +1142,10 @@ export function EvaluationPage({
                     [r.source_model]: {
                       ...ext,
                       evaluationResults: [
-                        ...(ext.evaluationResults || []).filter(
-                          (x: any) => x.provider_id ? x.provider_id !== r.provider_id : x.model !== r.model
+                        ...(ext.evaluationResults || []).filter((x: any) =>
+                          x.provider_id
+                            ? x.provider_id !== r.provider_id
+                            : x.model !== r.model
                         ),
                         newResult,
                       ],
@@ -1161,7 +1164,10 @@ export function EvaluationPage({
     // Key format: file_id::entity_name::source_model::provider_id (4-part)
     // Also attempt legacy 3-part removal for any old keys still in state.
     const doneEvaluationKeys = new Set(
-      fresh.map((r: any) => `${r.file_id || ""}::${r.entity_name}::${r.source_model || singleModeSourceModel || ""}::${r.provider_id}`)
+      fresh.map(
+        (r: any) =>
+          `${r.file_id || ""}::${r.entity_name}::${r.source_model || singleModeSourceModel || ""}::${r.provider_id}`
+      )
     );
     setEvaluatingEntities((prev: Set<string>) => {
       const next = new Set(prev);
@@ -1169,7 +1175,8 @@ export function EvaluationPage({
       return next;
     });
     setCompletedEntities(
-      (prev: Set<string>) => new Set([...prev, ...fresh.map((r: any) => r.entity_name)])
+      (prev: Set<string>) =>
+        new Set([...prev, ...fresh.map((r: any) => r.entity_name)])
     );
   };
 
@@ -1225,7 +1232,8 @@ export function EvaluationPage({
         // (updater must be pure — no side-effects like push/console).
         const rateLimitLabels: string[] = [];
         erroredItems.forEach((e: any) => {
-          const { entity_name, source_model, provider_id, error_type, error } = e;
+          const { entity_name, source_model, provider_id, error_type, error } =
+            e;
           console.warn(
             `[JobQueue] Eval ${error_type || "error"} — ${entity_name}${source_model ? `/${source_model}` : ""}/${provider_id}: ${error}`
           );
@@ -1422,7 +1430,10 @@ export function EvaluationPage({
             : Object.keys(entity.extractionsByModel || {});
 
       if (sourceModelsToUse.length === 0) {
-        console.warn("[Rerun] No source models available for entity:", entityName);
+        console.warn(
+          "[Rerun] No source models available for entity:",
+          entityName
+        );
         return;
       }
 
@@ -1431,7 +1442,9 @@ export function EvaluationPage({
         .map((sourceModelId) => {
           const extraction =
             entity.extractionsByModel?.[sourceModelId]?.extracted ||
-            (currentFile.selectedModel === sourceModelId ? entity.extracted : null);
+            (currentFile.selectedModel === sourceModelId
+              ? entity.extracted
+              : null);
           if (!extraction) return null;
           return {
             entity_name: entity.name,
@@ -1452,10 +1465,13 @@ export function EvaluationPage({
       }
 
       const providerConfigs = buildProviderConfigs();
-      if (providerConfigs.length === 0) throw new Error("No valid provider configs");
+      if (providerConfigs.length === 0)
+        throw new Error("No valid provider configs");
 
       const totalTasks = tasks.length * providerConfigs.length;
-      console.log(`[Rerun] Submitting single-entity job: ${tasks.length} tasks × ${providerConfigs.length} providers = ${totalTasks} evals`);
+      console.log(
+        `[Rerun] Submitting single-entity job: ${tasks.length} tasks × ${providerConfigs.length} providers = ${totalTasks} evals`
+      );
 
       // Submit via the job queue (same path as batch eval — timeout-protected, DB-backed)
       const submitRes = await fetch("/api/evaluations/jobs", {
@@ -1488,10 +1504,14 @@ export function EvaluationPage({
       tasks.forEach((t: any) => {
         providerConfigs.forEach((p) => {
           // 4-part key: file_id::entity_name::source_model::provider_id
-          evaluatingKeys.add(`${t.file_id || currentFile.fileId}::${t.entity_name}::${t.source_model}::${p.provider_id}`);
+          evaluatingKeys.add(
+            `${t.file_id || currentFile.fileId}::${t.entity_name}::${t.source_model}::${p.provider_id}`
+          );
         });
       });
-      setEvaluatingEntities((prev) => new Set([...Array.from(prev), ...Array.from(evaluatingKeys)]));
+      setEvaluatingEntities(
+        (prev) => new Set([...Array.from(prev), ...Array.from(evaluatingKeys)])
+      );
 
       const seenResultKeys = new Set<string>();
       await pollJobUntilDone(job_id, totalTasks, token, seenResultKeys);
@@ -1636,7 +1656,9 @@ export function EvaluationPage({
       tasks.forEach((t: any) => {
         providerConfigs.forEach((p) => {
           // 4-part key: file_id::entity_name::source_model::provider_id
-          evaluatingKeys.add(`${t.file_id || currentFile.fileId}::${t.entity_name}::${sourceModel}::${p.provider_id}`);
+          evaluatingKeys.add(
+            `${t.file_id || currentFile.fileId}::${t.entity_name}::${sourceModel}::${p.provider_id}`
+          );
         });
       });
 
@@ -2070,7 +2092,9 @@ export function EvaluationPage({
       // 4-part key includes fileId so same-named entities in different files don't collide.
       const evaluatingKeys = new Set<string>();
       tasks.forEach((t) => {
-        evaluatingKeys.add(`${t.fileId}::${t.entityName}::${t.sourceModel}::${t.judgeModel}`);
+        evaluatingKeys.add(
+          `${t.fileId}::${t.entityName}::${t.sourceModel}::${t.judgeModel}`
+        );
       });
       setEvaluatingEntities(evaluatingKeys);
 
@@ -3022,7 +3046,9 @@ export function EvaluationPage({
                             evaluatingEntities.has(entity.name) ||
                             Array.from(evaluatingEntities).some((k) => {
                               const parts = k.split("::");
-                              return parts.length >= 4 ? parts[1] === entity.name : parts[0] === entity.name;
+                              return parts.length >= 4
+                                ? parts[1] === entity.name
+                                : parts[0] === entity.name;
                             });
                           const isCompleted = completedEntities.has(
                             entity.name
@@ -3100,9 +3126,13 @@ export function EvaluationPage({
                                         onClick={() =>
                                           handleRerunEntity(entity.name)
                                         }
-                                        disabled={Array.from(evaluatingEntities).some(key => {
+                                        disabled={Array.from(
+                                          evaluatingEntities
+                                        ).some((key) => {
                                           const parts = key.split("::");
-                                          return parts.length >= 4 ? parts[1] === entity.name : parts[0] === entity.name;
+                                          return parts.length >= 4
+                                            ? parts[1] === entity.name
+                                            : parts[0] === entity.name;
                                         })}
                                       >
                                         <RotateCcw className="h-3 w-3 mr-1" />
@@ -4260,26 +4290,54 @@ export function EvaluationPage({
                                             ext.evaluationResults.some(
                                               (r: any) => {
                                                 // Primary: exact provider_id match (new results have this)
-                                                if (r.provider_id && r.provider_id === judgeId)
+                                                if (
+                                                  r.provider_id &&
+                                                  r.provider_id === judgeId
+                                                )
                                                   return true;
                                                 if (!r.model) return false;
                                                 // Secondary: model name exact match
-                                                if (judge && r.model === judge.model)
+                                                if (
+                                                  judge &&
+                                                  r.model === judge.model
+                                                )
                                                   return true;
                                                 if (r.model === judgeId)
                                                   return true;
                                                 // Fallback fuzzy for old results without provider_id
                                                 if (
-                                                  judgeId.toLowerCase().includes(r.model.toLowerCase()) ||
-                                                  r.model.toLowerCase().includes(judgeId.toLowerCase())
+                                                  judgeId
+                                                    .toLowerCase()
+                                                    .includes(
+                                                      r.model.toLowerCase()
+                                                    ) ||
+                                                  r.model
+                                                    .toLowerCase()
+                                                    .includes(
+                                                      judgeId.toLowerCase()
+                                                    )
                                                 )
                                                   return true;
                                                 // Special cases for Vertex AI
-                                                if (judgeId === "vertex_ai_lite" && r.model.includes("flash-lite"))
+                                                if (
+                                                  judgeId ===
+                                                    "vertex_ai_lite" &&
+                                                  r.model.includes("flash-lite")
+                                                )
                                                   return true;
-                                                if (judgeId === "vertex_ai_pro" && r.model.includes("gemini") && r.model.includes("pro"))
+                                                if (
+                                                  judgeId === "vertex_ai_pro" &&
+                                                  r.model.includes("gemini") &&
+                                                  r.model.includes("pro")
+                                                )
                                                   return true;
-                                                if (judgeId === "vertex_ai_3_pro" && r.model.includes("gemini-2.5-pro"))
+                                                if (
+                                                  judgeId ===
+                                                    "vertex_ai_3_pro" &&
+                                                  r.model.includes(
+                                                    "gemini-2.5-pro"
+                                                  )
+                                                )
                                                   return true;
                                                 return false;
                                               }
@@ -4302,8 +4360,12 @@ export function EvaluationPage({
                                 // Check using 4-part key: file_id::entity_name::...
                                 // Including file_id prevents same-named entities in different files
                                 // from sharing a key and incorrectly showing "Failed" for each other.
-                                const isActivelyEvaluating = Array.from(evaluatingEntities).some(key =>
-                                  key.startsWith(`${file.fileId}::${entity.name}::`)
+                                const isActivelyEvaluating = Array.from(
+                                  evaluatingEntities
+                                ).some((key) =>
+                                  key.startsWith(
+                                    `${file.fileId}::${entity.name}::`
+                                  )
                                 );
 
                                 return (
