@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { authenticatedFetch } from "../utils/authUtils";
@@ -56,7 +56,7 @@ interface BenchmarkClearResult {
 
 export function SessionMetrics() {
   const [metrics, setMetrics] = useState<SessionMetricsData | null>(null);
-  const [_loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   // Dangerous clear state
@@ -209,7 +209,7 @@ export function SessionMetrics() {
     return { providerRows, modelRows, docRows, batchRows };
   }, [metrics]);
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     setLoading(true);
     try {
       const response = await authenticatedFetch("/api/server/session-metrics");
@@ -220,13 +220,6 @@ export function SessionMetrics() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Fetch once on mount for the header summary badge.
-  // No polling — data only changes during active evals/extractions.
-  // The dialog triggers a fresh fetch on open via onOpenChange.
-  useEffect(() => {
-    fetchMetrics();
   }, []);
 
   const handleClear = async () => {
@@ -415,8 +408,8 @@ export function SessionMetrics() {
               <span className="text-muted-foreground">
                 Calls: <strong>{displayMetrics.total_calls}</strong>
               </span>
-              <span className="text-xs text-muted-foreground">
-                Click for details
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Click to view & refresh
               </span>
             </div>
           </Card>
@@ -426,6 +419,15 @@ export function SessionMetrics() {
             <div className="flex flex-wrap items-center justify-between gap-3 pr-12">
               <DialogTitle>Session Metrics Breakdown</DialogTitle>
               <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  onClick={fetchMetrics}
+                  disabled={loading}
+                >
+                  {loading ? "Refreshing..." : "⟳ Refresh Metrics"}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"

@@ -13,6 +13,7 @@ import {
   CheckCircle,
   XCircle,
   ArrowLeft,
+  ArrowRight,
   AlertTriangle,
 } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -21,7 +22,10 @@ import { RawOutputViewer } from "./RawOutputViewer";
 interface ProcessingPageProps {
   onComplete: (data: Partial<DocumentData>) => void;
   onBack: () => void;
+  onNavigateForward?: () => void;
   documentData: DocumentData;
+  hasDownstreamResults?: boolean;
+  onInvalidateDownstream?: () => void;
 }
 
 const allParsers = [
@@ -62,7 +66,10 @@ interface FileStatus {
 export function ProcessingPage({
   onComplete,
   onBack,
+  onNavigateForward,
   documentData,
+  hasDownstreamResults,
+  onInvalidateDownstream,
 }: ProcessingPageProps) {
   // Initialize files from documentData
   const [files, setFiles] = useState<FileStatus[]>(() => {
@@ -129,15 +136,17 @@ export function ProcessingPage({
   }, [availableParsers, globalParser]);
 
   const handleProceed = () => {
-    // Filter completed files
     const completedFiles = files.filter((f) => f.status === "completed");
 
     if (completedFiles.length === 0) {
-      return; // Should be disabled anyway
+      return;
     }
 
-    // For backward compatibility, update the main documentData with the first completed file
-    // But also pass the full list of uploadedFiles with their results
+    // Proceeding re-enters study selection which may overwrite downstream
+    if (hasDownstreamResults) {
+      onInvalidateDownstream?.();
+    }
+
     const firstFile = completedFiles[0];
 
     onComplete({
@@ -173,9 +182,23 @@ export function ProcessingPage({
           <h2 className="text-xl font-semibold">Processed Documents</h2>
         </div>
         <div className="flex items-center gap-3">
+          {onNavigateForward && hasDownstreamResults && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onNavigateForward}
+              className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+            >
+              Continue to Study Selection
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          )}
           {completedCount > 0 && (
             <Button onClick={handleProceed}>
-              Proceed to Entity Extraction ({completedCount}/{totalCount})
+              {hasDownstreamResults
+                ? "Re-configure & Proceed"
+                : "Proceed to Study Selection"}{" "}
+              ({completedCount}/{totalCount})
             </Button>
           )}
         </div>
