@@ -32,7 +32,9 @@ class MacbookRequestQueue:
         self._started = False
         self._total_processed = 0
         self._total_enqueued = 0
-        print("[MacbookQueue] Initialized — all Macbook LLM requests will be serialized (FIFO, 1 worker)")
+        print(
+            "[MacbookQueue] Initialized — all Macbook LLM requests will be serialized (FIFO, 1 worker)"
+        )
 
     def _ensure_worker(self) -> None:
         """Start the background worker if not already running."""
