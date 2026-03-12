@@ -4,6 +4,7 @@ import asyncio
 import time
 import requests
 from pathlib import Path
+from utils.text_utils import sanitize_text
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -568,7 +569,7 @@ Return JSON only:"""
             }
 
         try:
-            parsed_json = json.loads(content.strip())
+            parsed_json = json.loads(sanitize_text(content.strip()))
             result = ExtractionResult.model_validate(parsed_json)
 
             # Convert answer to string if it's a list or dict for consistency
@@ -683,7 +684,7 @@ Text: {essential_markdown}"""
             }
 
         try:
-            parsed_json = json.loads(content.strip())
+            parsed_json = json.loads(sanitize_text(content.strip()))
             result = ExtractionResult.model_validate(parsed_json)
 
             # Convert answer to string if it's a list or dict for consistency
@@ -764,7 +765,7 @@ Text: {essential_markdown}"""
             json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 try:
-                    fragment = json.loads(json_match.group())
+                    fragment = json.loads(sanitize_text(json_match.group()))
                     if "answer" in fragment:
                         fallback_answer = fragment["answer"]
                     if "references" in fragment and isinstance(

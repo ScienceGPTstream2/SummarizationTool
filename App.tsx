@@ -21,6 +21,7 @@ import {
   Users,
   Check,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -35,7 +36,12 @@ import {
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
-import { signOut, getCurrentUser, getValidToken } from "./utils/authUtils";
+import {
+  signOut,
+  getCurrentUser,
+  getValidToken,
+  installVisibilityRefreshListener,
+} from "./utils/authUtils";
 import { Toaster, toast } from "./components/ui/sonner";
 import { SessionMetrics } from "./components/SessionMetrics";
 
@@ -253,16 +259,11 @@ export default function App() {
     });
   }, []);
 
-  // Clear stale flags when a step completes (producing fresh results)
-  const clearStaleFrom = useCallback((fromStep: Step) => {
-    const fromIdx = getStepIndex(fromStep);
-    if (fromIdx < 0) return;
+  // Clear stale flag only for the step that just completed
+  const clearStaleFrom = useCallback((completedStep: Step) => {
     setStaleDownstream((prev) => {
       const next = new Set(prev);
-      next.delete(fromStep);
-      for (let i = fromIdx + 1; i < WORKFLOW_STEPS.length; i++) {
-        next.delete(WORKFLOW_STEPS[i]);
-      }
+      next.delete(completedStep);
       return next;
     });
   }, []);
@@ -441,6 +442,80 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // ─── Fix: Proactive token refresh on tab visibility change ──────────
+  // Chrome throttles timers in backgrounded tabs, so Supabase's
+  // autoRefreshToken may not fire. This listener ensures we refresh
+  // the token immediately when the user switches back to the tab.
+  useEffect(() => {
+    installVisibilityRefreshListener();
+  }, []);
+
+  // ─── Fix: Persist session state to localStorage as a safety net ─────
+  // If a page reload somehow happens (browser crash, accidental refresh,
+  // or a clearTokenAndReload that we missed), we can auto-restore the
+  // user to their last step + session instead of dumping them at upload.
+  const PERSISTED_STATE_KEY = "app_persisted_state";
+
+  // Save currentStep + sessionId whenever they change
+  useEffect(() => {
+    const nonPersistableSteps: Step[] = ["login", "auth_callback"];
+    if (!nonPersistableSteps.includes(currentStep)) {
+      try {
+        localStorage.setItem(
+          PERSISTED_STATE_KEY,
+          JSON.stringify({
+            currentStep,
+            sessionId: documentData.sessionId || null,
+            timestamp: Date.now(),
+          })
+        );
+      } catch {
+        // localStorage full or unavailable — not critical
+      }
+    }
+  }, [currentStep, documentData.sessionId]);
+
+  // On mount, if we have a valid auth session AND persisted state, auto-restore
+  useEffect(() => {
+    if (!session || isAuthCallback) return;
+
+    try {
+      const raw = localStorage.getItem(PERSISTED_STATE_KEY);
+      if (!raw) return;
+
+      const persisted = JSON.parse(raw);
+      const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+      if (Date.now() - persisted.timestamp > MAX_AGE_MS) {
+        localStorage.removeItem(PERSISTED_STATE_KEY);
+        return;
+      }
+
+      const restoredStep = persisted.currentStep as Step;
+      const restoredSessionId = persisted.sessionId as string | null;
+
+      // Only auto-restore if we're currently at upload (default) and
+      // the persisted step is a workflow step with a session
+      const workflowSteps: Step[] = [
+        "study_selection",
+        "extraction",
+        "evaluation",
+      ];
+      if (
+        currentStep === "upload" &&
+        restoredSessionId &&
+        workflowSteps.includes(restoredStep)
+      ) {
+        console.log(
+          `[App] Auto-restoring from persisted state: step=${restoredStep}, session=${restoredSessionId}`
+        );
+        // Use the existing handleRestoreSession which fetches full data from the API
+        handleRestoreSession(restoredSessionId);
+      }
+    } catch {
+      // Corrupted localStorage — ignore
+    }
+  }, [session]); // Only run when session becomes available
 
   useEffect(() => {
     if (session) {
@@ -672,7 +747,7 @@ export default function App() {
 
     setDocumentData((prev) => ({ ...prev, ...updatedData }));
 
-    // This step just produced fresh results — clear stale flags for it and downstream
+    // This step just produced fresh results — clear stale flag for it
     clearStaleFrom(step);
 
     if (step === "upload") {
@@ -687,6 +762,10 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    // Clear persisted state so we don't auto-restore after explicit logout
+    try {
+      localStorage.removeItem(PERSISTED_STATE_KEY);
+    } catch {}
     await signOut();
     setSession(null);
     setDocumentData({
@@ -1899,7 +1978,7 @@ export default function App() {
                             ${
                               isCurrent
                                 ? hasInFlight
-                                  ? "bg-amber-500 text-white ring-2 ring-amber-300 animate-pulse"
+                                  ? "bg-amber-100 text-amber-700 ring-2 ring-amber-400"
                                   : "bg-primary text-primary-foreground ring-2 ring-primary/30"
                                 : isStale && isCompleted
                                   ? "bg-amber-500/60 text-white"
@@ -1912,7 +1991,9 @@ export default function App() {
                             ${isClickable ? "group-hover:ring-2 group-hover:ring-primary/40 group-hover:scale-110" : ""}
                           `}
                         >
-                          {isStale && isCompleted && !isCurrent ? (
+                          {hasInFlight && isCurrent ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                          ) : isStale && isCompleted && !isCurrent ? (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           ) : isCompleted && !isCurrent ? (
                             <Check className="h-3.5 w-3.5" />

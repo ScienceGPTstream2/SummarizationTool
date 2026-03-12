@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { authenticatedFetch } from "../utils/authUtils";
@@ -56,7 +56,7 @@ interface BenchmarkClearResult {
 
 export function SessionMetrics() {
   const [metrics, setMetrics] = useState<SessionMetricsData | null>(null);
-  const [_loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   // Dangerous clear state
@@ -209,33 +209,17 @@ export function SessionMetrics() {
     return { providerRows, modelRows, docRows, batchRows };
   }, [metrics]);
 
-  useEffect(() => {
-    let mounted = true;
-
-    const fetchMetrics = async () => {
-      setLoading(true);
-      try {
-        const response = await authenticatedFetch(
-          "/api/server/session-metrics"
-        );
-        const data = await response.json();
-        if (!mounted) return;
-        setMetrics(data.metrics || null);
-      } catch (error) {
-        console.warn("Failed to fetch session metrics:", error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+  const fetchMetrics = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await authenticatedFetch("/api/server/session-metrics");
+      const data = await response.json();
+      setMetrics(data.metrics || null);
+    } catch (error) {
+      console.warn("Failed to fetch session metrics:", error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const handleClear = async () => {
@@ -420,8 +404,8 @@ export function SessionMetrics() {
               <span className="text-muted-foreground">
                 Calls: <strong>{displayMetrics.total_calls}</strong>
               </span>
-              <span className="text-xs text-muted-foreground">
-                Click for details
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Click to view & refresh
               </span>
             </div>
           </Card>
@@ -431,6 +415,15 @@ export function SessionMetrics() {
             <div className="flex flex-wrap items-center justify-between gap-3 pr-12">
               <DialogTitle>Session Metrics Breakdown</DialogTitle>
               <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  onClick={fetchMetrics}
+                  disabled={loading}
+                >
+                  {loading ? "Refreshing..." : "⟳ Refresh Metrics"}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"

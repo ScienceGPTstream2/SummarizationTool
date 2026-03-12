@@ -448,38 +448,60 @@ export function UploadPage({
       return;
     }
 
-    // Check if all files are uploaded
-    const allUploaded = selectedFiles.every((f) => uploadResults[f.name]);
-    if (!allUploaded) {
+    // A file is considered "ready" if it has an upload result OR is already
+    // present in processedFiles (restored session — no fresh upload happened).
+    const allReady = selectedFiles.every(
+      (f) => uploadResults[f.name] || processedFiles[f.name]
+    );
+    if (!allReady) {
       console.error("Not all files uploaded");
       alert("Please wait for all files to finish uploading.");
       return;
     }
 
-    // Prepare data for next step
-    // For backward compatibility, we use the first file as the "main" file
+    // Prepare data for next step.
+    // Merge new per-file data on top of any existing uploadedFiles entry so
+    // that fields set by later steps (entities, studyType, etc.) are preserved
+    // and not wiped out when the user clicks "View Processed Documents" on a
+    // restored session.
+    const existingFileMap: Record<string, any> = {};
+    for (const ef of documentData.uploadedFiles || []) {
+      existingFileMap[ef.file.name] = ef;
+    }
+
+    const uploadedFilesData = selectedFiles.map((f) => {
+      const existing = existingFileMap[f.name] || {};
+      const uploadResult = uploadResults[f.name];
+      return {
+        // Spread existing fields first so downstream data (entities, studyType,
+        // summaries, etc.) is preserved.
+        ...existing,
+        file: f,
+        // Only overwrite fileId/uploadResult when we actually have fresh values.
+        ...(uploadResult?.file_id ? { fileId: uploadResult.file_id } : {}),
+        ...(uploadResult ? { uploadResult } : {}),
+        status: "completed" as const,
+        selectedParser: fileParsers[f.name] || defaultParser,
+        // processingResult from local state takes precedence over existing.
+        processingResult:
+          processedFilesRef.current[f.name] || existing.processingResult,
+      };
+    });
+
+    // For backward compat, expose first file at the top level.
     const firstFile = selectedFiles[0];
     const firstResult = uploadResults[firstFile.name];
-
-    const uploadedFilesData = selectedFiles.map((f) => ({
-      file: f,
-      fileId: uploadResults[f.name].file_id,
-      uploadResult: uploadResults[f.name],
-      status: "completed" as const,
-      selectedParser: fileParsers[f.name] || defaultParser,
-      processingResult: processedFilesRef.current[f.name],
-    }));
+    const firstExisting = existingFileMap[firstFile.name] || {};
 
     console.log(
       "Proceeding to processing page with processed files:",
       uploadedFilesData.length
     );
 
-    // Pass the upload result and file to the next step
     onComplete({
       file: firstFile,
-      fileId: firstResult.file_id,
-      uploadResult: firstResult,
+      fileId: firstResult?.file_id || firstExisting.fileId,
+      uploadResult: firstResult || firstExisting.uploadResult,
       uploadedFiles: uploadedFilesData,
     });
   };

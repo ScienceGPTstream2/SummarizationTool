@@ -279,6 +279,17 @@ export function EntityExtractionPage({
     new Set()
   );
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cancel any in-flight extraction if the component unmounts (e.g. user navigates back)
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
   const [showRerunDialog, setShowRerunDialog] = useState(false);
   const [currentEntityIndex, setCurrentEntityIndex] = useState(0);
   const [isGeneratingParagraph, setIsGeneratingParagraph] = useState(false);

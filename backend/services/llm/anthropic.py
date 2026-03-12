@@ -3,6 +3,7 @@ import json
 import asyncio
 import time
 from pathlib import Path
+from utils.text_utils import sanitize_text
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
 from anthropic import AnthropicVertex
@@ -189,7 +190,7 @@ IMPORTANT: Respond with valid JSON only, matching the schema above. Do not inclu
 
                     # Parse JSON
                     try:
-                        parsed_json = json.loads(json_text)
+                        parsed_json = json.loads(sanitize_text(json_text))
                     except json.JSONDecodeError as e:
                         print(f"[LLMService] JSON parsing failed: {e}")
                         print(f"[LLMService] Response text: {json_text[:500]}")

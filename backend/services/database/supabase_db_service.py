@@ -9,6 +9,7 @@ import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from supabase import create_client, Client
+from utils.text_utils import sanitize_text as _sanitize_text
 
 # Environment variables are loaded from secrets.toml via core/config.py
 
@@ -447,10 +448,10 @@ class SupabaseDBService:
             "document_id": document_id,
             "entity_name": entity_name,
             "model_id": model_id,
-            "extracted_text": extracted_text,
+            "extracted_text": _sanitize_text(extracted_text),
             "bbox_references": bbox_references,
             "status": status,
-            "error_message": error_message,
+            "error_message": _sanitize_text(error_message),
         }
         # Only include cost/token fields if they have values, so a second write
         # without these fields never overwrites an already-persisted cost.
@@ -528,10 +529,10 @@ class SupabaseDBService:
             "extraction_result_id": extraction_result_id,
             "metric": metric,
             "score": score,
-            "reasoning": reasoning,
+            "reasoning": _sanitize_text(reasoning),
             "judge_model": judge_model,
             "human_score": human_score,
-            "ground_truth": ground_truth,
+            "ground_truth": _sanitize_text(ground_truth),
             "evaluated_at": datetime.utcnow().isoformat(),
         }
         # Only include cost/time if provided (to avoid overwriting existing values)
