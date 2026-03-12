@@ -43,7 +43,7 @@ _RATE_LIMIT_KEYWORDS = (
 _NON_RETRYABLE_KEYWORDS = (
     "invalid json",
     "please use a better evaluation model",
-    "json",           # JSON parse / decode errors from DeepEval
+    "json",  # JSON parse / decode errors from DeepEval
     "unauthorized",
     "authentication",
     "api key",
@@ -78,7 +78,7 @@ def _is_non_retryable_error(exc: Exception) -> bool:
 # Retry delays in seconds for TRANSIENT errors only.
 # Rate-limit:  longer back-off so the quota window can recover.
 # Other transient (network, server 5xx): short pause.
-_RETRY_DELAYS_NORMAL = [3, 10]       # attempt 0→1, attempt 1→2
+_RETRY_DELAYS_NORMAL = [3, 10]  # attempt 0→1, attempt 1→2
 _RETRY_DELAYS_RATE_LIMIT = [15, 45]  # attempt 0→1, attempt 1→2
 
 # ---------------------------------------------------------------------------
@@ -169,7 +169,9 @@ class EvalJob:
     progress: int = 0
     total: int = 0
     results: List[TaskResult] = field(default_factory=list)
-    errors: List[Dict[str, str]] = field(default_factory=list)  # {entity_name, provider_id, error}
+    errors: List[Dict[str, str]] = field(
+        default_factory=list
+    )  # {entity_name, provider_id, error}
     cancelled: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
@@ -223,8 +225,8 @@ _eval_service = EvaluationService()
 # ---------------------------------------------------------------------------
 # Background job cleanup
 # ---------------------------------------------------------------------------
-_JOB_TTL_SECONDS: int = 3600        # evict terminal jobs after 1 hour
-_CLEANUP_INTERVAL_SECONDS: int = 600 # run cleanup every 10 minutes
+_JOB_TTL_SECONDS: int = 3600  # evict terminal jobs after 1 hour
+_CLEANUP_INTERVAL_SECONDS: int = 600  # run cleanup every 10 minutes
 _cleanup_task: Optional[asyncio.Task] = None
 
 
@@ -243,7 +245,9 @@ async def _cleanup_loop() -> None:
         for job_id in to_delete:
             del _JOBS[job_id]
         if to_delete:
-            print(f"[JobQueue] Evicted {len(to_delete)} expired job(s) (TTL={_JOB_TTL_SECONDS}s)")
+            print(
+                f"[JobQueue] Evicted {len(to_delete)} expired job(s) (TTL={_JOB_TTL_SECONDS}s)"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -338,14 +342,16 @@ async def _run_single_eval(
             is_final = attempt == MAX_ATTEMPTS - 1 or _is_non_retryable_error(exc)
             if is_final:
                 # Record error and stop retrying.
-                job.errors.append({
-                    "entity_name": task.entity_name,
-                    "source_model": task.source_model,
-                    "file_id": task.file_id,
-                    "provider_id": provider.provider_id,
-                    "error": str(exc),
-                    "error_type": "rate_limit" if is_rl else "error",
-                })
+                job.errors.append(
+                    {
+                        "entity_name": task.entity_name,
+                        "source_model": task.source_model,
+                        "file_id": task.file_id,
+                        "provider_id": provider.provider_id,
+                        "error": str(exc),
+                        "error_type": "rate_limit" if is_rl else "error",
+                    }
+                )
                 break  # exit retry loop immediately for non-retryable errors
 
     # -----------------------------------------------------------------------
@@ -360,14 +366,20 @@ async def _run_single_eval(
 
         if result.get("status") == "error":
             err_msg = result.get("error", "unknown error")
-            job.errors.append({
-                "entity_name": task.entity_name,
-                "source_model": task.source_model,
-                "file_id": task.file_id,
-                "provider_id": provider.provider_id,
-                "error": err_msg,
-                "error_type": "rate_limit" if _is_rate_limit_error(Exception(err_msg)) else "error",
-            })
+            job.errors.append(
+                {
+                    "entity_name": task.entity_name,
+                    "source_model": task.source_model,
+                    "file_id": task.file_id,
+                    "provider_id": provider.provider_id,
+                    "error": err_msg,
+                    "error_type": (
+                        "rate_limit"
+                        if _is_rate_limit_error(Exception(err_msg))
+                        else "error"
+                    ),
+                }
+            )
             return
 
         task_result = TaskResult(
@@ -449,14 +461,16 @@ async def _run_single_eval(
             for e in job.errors
         ):
             is_rl = _is_rate_limit_error(exc)
-            job.errors.append({
-                "entity_name": task.entity_name,
-                "source_model": task.source_model,
-                "file_id": task.file_id,
-                "provider_id": provider.provider_id,
-                "error": str(exc),
-                "error_type": "rate_limit" if is_rl else "error",
-            })
+            job.errors.append(
+                {
+                    "entity_name": task.entity_name,
+                    "source_model": task.source_model,
+                    "file_id": task.file_id,
+                    "provider_id": provider.provider_id,
+                    "error": str(exc),
+                    "error_type": "rate_limit" if is_rl else "error",
+                }
+            )
     finally:
         job.progress += 1
 
@@ -559,7 +573,9 @@ def cancel_job(job_id: str) -> bool:
             task.cancel()
             cancelled_count += 1
     if cancelled_count:
-        print(f"[JobQueue] Cancelled {cancelled_count} in-flight tasks for job {job_id[:8]}")
+        print(
+            f"[JobQueue] Cancelled {cancelled_count} in-flight tasks for job {job_id[:8]}"
+        )
     return True
 
 

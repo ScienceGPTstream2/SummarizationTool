@@ -219,10 +219,14 @@ class EvaluationService:
             context_parts.append(f"[Expected Output]\n{test_case.expected_output}")
 
         # Expected JSON shape so the model knows exactly what to produce
-        json_shape = "{\n" + ",\n".join(
-            f'  "{m.name}": {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
-            for m in metric_objects
-        ) + "\n}"
+        json_shape = (
+            "{\n"
+            + ",\n".join(
+                f'  "{m.name}": {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
+                for m in metric_objects
+            )
+            + "\n}"
+        )
 
         prompt = (
             "You are an expert evaluator. Score the AI extraction below on each "
@@ -377,7 +381,9 @@ class EvaluationService:
             # Run all metrics in ONE combined LLM call (~4× faster than N separate calls).
             # Falls back to N parallel calls if the combined response can't be parsed.
             try:
-                results = await self._evaluate_combined(eval_model, metric_objects, test_case)
+                results = await self._evaluate_combined(
+                    eval_model, metric_objects, test_case
+                )
             except Exception as combined_exc:
                 print(
                     f"[EvalService] Combined eval failed ({combined_exc}), "
