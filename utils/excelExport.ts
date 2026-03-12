@@ -12,11 +12,14 @@ type EvaluationResult = {
   model?: string;
   metrics?: EvaluationMetric[];
   evaluation_cost?: number;
+  evaluation_time?: number;
 };
 
 type ExtractionData = {
   extracted?: string;
   evaluationResults?: EvaluationResult[];
+  duration?: number;
+  cost?: number;
 };
 
 type UploadFileData = {
@@ -114,13 +117,16 @@ export async function downloadExcelReport(documentData: DocumentData) {
       "";
     const entities = fileItem.entities || [];
     const docParseCost = (fileItem as any).processingResult?.parse_cost ?? "";
+    const docParseLatencyRaw: number | null =
+      (fileItem as any).processingResult?.parseDuration ??
+      (fileItem as any).processingResult?.parse_duration_seconds ??
+      null;
 
     for (const entity of entities) {
       const entityName = (entity as { name?: string }).name || "";
       const promptTemplate = (entity as { prompt?: string }).prompt || "";
       const systemPrompt =
-        (entity as { systemPrompt?: string }).systemPrompt ||
-        "You are an expert toxicologist...";
+        (entity as { systemPrompt?: string }).systemPrompt || "";
       const groundTruth =
         (entity as { groundTruth?: string }).groundTruth || "";
 
@@ -183,6 +189,13 @@ export async function downloadExcelReport(documentData: DocumentData) {
               (extractionData as any)?.cost as number
             ),
             "Eval Cost": "",
+            "Parse time (s)":
+              docParseLatencyRaw != null ? String(docParseLatencyRaw) : "",
+            "Extraction time (s)":
+              extractionData?.duration != null
+                ? String(extractionData.duration)
+                : "",
+            "Eval time (s)": "",
           });
         } else {
           for (const result of evalResults) {
@@ -206,6 +219,16 @@ export async function downloadExcelReport(documentData: DocumentData) {
                 (extractionData as any)?.cost as number
               ),
               "Eval Cost": formatCost(result.evaluation_cost),
+              "Parse time (s)":
+                docParseLatencyRaw != null ? String(docParseLatencyRaw) : "",
+              "Extraction time (s)":
+                extractionData?.duration != null
+                  ? String(extractionData.duration)
+                  : "",
+              "Eval time (s)":
+                result.evaluation_time != null
+                  ? String(result.evaluation_time)
+                  : "",
             });
           }
         }
@@ -248,6 +271,10 @@ export async function downloadExcelReport(documentData: DocumentData) {
             (fileItem as any).paragraphSummaryCost as number
           ),
           "Eval Cost": "",
+          "Parse time (s)":
+            docParseLatencyRaw != null ? String(docParseLatencyRaw) : "",
+          "Extraction time (s)": "",
+          "Eval time (s)": "",
         });
       }
     } else if ((fileItem as any).finalSummary && paragraphEval?.groundTruth) {
@@ -277,6 +304,10 @@ export async function downloadExcelReport(documentData: DocumentData) {
           (fileItem as any).paragraphSummaryCost as number
         ),
         "Eval Cost": "",
+        "Parse time (s)":
+          docParseLatencyRaw != null ? String(docParseLatencyRaw) : "",
+        "Extraction time (s)": "",
+        "Eval time (s)": "",
       });
     }
   }
@@ -398,6 +429,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
     { header: "Doc Parse Cost", key: "Doc Parse Cost", width: 15 },
     { header: "Extraction Cost", key: "Extraction Cost", width: 15 },
     { header: "Eval Cost", key: "Eval Cost", width: 15 },
+    { header: "Parse time (s)", key: "Parse time (s)", width: 15 },
+    { header: "Extraction time (s)", key: "Extraction time (s)", width: 18 },
+    { header: "Eval time (s)", key: "Eval time (s)", width: 15 },
   ];
 
   // Style Header Row

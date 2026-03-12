@@ -408,9 +408,9 @@ const ALL_COLUMNS = [
   { key: "docParseCost", label: "Doc Parse Cost", type: "text" },
   { key: "extractionCost", label: "Extraction Cost", type: "text" },
   { key: "evalCost", label: "Eval Cost", type: "text" },
-  { key: "parseLatency", label: "Parse Latency (s)", type: "text" },
-  { key: "extractionLatency", label: "Extraction Latency (s)", type: "text" },
-  { key: "evalLatency", label: "Eval Latency (s)", type: "text" },
+  { key: "parseLatency", label: "Parse time (s)", type: "text" },
+  { key: "extractionLatency", label: "Extraction time (s)", type: "text" },
+  { key: "evalLatency", label: "Eval time (s)", type: "text" },
 ] as const;
 
 type SortDirection = "asc" | "desc" | null;
@@ -753,10 +753,8 @@ export default function BatchResultsPage({
       });
     }
 
-    // Define columns (only visible ones)
-    const visibleColumnDefs = ALL_COLUMNS.filter((col) =>
-      visibleColumns.has(col.key)
-    );
+    // Always export all columns regardless of UI visibility
+    const visibleColumnDefs = [...ALL_COLUMNS];
     worksheet.columns = visibleColumnDefs.map((col) => ({
       header: col.label,
       key: col.key,
