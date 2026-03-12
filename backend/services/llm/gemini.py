@@ -38,6 +38,9 @@ class ExtractionResult(BaseModel):
     )
 
 
+from utils.text_utils import sanitize_text as _sanitize
+
+
 class GeminiLLMClient:
     def __init__(self):
         # Load from environment variables or secrets.toml
@@ -354,7 +357,7 @@ class GeminiLLMClient:
                         print(f"[LLMService] Output still truncated after max retries")
 
                 try:
-                    response_text = (
+                    response_text = _sanitize(
                         raw.get("candidates", [])[0]
                         .get("content", {})
                         .get("parts", [])[0]

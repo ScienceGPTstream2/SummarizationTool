@@ -9,6 +9,7 @@ import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from supabase import create_client, Client
+from utils.text_utils import sanitize_text as _sanitize_text
 
 # Environment variables are loaded from secrets.toml via core/config.py
 
@@ -447,10 +448,10 @@ class SupabaseDBService:
             "document_id": document_id,
             "entity_name": entity_name,
             "model_id": model_id,
-            "extracted_text": extracted_text,
+            "extracted_text": _sanitize_text(extracted_text),
             "bbox_references": bbox_references,
             "status": status,
-            "error_message": error_message,
+            "error_message": _sanitize_text(error_message),
         }
         # Only include cost/token fields if they have values, so a second write
         # without these fields never overwrites an already-persisted cost.
@@ -528,10 +529,10 @@ class SupabaseDBService:
             "extraction_result_id": extraction_result_id,
             "metric": metric,
             "score": score,
-            "reasoning": reasoning,
+            "reasoning": _sanitize_text(reasoning),
             "judge_model": judge_model,
             "human_score": human_score,
-            "ground_truth": ground_truth,
+            "ground_truth": _sanitize_text(ground_truth),
             "evaluated_at": datetime.utcnow().isoformat(),
         }
         # Only include cost/time if provided (to avoid overwriting existing values)
@@ -671,35 +672,20 @@ class SupabaseDBService:
         cost: float = 0.0,
         latency: float = 0.0,
     ) -> bool:
-        """Increment session metrics (total_cost, total_latency, total_calls)"""
+        """Atomically increment session metrics using a single DB UPDATE via RPC.
+
+        Replaces the previous SELECT + UPDATE pattern which had a race condition
+        when many concurrent extraction calls all incremented the same session.
+        """
         try:
-            # Use RPC to atomically increment values
-            # First get current values
-            result = (
-                self.client.table("sessions")
-                .select("total_cost, total_latency, total_calls")
-                .eq("id", session_id)
-                .execute()
-            )
-
-            if not result.data:
-                print(f"[DB] Session {session_id} not found for metrics update")
-                return False
-
-            current = result.data[0]
-            new_cost = float(current.get("total_cost") or 0) + cost
-            new_latency = float(current.get("total_latency") or 0) + latency
-            new_calls = int(current.get("total_calls") or 0) + 1
-
-            # Update with new values
-            self.client.table("sessions").update(
+            self.client.rpc(
+                "increment_session_metrics",
                 {
-                    "total_cost": new_cost,
-                    "total_latency": new_latency,
-                    "total_calls": new_calls,
-                }
-            ).eq("id", session_id).execute()
-
+                    "p_session_id": session_id,
+                    "p_cost": cost,
+                    "p_latency": latency,
+                },
+            ).execute()
             return True
         except Exception as e:
             print(f"[DB] Failed to increment session metrics: {e}")

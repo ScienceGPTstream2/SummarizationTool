@@ -36,7 +36,12 @@ import {
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
 import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
-import { signOut, getCurrentUser, getValidToken } from "./utils/authUtils";
+import {
+  signOut,
+  getCurrentUser,
+  getValidToken,
+  installVisibilityRefreshListener,
+} from "./utils/authUtils";
 import { Toaster, toast } from "./components/ui/sonner";
 import { SessionMetrics } from "./components/SessionMetrics";
 
@@ -210,6 +215,13 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<Step>(
     isAuthCallback ? "auth_callback" : "upload"
   );
+  // Ref that always holds the current step — used in the onAuthStateChange closure
+  // (which has [] deps and captures the initial value) to avoid stale closure bugs.
+  const currentStepRef = useRef<Step>(currentStep);
+  useEffect(() => {
+    currentStepRef.current = currentStep;
+  }, [currentStep]);
+
   // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
@@ -391,13 +403,15 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
       (event: AuthChangeEvent, session: Session | null) => {
-        setSession(session);
-
         if (session) {
+          // Always accept a valid session (initial load, refresh, sign-in)
+          setSession(session);
+
           // If we just logged in, go to upload
           if (
             event === "SIGNED_IN" &&
-            (currentStep === "login" || currentStep === "auth_callback")
+            (currentStepRef.current === "login" ||
+              currentStepRef.current === "auth_callback")
           ) {
             // Clean up URL if needed
             if (
@@ -409,15 +423,99 @@ export default function App() {
             setCurrentStep("upload");
           }
         } else if (event === "SIGNED_OUT") {
-          // Only redirect to login on explicit sign-out, not on transient
-          // token refresh failures or other null-session events (e.g. alt-tab)
+          // Only clear session on EXPLICIT sign-out.
+          // This is the only event that should nuke the app state.
+          setSession(null);
           setCurrentStep("login");
+        } else {
+          // Transient null session — e.g. token refresh after tab switch,
+          // background timer expiry, or network hiccup.
+          // Do NOT call setSession(null) here — that would trigger the
+          // `if (!session) return <LoginPage />` render guard and unmount
+          // the entire app, destroying all in-progress work.
+          console.warn(
+            `[Auth] Event "${event}" fired with null session — keeping existing session to avoid state loss`
+          );
         }
       }
     );
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // ─── Fix: Proactive token refresh on tab visibility change ──────────
+  // Chrome throttles timers in backgrounded tabs, so Supabase's
+  // autoRefreshToken may not fire. This listener ensures we refresh
+  // the token immediately when the user switches back to the tab.
+  useEffect(() => {
+    installVisibilityRefreshListener();
+  }, []);
+
+  // ─── Fix: Persist session state to localStorage as a safety net ─────
+  // If a page reload somehow happens (browser crash, accidental refresh,
+  // or a clearTokenAndReload that we missed), we can auto-restore the
+  // user to their last step + session instead of dumping them at upload.
+  const PERSISTED_STATE_KEY = "app_persisted_state";
+
+  // Save currentStep + sessionId whenever they change
+  useEffect(() => {
+    const nonPersistableSteps: Step[] = ["login", "auth_callback"];
+    if (!nonPersistableSteps.includes(currentStep)) {
+      try {
+        localStorage.setItem(
+          PERSISTED_STATE_KEY,
+          JSON.stringify({
+            currentStep,
+            sessionId: documentData.sessionId || null,
+            timestamp: Date.now(),
+          })
+        );
+      } catch {
+        // localStorage full or unavailable — not critical
+      }
+    }
+  }, [currentStep, documentData.sessionId]);
+
+  // On mount, if we have a valid auth session AND persisted state, auto-restore
+  useEffect(() => {
+    if (!session || isAuthCallback) return;
+
+    try {
+      const raw = localStorage.getItem(PERSISTED_STATE_KEY);
+      if (!raw) return;
+
+      const persisted = JSON.parse(raw);
+      const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+      if (Date.now() - persisted.timestamp > MAX_AGE_MS) {
+        localStorage.removeItem(PERSISTED_STATE_KEY);
+        return;
+      }
+
+      const restoredStep = persisted.currentStep as Step;
+      const restoredSessionId = persisted.sessionId as string | null;
+
+      // Only auto-restore if we're currently at upload (default) and
+      // the persisted step is a workflow step with a session
+      const workflowSteps: Step[] = [
+        "study_selection",
+        "extraction",
+        "evaluation",
+      ];
+      if (
+        currentStep === "upload" &&
+        restoredSessionId &&
+        workflowSteps.includes(restoredStep)
+      ) {
+        console.log(
+          `[App] Auto-restoring from persisted state: step=${restoredStep}, session=${restoredSessionId}`
+        );
+        // Use the existing handleRestoreSession which fetches full data from the API
+        handleRestoreSession(restoredSessionId);
+      }
+    } catch {
+      // Corrupted localStorage — ignore
+    }
+  }, [session]); // Only run when session becomes available
 
   useEffect(() => {
     if (session) {
@@ -664,6 +762,10 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    // Clear persisted state so we don't auto-restore after explicit logout
+    try {
+      localStorage.removeItem(PERSISTED_STATE_KEY);
+    } catch {}
     await signOut();
     setSession(null);
     setDocumentData({
