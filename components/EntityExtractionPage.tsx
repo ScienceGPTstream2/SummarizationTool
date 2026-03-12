@@ -782,7 +782,8 @@ export function EntityExtractionPage({
         (mId: string) => !macbookModels.includes(mId)
       );
 
-      const isMacbookOnly = macbookModels.length > 0 && cloudModels.length === 0;
+      const isMacbookOnly =
+        macbookModels.length > 0 && cloudModels.length === 0;
       const hasMacbook = macbookModels.length > 0;
 
       // Show a "slow models" notice after a threshold
