@@ -436,6 +436,7 @@ export function EvaluationPage({
 
   // Tracks the currently running job so Stop can cancel it
   const currentJobIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Cancel any in-flight evaluation if the component unmounts (e.g. user navigates back)
   useEffect(() => {
@@ -1083,6 +1084,101 @@ export function EvaluationPage({
         return { provider_id: pid, provider: pid, model_name: p.model };
       })
       .filter(Boolean);
+  };
+
+  const saveEvaluationResult = async (
+    entityName: string,
+    modelId: string,
+    groundTruth: string | undefined,
+    evaluationResults: Array<{
+      provider: string;
+      model: string;
+      metrics: Array<{
+        metric_name: string;
+        score: number;
+        threshold: number;
+        success: boolean;
+        reason: string;
+      }>;
+      aggregate_score: number;
+      all_passed: boolean;
+      evaluation_time: number;
+      evaluation_cost?: number;
+    }>,
+    humanScore?: number,
+    documentId?: string
+  ) => {
+    const sessionId = documentData.sessionId;
+    if (!sessionId) return;
+
+    try {
+      const token = await getValidToken();
+      if (!token) return;
+
+      const { getCurrentUser } = await import("../utils/authUtils");
+      const user = await getCurrentUser();
+      if (!user) return;
+
+      const metricNameMap: Record<string, string> = {
+        "Entity Extraction Correctness": "correctness",
+        "Entity Extraction Completeness": "completeness",
+        "Entity Extraction Relevance": "relevance",
+        "Entity Extraction Safety": "safety",
+        correctness: "correctness",
+        completeness: "completeness",
+        relevance: "relevance",
+        safety: "safety",
+      };
+
+      const scores = evaluationResults.flatMap((result) =>
+        result.metrics.map((metric) => ({
+          metric:
+            metricNameMap[metric.metric_name] ||
+            metric.metric_name.toLowerCase().split(" ").pop() ||
+            "unknown",
+          score: metric.score,
+          reasoning: metric.reason,
+          judge_model: result.model,
+        }))
+      );
+
+      const response = await fetch(
+        `/api/sessions/${sessionId}/evaluations?user_id=${user.id}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            entity_name: entityName,
+            model_id: modelId,
+            file_hash: documentId,
+            ground_truth: groundTruth,
+            scores: scores,
+            human_score: humanScore,
+            evaluation_cost: evaluationResults.reduce(
+              (sum, r) => sum + (r.evaluation_cost || 0),
+              0
+            ),
+            evaluation_time: evaluationResults.reduce(
+              (sum, r) => sum + (r.evaluation_time || 0),
+              0
+            ),
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(
+          `[Eval Persist] Failed to save evaluation: ${response.status}`,
+          errorBody
+        );
+      }
+    } catch (error) {
+      console.error("[Eval Persist] Error saving evaluation:", error);
+    }
   };
 
   /**
