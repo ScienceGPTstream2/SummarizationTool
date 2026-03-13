@@ -3,12 +3,74 @@ Custom Azure OpenAI adapter for DeepEval using LangChain
 This follows the official DeepEval documentation pattern
 """
 
+import asyncio
+import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from deepeval.models.base_model import DeepEvalBaseLLM
 from langchain_openai import AzureChatOpenAI
+
+# Limit concurrent Azure OpenAI API calls to avoid rate-limit storms.
+# Azure GPT-4o Mini quota is typically 300–600 RPM.  With the combined-eval
+# approach (1 call per evaluation instead of 4), each call is ~4–6s, giving
+# throughput of 35 / 5s = 7 req/s = 420 RPM — safely under quota.
+# Each evaluate_extraction spawns N_metrics sub-calls; they all share this semaphore.
+_AZURE_API_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+
+def _get_azure_semaphore() -> asyncio.Semaphore:
+    global _AZURE_API_SEMAPHORE
+    if _AZURE_API_SEMAPHORE is None:
+        _AZURE_API_SEMAPHORE = asyncio.Semaphore(35)
+    return _AZURE_API_SEMAPHORE
+
+
+def _extract_json(text: str) -> str:
+    """
+    Best-effort JSON extraction from a model response.
+
+    Weak/small models often wrap the JSON score object in prose or markdown
+    code fences.  DeepEval expects a bare JSON string, so we try to recover:
+
+      1. Already valid JSON → return as-is.
+      2. Markdown code-block (```json … ```) → strip fences.
+      3. JSON object buried anywhere in the text → extract with regex.
+      4. Nothing worked → return original so DeepEval shows a clean error.
+    """
+    stripped = text.strip()
+
+    # 1. Already valid JSON
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Strip markdown code fences  (```json … ``` or ``` … ```)
+    no_fence = re.sub(r"```(?:json)?\s*", "", stripped).strip("`").strip()
+    try:
+        json.loads(no_fence)
+        return no_fence
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Find the outermost {...} block (greedy first for nested JSON, then
+    #    non-greedy as fallback for simple single-level objects).
+    for pattern in (r"\{[\s\S]*\}", r"\{[\s\S]*?\}"):
+        match = re.search(pattern, stripped)
+        if match:
+            candidate = match.group()
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+    # 4. Fallback — return original and let DeepEval report the error
+    return text
 
 
 class AzureOpenAIDeepEvalModel(DeepEvalBaseLLM):
@@ -239,38 +301,25 @@ class AzureOpenAIDeepEvalModel(DeepEvalBaseLLM):
         return self.model
 
     def generate(self, prompt: str) -> str:
-        """
-        Generate text using Azure OpenAI via LangChain
-
-        Args:
-            prompt: The prompt to send to the model
-
-        Returns:
-            Generated text response
-        """
+        """Generate text using Azure OpenAI via LangChain."""
         chat_model = self.load_model()
         start_time = time.perf_counter()
         response = chat_model.invoke(prompt)
         duration = time.perf_counter() - start_time
         self._record_call(duration, self._extract_usage(response))
-        return response.content
+        # Recover valid JSON from responses that wrap it in prose/markdown
+        return _extract_json(response.content)
 
     async def a_generate(self, prompt: str) -> str:
-        """
-        Async generate text using Azure OpenAI via LangChain
-
-        Args:
-            prompt: The prompt to send to the model
-
-        Returns:
-            Generated text response
-        """
-        chat_model = self.load_model()
-        start_time = time.perf_counter()
-        response = await chat_model.ainvoke(prompt)
-        duration = time.perf_counter() - start_time
-        self._record_call(duration, self._extract_usage(response))
-        return response.content
+        """Async generate text using Azure OpenAI via LangChain."""
+        async with _get_azure_semaphore():
+            chat_model = self.load_model()
+            start_time = time.perf_counter()
+            response = await chat_model.ainvoke(prompt)
+            duration = time.perf_counter() - start_time
+            self._record_call(duration, self._extract_usage(response))
+            # Recover valid JSON from responses that wrap it in prose/markdown
+            return _extract_json(response.content)
 
     def get_model_name(self) -> str:
         """Return the model name"""

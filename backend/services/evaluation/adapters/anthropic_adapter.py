@@ -3,11 +3,22 @@ Custom Anthropic Vertex AI adapter for DeepEval
 This follows the official DeepEval documentation pattern using Anthropic Vertex SDK
 """
 
+import asyncio
 import os
 import time
 from typing import Optional, Dict, Any, List
 from deepeval.models.base_model import DeepEvalBaseLLM
 from anthropic import AnthropicVertex, AsyncAnthropicVertex
+
+# Limit concurrent Anthropic Vertex AI API calls to avoid rate-limit storms.
+_ANTHROPIC_API_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+
+def _get_anthropic_semaphore() -> asyncio.Semaphore:
+    global _ANTHROPIC_API_SEMAPHORE
+    if _ANTHROPIC_API_SEMAPHORE is None:
+        _ANTHROPIC_API_SEMAPHORE = asyncio.Semaphore(8)
+    return _ANTHROPIC_API_SEMAPHORE
 
 
 class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
@@ -162,11 +173,12 @@ class AnthropicVertexDeepEvalModel(DeepEvalBaseLLM):
         if self.temperature is not None:
             request_params["temperature"] = self.temperature
 
-        # Make the API call
-        start_time = time.perf_counter()
-        message = await self.async_client.messages.create(**request_params)
-        duration = time.perf_counter() - start_time
-        self._record_call(duration, self._extract_usage(message))
+        async with _get_anthropic_semaphore():
+            # Make the API call
+            start_time = time.perf_counter()
+            message = await self.async_client.messages.create(**request_params)
+            duration = time.perf_counter() - start_time
+            self._record_call(duration, self._extract_usage(message))
 
         # Extract content from response
         if message.content and len(message.content) > 0:

@@ -65,19 +65,24 @@ async def get_session(
     return session
 
 
-@router.patch("/{session_id}", response_model=Session)
+@router.patch("/{session_id}", response_model=dict)
 async def update_session(session_id: str, request: UpdateSessionRequest):
     """
     Update a session's name, status, configuration, or results.
 
     Only provided fields will be updated.
+
+    Returns {"ok": true} — callers (frontend auto-save for eval config,
+    ground truths, batch configs) do not use the returned session data,
+    so we skip serialising the full Session object which grows with every
+    eval run and can become many MB for large sessions.
     """
     session = session_service.update_session(request.user_id, session_id, request)
 
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    return session
+    return {"ok": True}
 
 
 @router.delete("/{session_id}")
@@ -119,7 +124,7 @@ async def add_extraction_result(
     return {"ok": True}
 
 
-@router.post("/{session_id}/evaluations", response_model=Session)
+@router.post("/{session_id}/evaluations")
 async def add_evaluation_result(
     session_id: str,
     result: EvaluationResult,
@@ -128,18 +133,24 @@ async def add_evaluation_result(
     """
     Add or update an evaluation result in a session.
 
-    If a result for the same entity and model already exists, it will be updated.
+    Returns {"ok": true} — the frontend does not consume the full session
+    response so we skip the expensive get_session() reload to avoid
+    returning 9+MB of session data (all documents, extractions, and bbox
+    references) on every eval persist call.
+
+    This mirrors the same optimisation already applied to the extractions
+    endpoint above.
     """
     try:
-        session = session_service.add_evaluation_result(user_id, session_id, result)
+        ok = session_service.add_evaluation_result_fast(user_id, session_id, result)
 
-        if session is None:
+        if not ok:
             raise HTTPException(
                 status_code=404,
                 detail=f"Session {session_id} not found or no extraction exists for entity {result.entity_name}",
             )
 
-        return session
+        return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
