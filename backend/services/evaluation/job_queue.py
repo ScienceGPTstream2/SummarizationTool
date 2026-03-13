@@ -56,9 +56,20 @@ _NON_RETRYABLE_KEYWORDS = (
 )
 
 
+def _is_timeout_error(exc: Exception) -> bool:
+    """Return True for asyncio/httpx/requests timeout exceptions.
+
+    TimeoutError has an empty str(), so we check the type name too.
+    """
+    msg = (str(exc) + " " + type(exc).__name__).lower()
+    return "timeout" in msg or isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+
+
 def _is_rate_limit_error(exc: Exception) -> bool:
     """Return True when the exception looks like a provider rate-limit."""
-    msg = str(exc).lower()
+    if _is_timeout_error(exc):
+        return False  # timeouts have their own classification
+    msg = (str(exc) + " " + type(exc).__name__).lower()
     return any(kw in msg for kw in _RATE_LIMIT_KEYWORDS)
 
 
@@ -68,10 +79,13 @@ def _is_non_retryable_error(exc: Exception) -> bool:
     JSON parse failures from weak eval models, auth errors, and missing
     deployments are deterministic — retrying only wastes time.
     Rate-limit errors are explicitly excluded so they still get their backoff.
+    Timeouts are handled separately — they are also non-retryable (fail fast).
     """
     if _is_rate_limit_error(exc):
         return False  # rate limits ARE worth retrying after a delay
-    msg = str(exc).lower()
+    if _is_timeout_error(exc):
+        return True  # fail fast — don't hold up other entities
+    msg = (str(exc) + " " + type(exc).__name__).lower()
     return any(kw in msg for kw in _NON_RETRYABLE_KEYWORDS)
 
 
@@ -303,7 +317,7 @@ async def _run_single_eval(
                 f"[JobQueue] Attempt {attempt}/{MAX_ATTEMPTS} failed "
                 f"({'rate-limit' if is_rl else 'error'}) "
                 f"for {task.entity_name}/{provider.provider_id}: "
-                f"{last_exc}. Retrying in {delay}s…"
+                f"{type(last_exc).__name__}: {last_exc!r}. Retrying in {delay}s…"
             )
             await asyncio.sleep(delay)  # semaphores NOT held here
 
@@ -342,14 +356,18 @@ async def _run_single_eval(
             is_final = attempt == MAX_ATTEMPTS - 1 or _is_non_retryable_error(exc)
             if is_final:
                 # Record error and stop retrying.
+                err_str = str(exc) or f"{type(exc).__name__} (no message)"
+                is_to = _is_timeout_error(exc)
                 job.errors.append(
                     {
                         "entity_name": task.entity_name,
                         "source_model": task.source_model,
                         "file_id": task.file_id,
                         "provider_id": provider.provider_id,
-                        "error": str(exc),
-                        "error_type": "rate_limit" if is_rl else "error",
+                        "error": err_str,
+                        "error_type": (
+                            "timeout" if is_to else "rate_limit" if is_rl else "error"
+                        ),
                     }
                 )
                 break  # exit retry loop immediately for non-retryable errors
@@ -461,14 +479,18 @@ async def _run_single_eval(
             for e in job.errors
         ):
             is_rl = _is_rate_limit_error(exc)
+            is_to = _is_timeout_error(exc)
+            err_str = str(exc) or f"{type(exc).__name__} (no message)"
             job.errors.append(
                 {
                     "entity_name": task.entity_name,
                     "source_model": task.source_model,
                     "file_id": task.file_id,
                     "provider_id": provider.provider_id,
-                    "error": str(exc),
-                    "error_type": "rate_limit" if is_rl else "error",
+                    "error": err_str,
+                    "error_type": (
+                        "timeout" if is_to else "rate_limit" if is_rl else "error"
+                    ),
                 }
             )
     finally:

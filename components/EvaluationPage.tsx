@@ -464,6 +464,65 @@ export function EvaluationPage({
     };
   }, []);
 
+  // Reconnect to a job that was running when the page was last unloaded
+  // (tab discard, browser reload, navigation away and back).
+  useEffect(() => {
+    const saved = sessionStorage.getItem("evalActiveJob");
+    if (!saved || currentJobIdRef.current) return;
+    let cancelled = false;
+    const reconnect = async () => {
+      let parsed: { jobId: string; totalTasks: number };
+      try {
+        parsed = JSON.parse(saved);
+      } catch {
+        sessionStorage.removeItem("evalActiveJob");
+        return;
+      }
+      const { jobId, totalTasks } = parsed;
+      const token = await getValidToken();
+      if (!token || cancelled) return;
+      try {
+        const res = await fetch(`/api/evaluations/jobs/${jobId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          sessionStorage.removeItem("evalActiveJob");
+          return;
+        }
+        const statusData = await res.json();
+        // Apply results already completed before the reload
+        const seenResultKeys = new Set<string>();
+        applyJobResults(statusData.results || [], seenResultKeys);
+        if (
+          statusData.status === "running" ||
+          statusData.status === "pending"
+        ) {
+          if (cancelled) return;
+          setIsEvaluating(true);
+          currentJobIdRef.current = jobId;
+          toast.info("Reconnected to running evaluation", {
+            description: `Job ${jobId.slice(0, 8)}… still in progress — resuming updates.`,
+          });
+          await pollJobUntilDone(jobId, totalTasks, token, seenResultKeys);
+          const wasStoppedByUser = !currentJobIdRef.current;
+          currentJobIdRef.current = null;
+          setIsEvaluating(false);
+          setEvaluationProgress(0);
+          setEvaluatingEntities(new Set());
+          if (!wasStoppedByUser) setEvaluationComplete(true);
+        }
+      } catch {
+        // Job not found or network error — just clear saved state
+      } finally {
+        sessionStorage.removeItem("evalActiveJob");
+      }
+    };
+    reconnect();
+    return () => {
+      cancelled = true;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Confirmation dialog state
   const [confirmationDialog, setConfirmationDialog] = useState<{
     isOpen: boolean;
@@ -1195,6 +1254,32 @@ export function EvaluationPage({
     });
     if (fresh.length === 0) return;
 
+    // Persist each fresh result to the DB so Restore History sees the latest data.
+    // Fire-and-forget — don't block the UI state update.
+    fresh.forEach((r) => {
+      const groundTruth = files
+        .find((f: any) => f.fileId === r.file_id)
+        ?.entities?.find((e: any) => e.name === r.entity_name)?.groundTruth;
+      saveEvaluationResult(
+        r.entity_name,
+        r.source_model,
+        groundTruth,
+        [
+          {
+            provider: r.provider,
+            model: r.model,
+            metrics: r.metrics,
+            aggregate_score: r.aggregate_score,
+            all_passed: r.all_passed,
+            evaluation_time: r.evaluation_time,
+            evaluation_cost: r.evaluation_cost,
+          },
+        ],
+        undefined,
+        r.file_id
+      );
+    });
+
     setFiles((prevFiles: any[]) =>
       prevFiles.map((file) => ({
         ...file,
@@ -1290,23 +1375,41 @@ export function EvaluationPage({
     seenResultKeys: Set<string>
   ) => {
     const POLL_INTERVAL_MS = 3000;
+    const MAX_CONSECUTIVE_FAILURES = 5;
     // Track errors we've already processed so cumulative job.errors list
     // doesn't re-fire toasts / re-clear badges on every poll.
     const seenErrorKeys = new Set<string>();
+    let currentToken = token;
+    let consecutiveFailures = 0;
     while (true) {
       if (!currentJobIdRef.current) break; // user clicked Stop
 
       await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
 
+      // Refresh token each iteration — critical for long-running jobs where
+      // the initial token (Supabase default: 1 hour) can expire mid-poll.
+      const freshToken = await getValidToken();
+      if (freshToken) currentToken = freshToken;
+
       let statusData: any;
       try {
         const res = await fetch(`/api/evaluations/jobs/${jobId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${currentToken}` },
         });
-        if (!res.ok) break;
+        if (!res.ok) {
+          if (res.status === 404) break; // job evicted from memory — stop
+          // 401/5xx: transient — count failures, retry up to limit
+          consecutiveFailures++;
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
+          continue;
+        }
         statusData = await res.json();
+        consecutiveFailures = 0; // reset on success
       } catch {
-        break;
+        // Network error — retry up to limit
+        consecutiveFailures++;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
+        continue;
       }
 
       applyJobResults(statusData.results || [], seenResultKeys);
@@ -1327,6 +1430,7 @@ export function EvaluationPage({
         // Log and collect rate-limit errors outside of the setState updater
         // (updater must be pure — no side-effects like push/console).
         const rateLimitLabels: string[] = [];
+        const timeoutLabels: string[] = [];
         erroredItems.forEach((e: any) => {
           const { entity_name, source_model, provider_id, error_type, error } =
             e;
@@ -1335,6 +1439,10 @@ export function EvaluationPage({
           );
           if (error_type === "rate_limit") {
             rateLimitLabels.push(
+              `${entity_name}${source_model ? ` [${source_model}]` : ""}/${provider_id}`
+            );
+          } else if (error_type === "timeout") {
+            timeoutLabels.push(
               `${entity_name}${source_model ? ` [${source_model}]` : ""}/${provider_id}`
             );
           }
@@ -1378,6 +1486,18 @@ export function EvaluationPage({
               });
             }
           });
+        }
+
+        // Surface timeout errors as a single grouped toast
+        if (timeoutLabels.length > 0) {
+          toast.warning(
+            `Server busy — ${timeoutLabels.length} evaluation${timeoutLabels.length > 1 ? "s" : ""} skipped`,
+            {
+              description:
+                "These entities timed out and were skipped. You can rerun them later.",
+              duration: 8000,
+            }
+          );
         }
       }
 
@@ -1591,10 +1711,14 @@ export function EvaluationPage({
         throw new Error(`Failed to submit rerun job: ${err}`);
       }
 
-      const { job_id } = await submitRes.json();
+      const { job_id, total: rerunTotal } = await submitRes.json();
       // Use a local ref so this rerun's poll doesn't interfere with a full batch eval
       const prevJobId = currentJobIdRef.current;
       currentJobIdRef.current = job_id;
+      sessionStorage.setItem(
+        "evalActiveJob",
+        JSON.stringify({ jobId: job_id, totalTasks: rerunTotal ?? totalTasks })
+      );
 
       const evaluatingKeys = new Set<string>();
       tasks.forEach((t: any) => {
@@ -1617,6 +1741,7 @@ export function EvaluationPage({
       console.error("[Rerun] Error:", error);
       toast.error("Re-run failed", { description: error.message });
     } finally {
+      sessionStorage.removeItem("evalActiveJob");
       setEvaluatingEntities((prev) => {
         const newSet = new Set(prev);
         // Clear the plain-name placeholder AND all 4-part keys for this file+entity.
@@ -1785,6 +1910,10 @@ export function EvaluationPage({
 
       const { job_id, total } = await submitRes.json();
       currentJobIdRef.current = job_id;
+      sessionStorage.setItem(
+        "evalActiveJob",
+        JSON.stringify({ jobId: job_id, totalTasks: total })
+      );
       console.log(`[JobQueue] Submitted job ${job_id} — ${total} total evals`);
 
       // Poll until done — applies results to React state as they arrive
@@ -1798,6 +1927,7 @@ export function EvaluationPage({
       console.error("Evaluation error:", error);
       alert(`Evaluation failed: ${error.message}`);
     } finally {
+      sessionStorage.removeItem("evalActiveJob");
       setIsEvaluating(false);
       setEvaluationProgress(0);
       // Clear any badges still stuck as "Evaluating" (e.g. entities that errored
@@ -2228,6 +2358,10 @@ export function EvaluationPage({
 
       const { job_id, total } = await submitRes.json();
       currentJobIdRef.current = job_id;
+      sessionStorage.setItem(
+        "evalActiveJob",
+        JSON.stringify({ jobId: job_id, totalTasks: total })
+      );
       console.log(`[JobQueue] Batch job submitted: ${job_id}`);
 
       // Poll until done
@@ -2253,6 +2387,7 @@ export function EvaluationPage({
         description: error.message || "Unknown error occurred",
       });
     } finally {
+      sessionStorage.removeItem("evalActiveJob");
       setIsEvaluating(false);
       setEvaluationProgress(0);
       // Clear any badges still stuck as "Evaluating" (e.g. entities that errored
