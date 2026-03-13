@@ -104,7 +104,7 @@ _RETRY_DELAYS_RATE_LIMIT = [15, 45]  # attempt 0→1, attempt 1→2
 # Set this high enough that the adapter semaphores — not this value — are always
 # the bottleneck.  100 concurrent evals × 4 metrics = 400 queued a_generate calls,
 # which keeps all provider semaphore slots fully saturated.
-GLOBAL_LLM_CONCURRENCY: int = 100
+GLOBAL_LLM_CONCURRENCY: int = 30
 _LLM_SEMAPHORE: asyncio.Semaphore = asyncio.Semaphore(GLOBAL_LLM_CONCURRENCY)
 
 # PER_JOB_CONCURRENCY is computed dynamically at job-start time:
@@ -300,7 +300,7 @@ async def _run_single_eval(
             "model_name": provider.model_name or "claude-sonnet-4-5@20250929"
         }
 
-    MAX_ATTEMPTS = 3
+    MAX_ATTEMPTS = 1
     last_exc: Optional[Exception] = None
     result = None
 
@@ -342,7 +342,7 @@ async def _run_single_eval(
                             session_id=job.session_id,
                             **model_kwargs,
                         ),
-                        timeout=90.0,
+                        timeout=60.0,
                     )
             last_exc = None
             break  # success — exit retry loop
