@@ -773,57 +773,182 @@ export function EntityExtractionPage({
         },
       }));
     } else {
+      // Separate macbook models from cloud models
+      const macbookModels = modelsToUse.filter((mId: string) => {
+        const mObj = availableModels.find((m) => m.id === mId);
+        return mObj?.provider?.toLowerCase().includes("macbook");
+      });
+      const cloudModels = modelsToUse.filter(
+        (mId: string) => !macbookModels.includes(mId)
+      );
+
+      const hasMacbook = macbookModels.length > 0;
+
       // Show a "slow models" notice after a threshold
-      const slowThresholdMs = Math.max(30000, modelsToUse.length * 15000);
+      const slowThresholdMs = hasMacbook
+        ? 15000 // Macbook serialization is inherently slow, show sooner
+        : Math.max(30000, modelsToUse.length * 15000);
       const retryMsgTimer = setTimeout(() => {
         setFileProcessingStatus((prev) => ({
           ...prev,
           [file.fileId]: {
             ...prev[file.fileId],
-            statusMessage: `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes\u2026`,
+            statusMessage: hasMacbook
+              ? `Macbook models process one entity at a time for reliability\u2014this is slower but ensures stable results\u2026`
+              : `Waiting for model responses\u2014reasoning models (o3, o1) can take 1\u20132 minutes\u2026`,
           },
         }));
       }, slowThresholdMs);
 
-      // Fire all models concurrently — each request contains ALL entities
       let completedModels = 0;
       const processorUsed =
         file.processingResult?.processorUsed || documentData.processorUsed;
 
-      const modelResults = await Promise.all(
-        modelsToUse.map(async (modelId: string) => {
-          try {
-            const resultsByEntity = await extractAllEntitiesForModelBatched(
-              entitiesToExtract,
-              conversionId,
-              modelId,
-              processorUsed,
-              undefined, // signal
-              sessionIdRef.current || undefined
-            );
-            completedModels++;
+      // ── Cloud models: batched concurrently (existing fast path) ──
+      const cloudResults: Array<{
+        modelId: string;
+        resultsByEntity: Record<string, any>;
+        success: boolean;
+      }> = [];
+      if (cloudModels.length > 0) {
+        const cloudModelResults = await Promise.all(
+          cloudModels.map(async (modelId: string) => {
+            try {
+              const resultsByEntity = await extractAllEntitiesForModelBatched(
+                entitiesToExtract,
+                conversionId,
+                modelId,
+                processorUsed,
+                undefined,
+                sessionIdRef.current || undefined
+              );
+              completedModels++;
+              setFileProcessingStatus((prev) => ({
+                ...prev,
+                [file.fileId]: {
+                  ...prev[file.fileId],
+                  currentEntityIndex: Math.round(
+                    (completedModels / modelsToUse.length) *
+                      updatedEntities.length
+                  ),
+                  statusMessage: `Model ${completedModels}/${modelsToUse.length} complete`,
+                },
+              }));
+              return { modelId, resultsByEntity, success: true };
+            } catch (err) {
+              console.error(
+                `Error in batched extraction for model ${modelId} on file ${file.fileId}:`,
+                err
+              );
+              completedModels++;
+              return { modelId, resultsByEntity: {}, success: false };
+            }
+          })
+        );
+        cloudResults.push(...cloudModelResults);
+      }
+
+      // ── Macbook models: send ONE entity at a time per model for reliability ──
+      // This prevents GPU VRAM overload on the MacBook by ensuring only one
+      // LLM inference runs at a time. We process each macbook model sequentially,
+      // and within each model, send entities one-by-one with live UI updates.
+      const macbookResults: Array<{
+        modelId: string;
+        resultsByEntity: Record<string, any>;
+        success: boolean;
+      }> = [];
+      if (macbookModels.length > 0) {
+        for (const modelId of macbookModels) {
+          const modelObj = availableModels.find((m) => m.id === modelId);
+          const modelName = modelObj?.name || modelId;
+          const resultsByEntity: Record<string, any> = {};
+
+          console.log(
+            `🐢 Macbook serialized extraction: ${entitiesToExtract.length} entities × model "${modelName}" (one at a time)`
+          );
+
+          for (let eIdx = 0; eIdx < entitiesToExtract.length; eIdx++) {
+            const entity = entitiesToExtract[eIdx];
             setFileProcessingStatus((prev) => ({
               ...prev,
               [file.fileId]: {
                 ...prev[file.fileId],
-                currentEntityIndex: Math.round(
-                  (completedModels / modelsToUse.length) *
-                    updatedEntities.length
-                ),
-                statusMessage: `Model ${completedModels}/${modelsToUse.length} complete`,
+                currentEntityIndex: eIdx + 1,
+                totalEntities: entitiesToExtract.length,
+                currentEntityName: `${entity.name} (${modelName})`,
+                statusMessage: `Macbook: entity ${eIdx + 1}/${entitiesToExtract.length} — serialized for GPU reliability`,
               },
             }));
-            return { modelId, resultsByEntity, success: true };
-          } catch (err) {
-            console.error(
-              `Error in batched extraction for model ${modelId} on file ${file.fileId}:`,
-              err
-            );
-            completedModels++;
-            return { modelId, resultsByEntity: {}, success: false };
+
+            try {
+              // Send a SINGLE entity per request — mirrors extractEntityFromApi
+              const modelConfig = {
+                modelType: "macbook" as string,
+                modelId: modelObj?.id,
+                deployment: modelObj?.deployment,
+                apiVersion: modelObj?.api_version,
+              };
+
+              const singleResult = await extractEntityFromApi(
+                entity,
+                conversionId,
+                modelConfig,
+                processorUsed,
+                undefined, // signal
+                sessionIdRef.current || undefined
+              );
+
+              resultsByEntity[entity.name] = {
+                extracted: singleResult.extracted,
+                answer: singleResult.answer || singleResult.extracted,
+                references: singleResult.references || [],
+                duration: singleResult.duration,
+                promptTokens: singleResult.promptTokens,
+                completionTokens: singleResult.completionTokens,
+                cost: singleResult.cost ?? undefined,
+              };
+
+              // Show text immediately as each entity finishes — don't wait for all to complete
+              setEntities((prevEntities) =>
+                prevEntities.map((e) =>
+                  e.name === entity.name
+                    ? {
+                        ...e,
+                        extracted: singleResult.extracted,
+                        answer: singleResult.answer || singleResult.extracted,
+                      }
+                    : e
+                )
+              );
+
+              console.log(
+                `  ✅ Macbook entity "${entity.name}" done (${eIdx + 1}/${entitiesToExtract.length})`
+              );
+            } catch (err) {
+              console.error(
+                `  ❌ Macbook entity "${entity.name}" failed:`,
+                err
+              );
+              const errText = `Error: ${err instanceof Error ? err.message : String(err)}`;
+              resultsByEntity[entity.name] = {
+                extracted: errText,
+              };
+              // Show error text immediately too
+              setEntities((prevEntities) =>
+                prevEntities.map((e) =>
+                  e.name === entity.name ? { ...e, extracted: errText } : e
+                )
+              );
+            }
           }
-        })
-      );
+
+          completedModels++;
+          macbookResults.push({ modelId, resultsByEntity, success: true });
+        }
+      }
+
+      // Combine cloud + macbook results
+      const modelResults = [...cloudResults, ...macbookResults];
 
       clearTimeout(retryMsgTimer);
 

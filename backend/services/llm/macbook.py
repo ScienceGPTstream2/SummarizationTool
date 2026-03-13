@@ -10,6 +10,8 @@ from pathlib import Path
 import json
 import fnmatch
 
+from services.llm.macbook_queue import get_macbook_queue
+
 
 class MacbookLLMClient:
     def __init__(self):
@@ -31,15 +33,17 @@ class MacbookLLMClient:
             "off",
         ]
 
-        # Retry/backoff controls (tunable via env). Enforce minimum 600s timeouts.
-        self.max_attempts = int(os.environ.get("MACBOOK_MAX_ATTEMPTS", 5))
+        # Retry/backoff controls (tunable via env). Enforce minimum 1800s timeouts.
+        # Local inference on large documents can take >600s; use 1800s (30 min) as
+        # the floor so Ollama is never abandoned mid-generation ("Context canceled").
+        self.max_attempts = int(os.environ.get("MACBOOK_MAX_ATTEMPTS", 2))
         self.initial_backoff = float(os.environ.get("MACBOOK_INITIAL_BACKOFF", 1.0))
         self.max_backoff = float(os.environ.get("MACBOOK_MAX_BACKOFF", 8.0))
         self.per_attempt_timeout = max(
-            600.0, float(os.environ.get("MACBOOK_PER_ATTEMPT_TIMEOUT", 30.0))
+            1800.0, float(os.environ.get("MACBOOK_PER_ATTEMPT_TIMEOUT", 1800.0))
         )
         self.total_retry_cap = max(
-            600.0, float(os.environ.get("MACBOOK_TOTAL_RETRY_CAP", 60.0))
+            1800.0, float(os.environ.get("MACBOOK_TOTAL_RETRY_CAP", 1800.0))
         )
 
         if self.disabled:
@@ -404,7 +408,32 @@ class MacbookLLMClient:
 
         # Collapse extra whitespace created by removals
         sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
-        return sanitized.strip()
+        sanitized = sanitized.strip()
+
+        # Fallback: if stripping removed ALL content (model wrapped entire output in
+        # thinking tags), extract the inner content rather than returning empty string.
+        # This happens with reasoning models (gpt-oss, qwen3, DeepSeek) that ignore
+        # options.reasoning=false and put their answer inside <think>…</think>.
+        if not sanitized and content.strip():
+            for think_pat in [
+                r"<think[^>]*>([\s\S]*?)</think>",
+                r"<thinking[^>]*>([\s\S]*?)</thinking>",
+                r"<reflection[^>]*>([\s\S]*?)</reflection>",
+                r"<analysis[^>]*>([\s\S]*?)</analysis>",
+            ]:
+                m = re.search(think_pat, content, re.IGNORECASE)
+                if m:
+                    fallback = m.group(1).strip()
+                    if fallback:
+                        print(
+                            f"[MacbookLLM] _sanitize_content: entire response was inside "
+                            f"thinking tags — using inner content as fallback "
+                            f"({len(fallback)} chars)"
+                        )
+                        sanitized = re.sub(r"\n{3,}", "\n\n", fallback)
+                        break
+
+        return sanitized
 
     async def extract_entities_with_macbook(
         self,
@@ -421,7 +450,12 @@ class MacbookLLMClient:
             f"<markdown study>\n{markdown}\n</markdown study>\n\nPrompt:\n{extraction_prompt}",
         )
 
-        return await self._call_macbook_api(
+        # Route through the global FIFO queue to ensure only one Macbook
+        # request is active at a time — prevents GPU VRAM overload from
+        # concurrent model loads on Ollama.
+        queue = get_macbook_queue()
+        return await queue.enqueue(
+            self._call_macbook_api,
             model_id=used_model,
             prompt=prompt,
             max_tokens=max_tokens,
@@ -438,7 +472,11 @@ class MacbookLLMClient:
     ) -> Dict[str, Any]:
         used_model = model_id or ""
         prompt = self._format_prompt(system_message, user_prompt)
-        return await self._call_macbook_api(
+
+        # Route through the global FIFO queue (same as extraction)
+        queue = get_macbook_queue()
+        return await queue.enqueue(
+            self._call_macbook_api,
             model_id=used_model,
             prompt=prompt,
             max_tokens=max_tokens,
