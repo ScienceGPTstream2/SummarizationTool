@@ -309,7 +309,7 @@ IMPORTANT: Respond with valid JSON only, matching the schema above. Do not inclu
         markdown: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 2048,  # Increased default for structured outputs
+        max_tokens: int = 4096,  # Increased default for structured outputs
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
@@ -392,7 +392,7 @@ Prompt:
         self,
         user_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,

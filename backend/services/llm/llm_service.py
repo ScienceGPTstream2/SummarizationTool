@@ -120,7 +120,7 @@ class LLMService:
         gemini_api_key_override: Optional[str] = None,  # for Gemini
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
-        max_tokens: int = 8048,
+        max_tokens: int = 16096,
         temperature: float = 0.0,
         system_message: Optional[str] = None,  # Custom system prompt
         max_input_length: int = 128000,  # Max input length for Llama (128K tokens ≈ 96K chars)
@@ -295,7 +295,7 @@ class LLMService:
         api_key_override: Optional[str] = None,  # for Azure
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
-        max_tokens: int = 8048,
+        max_tokens: int = 16096,
         temperature: float = 0.0,
         system_message: Optional[str] = None,  # Custom system prompt
         session_id: Optional[str] = None,
@@ -352,7 +352,7 @@ class LLMService:
         gemini_api_key_override: Optional[str] = None,  # for Gemini
         gemini_project_id_override: Optional[str] = None,  # for Gemini
         gemini_location_override: Optional[str] = None,  # for Gemini
-        max_tokens: int = 8048,
+        max_tokens: int = 16096,
         temperature: Optional[float] = None,
         system_message: Optional[str] = None,  # Custom system prompt
         session_id: Optional[str] = None,

@@ -6,7 +6,7 @@ import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # For service account authentication
 try:
@@ -110,7 +110,7 @@ class GeminiLLMClient:
         self,
         model_id: str,
         contents: Dict[str, Any],
-        max_tokens: int = 8024,
+        max_tokens: int = 16048,
         temperature: float = 0.0,
         system_instruction: Optional[str] = None,
         project_id_override: Optional[str] = None,
@@ -389,15 +389,11 @@ class GeminiLLMClient:
                             f"[LLMService] Extracted structured content length: {len(content)}"
                         )
                         print(f"[LLMService] References count: {len(references)}")
-                    except (json.JSONDecodeError, Exception) as e:
+                    except json.JSONDecodeError as e:
+                        label = f"[STRUCTURED_OUTPUT_FAILURE:json_decode] Provider returned non-JSON (attempt {attempt + 1}): {e}"
+                        print(label)
+                        print(f"[LLMService] Raw response: {response_text[:500]}...")
                         if attempt < max_retries - 1:
-                            print(
-                                f"[LLMService] Failed to parse structured output (attempt {attempt + 1}): {e}"
-                            )
-                            print(
-                                f"[LLMService] Response text: {response_text[:500]}..."
-                            )
-                            # Increase maxOutputTokens in case truncation caused the parse failure
                             current_max = payload["generationConfig"].get(
                                 "maxOutputTokens", max_tokens
                             )
@@ -406,15 +402,42 @@ class GeminiLLMClient:
                             print(
                                 f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max} for retry"
                             )
-                            last_error = f"Failed to parse structured output: {str(e)}"
-                            continue  # Retry the entire request
-                        print(
-                            f"[LLMService] Failed to parse structured output after all retries: {e}"
-                        )
-                        print(f"[LLMService] Response text: {response_text[:500]}...")
+                            last_error = f"JSON decode error: {str(e)}"
+                            continue
                         return {
                             "success": False,
-                            "error": f"Failed to parse structured output: {str(e)}",
+                            "error": f"Provider returned non-JSON: {str(e)}",
+                            "raw": raw,
+                        }
+                    except ValidationError as e:
+                        label = f"[STRUCTURED_OUTPUT_FAILURE:pydantic_validation] Schema validation failed (attempt {attempt + 1}): {e}"
+                        print(label)
+                        print(f"[LLMService] Parsed JSON: {str(parsed_json)[:500]}...")
+                        if attempt < max_retries - 1:
+                            current_max = payload["generationConfig"].get(
+                                "maxOutputTokens", max_tokens
+                            )
+                            new_max = min(current_max * 2, 65536)
+                            payload["generationConfig"]["maxOutputTokens"] = new_max
+                            print(
+                                f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max} for retry"
+                            )
+                            last_error = f"Validation error: {str(e)}"
+                            continue
+                        return {
+                            "success": False,
+                            "error": f"Pydantic schema validation failed: {str(e)}",
+                            "raw": raw,
+                        }
+                    except Exception as e:
+                        label = f"[STRUCTURED_OUTPUT_FAILURE:unexpected] Unexpected error parsing structured output (attempt {attempt + 1}): {e}"
+                        print(label)
+                        if attempt < max_retries - 1:
+                            last_error = f"Unexpected error: {str(e)}"
+                            continue
+                        return {
+                            "success": False,
+                            "error": f"Unexpected error parsing structured output: {str(e)}",
                             "raw": raw,
                         }
                 else:
@@ -490,7 +513,7 @@ class GeminiLLMClient:
         markdown: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 8048,  # Increased default for structured outputs
+        max_tokens: int = 16096,  # Increased default for structured outputs
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
@@ -558,7 +581,7 @@ Prompt:
         self,
         user_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 8048,
+        max_tokens: int = 16096,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
@@ -623,7 +646,7 @@ Prompt:
         image_path: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 8048,
+        max_tokens: int = 16096,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,

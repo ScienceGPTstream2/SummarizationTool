@@ -149,7 +149,7 @@ class AzureLLMClient:
         api_version: Optional[str] = None,
         endpoint_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         temperature: Optional[float] = None,
         system_message: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -404,7 +404,7 @@ class AzureLLMClient:
         api_version: Optional[str] = None,
         endpoint_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         temperature: float = 0.0,
         system_message: Optional[str] = None,
     ) -> Dict[str, Any]:

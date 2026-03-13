@@ -257,7 +257,7 @@ class MacbookLLMClient:
         self,
         model_id: str,
         prompt: str,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
         if self.disabled:
@@ -411,7 +411,7 @@ class MacbookLLMClient:
         markdown: str,
         extraction_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.0,
         system_message: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -432,7 +432,7 @@ class MacbookLLMClient:
         self,
         user_prompt: str,
         model_id: Optional[str] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.0,
         system_message: Optional[str] = None,
     ) -> Dict[str, Any]:

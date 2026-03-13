@@ -7,7 +7,7 @@ from pathlib import Path
 from utils.text_utils import sanitize_text
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # For service account authentication
 try:
@@ -105,7 +105,7 @@ class LlamaLLMClient:
         self,
         model_name: str,
         messages: list,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         temperature: float = 0.0,
         response_format: Optional[Dict[str, Any]] = None,
         project_id_override: Optional[str] = None,
@@ -373,7 +373,7 @@ class LlamaLLMClient:
         markdown: str,
         extraction_prompt: str,
         model_name: Optional[str] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.0,
         max_input_length: int = 128000,  # Match Llama's actual context window (128K tokens ≈ 96K chars)
         project_id_override: Optional[str] = None,
@@ -529,7 +529,7 @@ Return JSON only:"""
         ]
 
         # Call with JSON mode and max_tokens matching other models
-        safe_max_tokens = min(max_tokens, 8048)  # Match Azure/Gemini limits
+        safe_max_tokens = min(max_tokens, 16096)  # Match Azure/Gemini limits
 
         response = await self._call_llama_api(
             model_name,
@@ -597,8 +597,19 @@ Return JSON only:"""
                 },
             }
 
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"[LLMService] Primary strategy failed: {e}")
+        except json.JSONDecodeError as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:json_decode] Primary strategy — provider returned non-JSON: {e}")
+            print(f"[LLMService] Raw content: {content[:500]}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "primary_optimized"
+            )
+        except ValidationError as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:pydantic_validation] Primary strategy — schema validation failed: {e}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "primary_optimized"
+            )
+        except Exception as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:unexpected] Primary strategy — unexpected error: {e}")
             return await self._handle_llama_parsing_error(
                 e, content, response, model_name, "primary_optimized"
             )
@@ -649,7 +660,7 @@ Text: {essential_markdown}"""
         response = await self._call_llama_api(
             model_name,
             messages,
-            1024,  # Very low token limit
+            2048,  # Very low token limit
             0.0,  # Zero temperature for consistency
             response_format={"type": "json_object"},
             project_id_override=project_id_override,
@@ -708,8 +719,19 @@ Text: {essential_markdown}"""
                 },
             }
 
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"[LLMService] Fallback strategy also failed: {e}")
+        except json.JSONDecodeError as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:json_decode] Fallback strategy — provider returned non-JSON: {e}")
+            print(f"[LLMService] Raw content: {content[:500]}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "fallback_minimal"
+            )
+        except ValidationError as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:pydantic_validation] Fallback strategy — schema validation failed: {e}")
+            return await self._handle_llama_parsing_error(
+                e, content, response, model_name, "fallback_minimal"
+            )
+        except Exception as e:
+            print(f"[STRUCTURED_OUTPUT_FAILURE:unexpected] Fallback strategy — unexpected error: {e}")
             return await self._handle_llama_parsing_error(
                 e, content, response, model_name, "fallback_minimal"
             )
@@ -803,7 +825,7 @@ Text: {essential_markdown}"""
         self,
         user_prompt: str,
         model_name: Optional[str] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.0,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
