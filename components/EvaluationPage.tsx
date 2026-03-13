@@ -4512,10 +4512,21 @@ export function EvaluationPage({
                                     ? selectedSourceModels
                                     : availableSourceModels;
                                 let completedCount = 0;
+                                // Only count models that have an extraction — models
+                                // without extractions can never have eval results and
+                                // must not inflate the denominator for isComplete.
+                                let extractableCount = 0;
 
                                 modelsToCheck.forEach((model) => {
                                   const ext =
                                     entity.extractionsByModel?.[model];
+                                  const hasExtr =
+                                    ext?.extracted ||
+                                    (entity.extracted &&
+                                      (availableSourceModels.length === 0 ||
+                                        model === file.selectedModel));
+                                  if (hasExtr) extractableCount++;
+
                                   if (
                                     ext?.evaluationResults &&
                                     ext.evaluationResults.length > 0
@@ -4595,8 +4606,8 @@ export function EvaluationPage({
                                 });
 
                                 const isComplete =
-                                  modelsToCheck.length > 0 &&
-                                  completedCount === modelsToCheck.length;
+                                  extractableCount > 0 &&
+                                  completedCount === extractableCount;
 
                                 // Check using 4-part key: file_id::entity_name::...
                                 // Including file_id prevents same-named entities in different files
