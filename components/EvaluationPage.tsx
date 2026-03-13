@@ -2082,14 +2082,13 @@ export function EvaluationPage({
     try {
       // 1. Identify all evaluation tasks (File x Entity x SourceModel x JudgeModel)
       const tasks: Array<{
-        fileId: string;
-        fileName: string;
-        entityName: string;
-        prompt: string;
-        sourceModel: string;
-        extractedContent: string;
-        groundTruth?: string;
-        judgeModel: string;
+        file_id: string;
+        entity_name: string;
+        extraction_prompt: string;
+        source_model: string;
+        actual_output: string;
+        expected_output?: string;
+        judgeModel: string; // local only — stripped before sending to backend
       }> = [];
 
       // When pendingOnly, pre-compute the set of pending file×entity pairs
@@ -2153,13 +2152,12 @@ export function EvaluationPage({
                 }
 
                 tasks.push({
-                  fileId: file.fileId,
-                  fileName: file.file?.name || "Unknown",
-                  entityName: entity.name,
-                  prompt: entity.prompt,
-                  sourceModel: sourceModelId,
-                  extractedContent: extraction,
-                  groundTruth: groundTruth,
+                  file_id: file.fileId,
+                  entity_name: entity.name,
+                  extraction_prompt: entity.prompt,
+                  source_model: sourceModelId,
+                  actual_output: extraction,
+                  expected_output: groundTruth,
                   judgeModel: judgeModelId,
                 });
               });
@@ -2189,10 +2187,22 @@ export function EvaluationPage({
       const evaluatingKeys = new Set<string>();
       tasks.forEach((t) => {
         evaluatingKeys.add(
-          `${t.fileId}::${t.entityName}::${t.sourceModel}::${t.judgeModel}`
+          `${t.file_id}::${t.entity_name}::${t.source_model}::${t.judgeModel}`
         );
       });
       setEvaluatingEntities(evaluatingKeys);
+
+      // Deduplicate tasks: backend runs every task × every provider, so send
+      // one task per (file_id, entity_name, source_model) — not one per judge.
+      const seenTaskKeys = new Set<string>();
+      const tasksForBackend = tasks
+        .filter((t) => {
+          const k = `${t.file_id}::${t.entity_name}::${t.source_model}`;
+          if (seenTaskKeys.has(k)) return false;
+          seenTaskKeys.add(k);
+          return true;
+        })
+        .map(({ judgeModel: _j, ...rest }) => rest);
 
       // Submit one job for the entire batch
       const submitRes = await fetch("/api/evaluations/jobs", {
@@ -2203,7 +2213,7 @@ export function EvaluationPage({
         },
         body: JSON.stringify({
           session_id: documentData.sessionId,
-          tasks,
+          tasks: tasksForBackend,
           providers: providerConfigs,
           metrics: selectedMetrics,
           custom_evaluation_steps: customEvaluationSteps,

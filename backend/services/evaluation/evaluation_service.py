@@ -222,7 +222,7 @@ class EvaluationService:
         json_shape = (
             "{\n"
             + ",\n".join(
-                f'  "{m.name}": {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
+                f'  "{m.name}": {{"score": <0.0-1.0>, "reason": "<10 words max>"}}'
                 for m in metric_objects
             )
             + "\n}"
@@ -230,7 +230,8 @@ class EvaluationService:
 
         prompt = (
             "You are an expert evaluator. Score the AI extraction below on each "
-            "criterion (0.0 = worst, 1.0 = best). Be concise.\n\n"
+            "criterion (0.0 = worst, 1.0 = best). Keep each reason to 10 words or fewer. "
+            "Do not use quotes inside reason strings.\n\n"
             + "\n\n".join(context_parts)
             + "\n\n---\nCriteria:\n\n"
             + "\n\n".join(metric_blocks)
@@ -261,6 +262,27 @@ class EvaluationService:
                         return json.loads(m.group())
                     except json.JSONDecodeError:
                         continue
+            # 4. Per-metric regex salvage — extract any complete metric entries
+            #    from a truncated or partially-invalid response.
+            partial: dict = {}
+            for name in [mo.name for mo in metric_objects]:
+                pat = (
+                    r'"'
+                    + re.escape(name)
+                    + r'":\s*\{"score":\s*([0-9.]+),\s*"reason":\s*"([^"]*)"'
+                    + r"\s*\}"
+                )
+                hit = re.search(pat, text)
+                if hit:
+                    try:
+                        partial[name] = {
+                            "score": float(hit.group(1)),
+                            "reason": hit.group(2),
+                        }
+                    except ValueError:
+                        pass
+            if partial:
+                return partial
             raise ValueError(f"Cannot parse combined eval JSON: {text[:300]}")
 
         data = _parse(raw)

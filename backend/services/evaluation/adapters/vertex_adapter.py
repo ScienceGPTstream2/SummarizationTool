@@ -115,14 +115,17 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         usage = {
             "prompt_tokens": token_usage.get("prompt_tokens")
             or token_usage.get("input_tokens")
+            or token_usage.get("prompt_token_count")
             or token_usage.get("promptTokenCount")
             or token_usage.get("inputTokenCount"),
             "completion_tokens": token_usage.get("completion_tokens")
             or token_usage.get("output_tokens")
+            or token_usage.get("candidates_token_count")
             or token_usage.get("completionTokenCount")
             or token_usage.get("outputTokenCount")
             or token_usage.get("candidatesTokenCount"),
             "total_tokens": token_usage.get("total_tokens")
+            or token_usage.get("total_token_count")
             or token_usage.get("totalTokenCount"),
         }
         if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
