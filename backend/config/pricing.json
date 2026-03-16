@@ -142,18 +142,24 @@
     },
     "vertex:llama-4-maverick-17b": {
       "provider": "gcp",
-      "input_per_million": 5.0,
-      "output_per_million": 16.0
+      "input_per_million": 0.35,
+      "output_per_million": 1.15,
+      "batch_input_per_million": 0.175,
+      "batch_output_per_million": 0.575
     },
     "vertex:llama-4-scout-17b-16e": {
       "provider": "gcp",
-      "input_per_million": 5.0,
-      "output_per_million": 16.0
+      "input_per_million": 0.25,
+      "output_per_million": 0.70,
+      "batch_input_per_million": 0.125,
+      "batch_output_per_million": 0.35
     },
     "vertex:llama-3.3-70b": {
       "provider": "gcp",
       "input_per_million": 0.72,
-      "output_per_million": 2.4
+      "output_per_million": 0.72,
+      "batch_input_per_million": 0.36,
+      "batch_output_per_million": 0.36
     },
     "vertex:llama-3.1-405b": {
       "provider": "gcp",
