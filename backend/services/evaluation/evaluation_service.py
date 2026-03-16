@@ -6,6 +6,8 @@ Supports both Azure OpenAI and Vertex AI for LLM-as-a-judge evaluation.
 """
 
 import asyncio
+import json
+import re
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -186,6 +188,133 @@ class EvaluationService:
             strict_mode=strict_mode,
         )
 
+    async def _evaluate_combined(
+        self,
+        eval_model,
+        metric_objects: List,
+        test_case,
+    ) -> List[Dict[str, Any]]:
+        """Score all metrics in ONE LLM call instead of N separate calls.
+
+        This is ~4× faster than calling a_measure() per metric because:
+        - 1 HTTP round-trip instead of N (critical when each call is 3–15s)
+        - The full extraction prompt (often a long document) is sent once, not N times
+
+        Falls back to per-metric calls if the combined response can't be parsed.
+        """
+        # Metric descriptions block
+        metric_blocks = []
+        for metric in metric_objects:
+            steps = "\n".join(
+                f"  {i + 1}. {s}" for i, s in enumerate(metric.evaluation_steps or [])
+            )
+            metric_blocks.append(f'"{metric.name}":\n{steps}')
+
+        # Context block
+        context_parts = [
+            f"[Extraction Task]\n{test_case.input}",
+            f"[Actual Output]\n{test_case.actual_output}",
+        ]
+        if test_case.expected_output:
+            context_parts.append(f"[Expected Output]\n{test_case.expected_output}")
+
+        # Expected JSON shape so the model knows exactly what to produce
+        json_shape = (
+            "{\n"
+            + ",\n".join(
+                f'  "{m.name}": {{"score": <0.0-1.0>, "reason": "<10 words max>"}}'
+                for m in metric_objects
+            )
+            + "\n}"
+        )
+
+        prompt = (
+            "You are an expert evaluator. Score the AI extraction below on each "
+            "criterion (0.0 = worst, 1.0 = best). Keep each reason to 10 words or fewer. "
+            "Do not use quotes inside reason strings.\n\n"
+            + "\n\n".join(context_parts)
+            + "\n\n---\nCriteria:\n\n"
+            + "\n\n".join(metric_blocks)
+            + f"\n\nReturn ONLY valid JSON with this exact structure:\n{json_shape}"
+        )
+
+        raw = await eval_model.a_generate(prompt)
+
+        # Robust JSON parsing — handles code fences, leading prose, nested objects
+        def _parse(text: str) -> dict:
+            text = text.strip()
+            # 1. Already valid
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+            # 2. Strip markdown code fences
+            no_fence = re.sub(r"```(?:json)?\s*", "", text).strip("`").strip()
+            try:
+                return json.loads(no_fence)
+            except json.JSONDecodeError:
+                pass
+            # 3. Outermost {...} block (greedy then non-greedy)
+            for pattern in (r"\{[\s\S]*\}", r"\{[\s\S]*?\}"):
+                m = re.search(pattern, text)
+                if m:
+                    try:
+                        return json.loads(m.group())
+                    except json.JSONDecodeError:
+                        continue
+            # 4. Per-metric regex salvage — extract any complete metric entries
+            #    from a truncated or partially-invalid response.
+            partial: dict = {}
+            for name in [mo.name for mo in metric_objects]:
+                pat = (
+                    r'"'
+                    + re.escape(name)
+                    + r'":\s*\{"score":\s*([0-9.]+),\s*"reason":\s*"([^"]*)"'
+                    + r"\s*\}"
+                )
+                hit = re.search(pat, text)
+                if hit:
+                    try:
+                        partial[name] = {
+                            "score": float(hit.group(1)),
+                            "reason": hit.group(2),
+                        }
+                    except ValueError:
+                        pass
+            if partial:
+                return partial
+            raise ValueError(f"Cannot parse combined eval JSON: {text[:300]}")
+
+        data = _parse(raw)
+
+        results = []
+        for metric in metric_objects:
+            entry = data.get(metric.name)
+            if entry is None:
+                # Case-insensitive fallback
+                for key, val in data.items():
+                    if key.lower() == metric.name.lower():
+                        entry = val
+                        break
+            if not entry:
+                entry = {"score": 0.0, "reason": "missing from combined response"}
+
+            score = max(0.0, min(1.0, float(entry.get("score", 0.0))))
+            reason = str(entry.get("reason", ""))
+            metric.score = score
+            metric.reason = reason
+            metric.success = score >= metric.threshold
+            results.append(
+                {
+                    "metric_name": metric.name,
+                    "score": score,
+                    "threshold": metric.threshold,
+                    "success": metric.success,
+                    "reason": reason,
+                }
+            )
+        return results
+
     async def evaluate_extraction(
         self,
         entity_name: str,
@@ -271,19 +400,33 @@ class EvaluationService:
                 expected_output=expected_output,
             )
 
-            # Run evaluation for each metric in parallel
-            async def evaluate_single_metric(metric):
-                await metric.a_measure(test_case)
-                return {
-                    "metric_name": metric.name,
-                    "score": metric.score,
-                    "threshold": metric.threshold,
-                    "success": metric.is_successful(),
-                    "reason": metric.reason,
-                }
+            # Run all metrics in ONE combined LLM call (~4× faster than N separate calls).
+            # Falls back to N parallel calls if the combined response can't be parsed.
+            try:
+                results = await self._evaluate_combined(
+                    eval_model, metric_objects, test_case
+                )
+            except Exception as combined_exc:
+                print(
+                    f"[EvalService] Combined eval failed ({combined_exc}), "
+                    "falling back to per-metric calls"
+                )
 
-            metric_tasks = [evaluate_single_metric(metric) for metric in metric_objects]
-            results = await asyncio.gather(*metric_tasks)
+                async def evaluate_single_metric(metric):
+                    await metric.a_measure(test_case)
+                    return {
+                        "metric_name": metric.name,
+                        "score": metric.score,
+                        "threshold": metric.threshold,
+                        "success": metric.is_successful(),
+                        "reason": metric.reason,
+                    }
+
+                results = list(
+                    await asyncio.gather(
+                        *[evaluate_single_metric(m) for m in metric_objects]
+                    )
+                )
 
             call_history = getattr(eval_model, "call_history", []) or []
             if not call_history:
@@ -357,9 +500,10 @@ class EvaluationService:
                 "status": "success",
             }
 
-            # Save evaluation result
-            await self.storage.save(evaluation_id, evaluation_result)
-
+            # NOTE: storage.save() intentionally removed — results are persisted to
+            # PostgreSQL by the job queue's add_evaluation_result_fast() call.
+            # Writing UUID-named JSON files per eval had no reader and caused
+            # unbounded growth in output/evaluations/ on every re-run.
             return evaluation_result
 
         except Exception as e:
@@ -371,12 +515,6 @@ class EvaluationService:
                 "status": "error",
                 "error": str(e),
             }
-
-            # Try to save error result
-            try:
-                await self.storage.save(evaluation_id, error_result)
-            except:
-                pass
 
             return error_result
 

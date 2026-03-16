@@ -389,7 +389,11 @@ export function SessionMetrics() {
       </Dialog>
 
       {/* Main metrics modal */}
-      <Dialog>
+      <Dialog
+        onOpenChange={(open) => {
+          if (open) fetchMetrics();
+        }}
+      >
         <DialogTrigger asChild>
           <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
             <div className="flex flex-wrap items-center gap-3 text-sm">

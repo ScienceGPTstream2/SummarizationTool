@@ -15,6 +15,17 @@ from langchain_google_vertexai import (
     HarmCategory,
 )
 
+# Limit concurrent Vertex AI API calls. Gemini has much higher quotas than Azure,
+# but still benefits from throttling to avoid 429s under heavy parallel load.
+_VERTEX_API_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+
+def _get_vertex_semaphore() -> asyncio.Semaphore:
+    global _VERTEX_API_SEMAPHORE
+    if _VERTEX_API_SEMAPHORE is None:
+        _VERTEX_API_SEMAPHORE = asyncio.Semaphore(25)
+    return _VERTEX_API_SEMAPHORE
+
 
 class VertexAIDeepEvalModel(DeepEvalBaseLLM):
     """
@@ -104,14 +115,17 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         usage = {
             "prompt_tokens": token_usage.get("prompt_tokens")
             or token_usage.get("input_tokens")
+            or token_usage.get("prompt_token_count")
             or token_usage.get("promptTokenCount")
             or token_usage.get("inputTokenCount"),
             "completion_tokens": token_usage.get("completion_tokens")
             or token_usage.get("output_tokens")
+            or token_usage.get("candidates_token_count")
             or token_usage.get("completionTokenCount")
             or token_usage.get("outputTokenCount")
             or token_usage.get("candidatesTokenCount"),
             "total_tokens": token_usage.get("total_tokens")
+            or token_usage.get("total_token_count")
             or token_usage.get("totalTokenCount"),
         }
         if not usage.get("prompt_tokens") and not usage.get("completion_tokens"):
@@ -219,7 +233,9 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    # Calculate exponential backoff with jitter
+                    # Calculate exponential backoff with jitter.
+                    # Sleep OUTSIDE the semaphore so a waiting task does not
+                    # park a concurrency slot while other callers could use it.
                     delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
                     jitter = random.uniform(0, 1)
                     total_delay = delay + jitter
@@ -228,11 +244,12 @@ class VertexAIDeepEvalModel(DeepEvalBaseLLM):
                     )
                     await asyncio.sleep(total_delay)
 
-                start_time = time.perf_counter()
-                response = await chat_model.ainvoke(prompt)
-                duration = time.perf_counter() - start_time
-                self._record_call(duration, self._extract_usage(response))
-                return response.content
+                async with _get_vertex_semaphore():
+                    start_time = time.perf_counter()
+                    response = await chat_model.ainvoke(prompt)
+                    duration = time.perf_counter() - start_time
+                    self._record_call(duration, self._extract_usage(response))
+                    return response.content
 
             except Exception as e:
                 error_str = str(e).lower()

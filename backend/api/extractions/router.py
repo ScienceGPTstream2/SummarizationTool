@@ -272,8 +272,27 @@ async def extract_entities(
                     "meta": result.get("meta"),
                 }
 
-        tasks = [run_extraction(entity) for entity in request.entities]
-        extracted_entities = await asyncio.gather(*tasks)
+        # For macbook models: process entities SEQUENTIALLY to avoid overwhelming
+        # the MacBook GPU with concurrent model loads. The FIFO queue in
+        # MacbookLLMClient is the primary gate, but sequential dispatch here avoids
+        # holding N-1 idle coroutines waiting in the queue and allows results to be
+        # ready in order.
+        # For cloud models: continue using asyncio.gather for maximum throughput.
+        if request.model_type == "macbook":
+            print(
+                f"[EXTRACTION] Macbook model detected — processing {len(request.entities)} "
+                f"entities SEQUENTIALLY (serialized for GPU reliability)"
+            )
+            extracted_entities = []
+            for i, entity in enumerate(request.entities):
+                print(
+                    f"[EXTRACTION] Macbook entity {i + 1}/{len(request.entities)}: '{entity.name}'"
+                )
+                result = await run_extraction(entity)
+                extracted_entities.append(result)
+        else:
+            tasks = [run_extraction(entity) for entity in request.entities]
+            extracted_entities = await asyncio.gather(*tasks)
 
         # Persist results if session_id and user_model are available
         if request.session_id and user_model:

@@ -247,7 +247,10 @@ class LLMService:
             elif model_type == "macbook":
                 if self.macbook_client.disabled:
                     return {"success": False, "error": "Macbook LLM is not configured."}
-                # Macbook models can be slower; allow up to 180s end-to-end (slightly above client HTTP timeout)
+                # Macbook models are serialized through a FIFO queue (one request
+                # at a time). Large documents can take >600s for local inference,
+                # so the outer timeout must exceed per_attempt_timeout (1800s).
+                # Use 1900s here to give the inner requests room to breathe.
                 result = await self._call_with_timeout_logging(
                     operation_name,
                     self.macbook_client.extract_entities_with_macbook(
@@ -258,7 +261,7 @@ class LLMService:
                         temperature,
                         system_message,
                     ),
-                    timeout_seconds=180,
+                    timeout_seconds=1900,
                 )
                 self._record_session_metrics(session_id, "macbook", result)
                 return result
@@ -419,7 +422,8 @@ class LLMService:
         elif model_type == "macbook":
             if self.macbook_client.disabled:
                 return {"success": False, "error": "Macbook LLM is not configured."}
-            # Allow more time for macbook completions
+            # Macbook requests are serialized through a FIFO queue; generous
+            # timeout to accommodate queue wait time (same rationale as extraction).
             result = await self._call_with_timeout_logging(
                 "paragraph_macbook",
                 self.macbook_client.generate_paragraph_with_macbook(
@@ -429,7 +433,7 @@ class LLMService:
                     temperature,
                     system_message,
                 ),
-                timeout_seconds=180,
+                timeout_seconds=1900,
             )
             self._record_session_metrics(session_id, "macbook", result)
             return result

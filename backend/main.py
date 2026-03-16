@@ -157,6 +157,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(extractions.router)
     app.include_router(evaluations.router)
+    app.include_router(evaluations.jobs_router)
     app.include_router(server.router)
     app.include_router(paragraphgenerator.router)
     app.include_router(paragraph_evaluation.router)
