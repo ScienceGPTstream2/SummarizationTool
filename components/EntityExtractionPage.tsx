@@ -1707,7 +1707,7 @@ export function EntityExtractionPage({
           prompt: e.prompt,
           system_prompt: e.systemPrompt || undefined,
         })),
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.0,
         processor_used: processorUsed,
         session_id: sessionId,

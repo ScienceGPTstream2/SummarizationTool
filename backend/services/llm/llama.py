@@ -113,7 +113,7 @@ class LlamaLLMClient:
         region_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
         request_timeout: int = 300,
-        max_retries: int = 5,
+        max_retries: int = 3,
     ) -> Dict[str, Any]:
         # Use overrides if provided, otherwise fall back to instance variables
         used_project_id = project_id_override or self.project_id

@@ -215,7 +215,7 @@ class AzureLLMClient:
         headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
         # Retry configuration
-        max_retries = 5
+        max_retries = 3
         base_delay = 1.0  # Start with 1 second
         max_delay = 30.0  # Cap at 30 seconds
         retryable_status_codes = [429, 500, 503, 504]  # Rate limit and server errors
@@ -465,7 +465,7 @@ Prompt:
             print(f"[LLMService] API version: {used_api_version}")
 
             # Retry configuration for OpenAI SDK calls
-            max_retries = 5
+            max_retries = 3
             base_delay = 1.0  # Start with 1 second
             max_delay = 30.0  # Cap at 30 seconds
 
@@ -610,7 +610,7 @@ Prompt:
             headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
             # Retry configuration
-            max_retries = 5
+            max_retries = 3
             base_delay = 1.0  # Start with 1 second
             max_delay = 30.0  # Cap at 30 seconds
             retryable_status_codes = [
