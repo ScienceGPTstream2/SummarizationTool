@@ -1604,7 +1604,7 @@ export function EntityExtractionPage({
             system_prompt: entity.systemPrompt || undefined,
           },
         ],
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.0,
         processor_used: processorUsed,
         session_id: sessionId,
@@ -1968,8 +1968,21 @@ export function EntityExtractionPage({
         selectedModelFallback: selectedModel,
       });
 
-      const modelsToUse =
+      const allModels =
         preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+      // Only rerun models that failed or have no result for this entity.
+      // If the entity looks healthy (deliberate re-run), use all models.
+      const isEntityFailed =
+        !entity.extracted || entity.extracted.startsWith("Error:");
+      let modelsToUse = allModels;
+      if (isEntityFailed) {
+        const failedModels = allModels.filter((modelId: string) => {
+          const result = entity.extractionsByModel?.[modelId];
+          return !result?.extracted || result.extracted.startsWith("Error:");
+        });
+        if (failedModels.length > 0) modelsToUse = failedModels;
+      }
 
       console.log(
         `🚀 Running entity extraction with ${modelsToUse.length} model(s): `,
@@ -2048,12 +2061,6 @@ export function EntityExtractionPage({
   const handleRerunFailedEntities = async () => {
     if (isExtracting || isBatchRunning || isRerunningFailed) return;
 
-    const failedEntities = entities.filter(
-      (e) => !e.extracted || e.extracted.startsWith("Error:")
-    );
-
-    if (failedEntities.length === 0) return;
-
     const conversionId =
       currentFile.processingResult?.conversionId || documentData.conversionId;
     if (!conversionId) {
@@ -2065,6 +2072,16 @@ export function EntityExtractionPage({
       currentFile?.selectedModels || documentData.selectedModels || [];
     const modelsToUse =
       preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+    // An entity needs rerun if ANY selected model has a failure or no result.
+    const failedEntities = entities.filter((e) =>
+      modelsToUse.some((modelId: string) => {
+        const result = e.extractionsByModel?.[modelId];
+        return !result?.extracted || result.extracted.startsWith("Error:");
+      })
+    );
+
+    if (failedEntities.length === 0) return;
 
     const processorUsed =
       currentFile.processingResult?.processorUsed || documentData.processorUsed;
@@ -2104,13 +2121,22 @@ export function EntityExtractionPage({
         (mId: string) => !macbookModels.includes(mId)
       );
 
-      // Cloud models: run all failed entities batched per model
+      // Cloud models: run only the entities that failed for each specific model
       if (cloudModels.length > 0) {
         const cloudResults = await Promise.all(
           cloudModels.map(async (modelId: string) => {
+            const entitiesForModel = failedEntities.filter((e) => {
+              const result = e.extractionsByModel?.[modelId];
+              return (
+                !result?.extracted || result.extracted.startsWith("Error:")
+              );
+            });
+            if (entitiesForModel.length === 0) {
+              return { modelId, resultsByEntity: {}, success: true };
+            }
             try {
               const resultsByEntity = await extractAllEntitiesForModelBatched(
-                failedEntities,
+                entitiesForModel,
                 conversionId,
                 modelId,
                 processorUsed,
@@ -2127,11 +2153,15 @@ export function EntityExtractionPage({
         modelResults.push(...cloudResults);
       }
 
-      // Macbook models: sequential per entity
+      // Macbook models: sequential, only entities that failed for this model
       for (const modelId of macbookModels) {
         const modelObj = availableModels.find((m) => m.id === modelId);
         const resultsByEntity: Record<string, any> = {};
-        for (const entity of failedEntities) {
+        const entitiesForModel = failedEntities.filter((e) => {
+          const result = e.extractionsByModel?.[modelId];
+          return !result?.extracted || result.extracted.startsWith("Error:");
+        });
+        for (const entity of entitiesForModel) {
           try {
             const modelConfig = {
               modelType: "macbook" as string,
