@@ -95,6 +95,11 @@ export interface SessionSummary {
   document_names: string[];
   extraction_count: number;
   evaluation_count: number;
+  // Sharing metadata (populated for shared session listings)
+  shared_by_name?: string | null;
+  shared_group_name?: string | null;
+  shared_at?: string | null;
+  owner_user_id?: string | null;
 }
 
 export interface SessionListResponse {

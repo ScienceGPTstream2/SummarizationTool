@@ -663,6 +663,155 @@ class SupabaseDBService:
         return len(result.data) > 0 if result.data else False
 
     # ==========================================
+    # Session Sharing Operations
+    # ==========================================
+
+    def share_session(
+        self,
+        session_id: str,
+        user_id: str,
+        group_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Share a session with a group. Only the session owner can share."""
+        result = (
+            self.client.table("sessions")
+            .update(
+                {
+                    "shared_with_group_id": group_id,
+                    "shared_by": user_id,
+                    "shared_at": datetime.utcnow().isoformat(),
+                }
+            )
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def unshare_session(
+        self,
+        session_id: str,
+        user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Remove sharing from a session. Only the session owner can unshare."""
+        result = (
+            self.client.table("sessions")
+            .update(
+                {
+                    "shared_with_group_id": None,
+                    "shared_by": None,
+                    "shared_at": None,
+                }
+            )
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def list_shared_sessions(
+        self, user_id: str, group_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """List sessions shared with any of the given groups (excluding user's own sessions)."""
+        if not group_ids:
+            return []
+
+        result = (
+            self.client.table("sessions")
+            .select(
+                "id, name, status, last_step, configuration, user_id, "
+                "shared_with_group_id, shared_by, shared_at, "
+                "created_at, updated_at"
+            )
+            .in_("shared_with_group_id", group_ids)
+            .neq("user_id", user_id)
+            .order("shared_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+
+        sessions = result.data or []
+
+        if not sessions:
+            return sessions
+
+        # Batch get document info
+        session_ids = [s["id"] for s in sessions]
+
+        docs_result = (
+            self.client.table("documents")
+            .select("session_id, filename")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        docs_by_session: Dict[str, List[str]] = {}
+        for doc in docs_result.data or []:
+            sid = doc["session_id"]
+            if sid not in docs_by_session:
+                docs_by_session[sid] = []
+            docs_by_session[sid].append(doc["filename"])
+
+        # Get extraction counts
+        ext_result = (
+            self.client.table("extraction_results")
+            .select("session_id")
+            .in_("session_id", session_ids)
+            .execute()
+        )
+        ext_counts: Dict[str, int] = {}
+        for ext in ext_result.data or []:
+            sid = ext["session_id"]
+            ext_counts[sid] = ext_counts.get(sid, 0) + 1
+
+        # Apply counts and metadata
+        for session in sessions:
+            sid = session["id"]
+            doc_names = docs_by_session.get(sid, [])
+            session["document_count"] = len(doc_names)
+            session["document_names"] = doc_names
+            session["extraction_count"] = ext_counts.get(sid, 0)
+            config = session.get("configuration", {})
+            session["study_type"] = config.get("study_type") if config else None
+
+        return sessions
+
+    def get_user_group_ids(self, user_id: str) -> List[str]:
+        """Get all group IDs a user belongs to."""
+        result = (
+            self.client.table("user_groups")
+            .select("group_id")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return [r["group_id"] for r in (result.data or [])]
+
+    def get_group_name(self, group_id: str) -> Optional[str]:
+        """Get a group's name by ID."""
+        result = (
+            self.client.table("groups")
+            .select("name")
+            .eq("id", group_id)
+            .execute()
+        )
+        return result.data[0]["name"] if result.data else None
+
+    def get_user_display_name(self, user_id: str) -> Optional[str]:
+        """Get a user's display name from Supabase auth."""
+        try:
+            user_resp = self.client.auth.admin.get_user_by_id(user_id)
+            if user_resp and user_resp.user:
+                meta = user_resp.user.user_metadata or {}
+                return (
+                    meta.get("full_name")
+                    or meta.get("name")
+                    or meta.get("preferred_username")
+                    or user_resp.user.email
+                )
+        except Exception:
+            pass
+        return None
+
+    # ==========================================
     # Session Metrics Operations
     # ==========================================
 

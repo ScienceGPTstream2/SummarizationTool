@@ -1,6 +1,7 @@
 """Session API endpoints for managing user extraction sessions"""
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from typing import Optional
 
 from schemas.sessions import (
@@ -12,6 +13,12 @@ from schemas.sessions import (
     EvaluationResult,
 )
 from services.session.session_service import get_session_service
+
+
+class ShareSessionRequest(BaseModel):
+    """Request to share a session with a group"""
+    user_id: str
+    group_id: str
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -160,3 +167,83 @@ async def add_evaluation_result(
         raise HTTPException(
             status_code=500, detail=f"Error saving evaluation: {str(e)}"
         )
+
+
+# ==========================================
+# Session Sharing Endpoints
+# ==========================================
+
+
+@router.get("/shared/list", response_model=SessionListResponse)
+async def list_shared_sessions(
+    user_id: str = Query(..., description="User ID requesting shared sessions"),
+):
+    """
+    List sessions shared with groups the user belongs to.
+    Returns sessions from other users that have been shared to the requesting user's groups.
+    """
+    try:
+        sessions = session_service.list_shared_sessions(user_id)
+        return SessionListResponse(sessions=sessions, total=len(sessions))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error listing shared sessions: {str(e)}"
+        )
+
+
+@router.get("/shared/{session_id}", response_model=Session)
+async def get_shared_session(
+    session_id: str,
+    user_id: str = Query(..., description="Requesting user ID"),
+):
+    """
+    Get a shared session for viewing. Verifies the requesting user has access
+    via group membership.
+    """
+    session = session_service.get_session_for_shared_view(user_id, session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Shared session not found or you don't have access",
+        )
+
+    return session
+
+
+@router.post("/{session_id}/share")
+async def share_session(session_id: str, request: ShareSessionRequest):
+    """
+    Share a session with a group. Only the session owner can share.
+    A session can only be shared with one group at a time.
+    """
+    result = session_service.share_session(
+        request.user_id, session_id, request.group_id
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot share session. You may not own this session or not be a member of the target group.",
+        )
+
+    return {"ok": True, "message": f"Session shared successfully"}
+
+
+@router.delete("/{session_id}/share")
+async def unshare_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID (session owner)"),
+):
+    """
+    Remove sharing from a session. Only the session owner can unshare.
+    """
+    result = session_service.unshare_session(user_id, session_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found or you don't have permission to unshare",
+        )
+
+    return {"ok": True, "message": "Session sharing removed"}

@@ -171,6 +171,11 @@ export interface DocumentData {
   sessionId?: string;
   temperature?: number;
   modelTemperatures?: Record<string, number>;
+  // Shared session tracking — when set, the workspace was loaded from a
+  // shared session and no own session has been created yet. The first write
+  // operation (extraction, evaluation) will create a clone named
+  // "Copy of [sharedSourceName]".
+  sharedSourceName?: string;
 }
 
 // User info from Supabase session
@@ -1705,6 +1710,9 @@ export default function App() {
 
       toast.success("Session restored successfully");
 
+      // Clear any shared source tracking since this is an owned session
+      setDocumentData((prev) => ({ ...prev, sharedSourceName: undefined }));
+
       // Determine the step to restore to
       // Skip "upload" step since restored sessions don't have actual File objects
       const toolOnlySteps = [
@@ -1743,6 +1751,80 @@ export default function App() {
     }
   };
 
+  // Restore a shared session: fetch via the shared endpoint, load data into
+  // the workspace *without* creating a new session. The first write op
+  // (extraction / evaluation) in EntityExtractionPage will lazily create
+  // a clone session named "Copy of <original name>".
+  const handleRestoreSharedSession = async (sessionId: string) => {
+    if (restoringSessionRef.current) return;
+    restoringSessionRef.current = true;
+    try {
+      setLoading(true);
+      const response = await fetch(
+        `/api/sessions/shared/${sessionId}?user_id=${userInfo?.id}`
+      );
+      if (!response.ok) throw new Error("Failed to fetch shared session");
+      const sessionData = await response.json();
+
+      // Re-use the same restore logic but WITHOUT setting sessionId.
+      // Instead, set sharedSourceName so the workspace knows it came from
+      // a shared session and will create a clone on first write.
+      const config = sessionData.configuration || {};
+
+      // Build lightweight restored data — documents + entities only
+      const restoredData: Partial<DocumentData> = {
+        studyType: config.study_type || "",
+        sessionId: undefined, // NO session yet — lazy clone
+        sharedSourceName: sessionData.name || "Shared Session",
+        selectedModel: config.selected_models?.[0] || "",
+        selectedModels: config.selected_models || [],
+        summaryPrompt: config.summary_prompt || "",
+        temperature: config.temperature ?? undefined,
+        modelTemperatures: config.model_temperatures || {},
+        uploadedFiles: sessionData.documents.map((doc: any) => ({
+          file: new File([""], doc.filename, { type: "application/pdf" }),
+          fileId: doc.file_hash,
+          studyType: config.study_type || "",
+          processingResult: {
+            conversionId: doc.file_hash,
+            fileHash: doc.file_hash,
+            markdownPath: `files/global/${doc.file_hash}/output/content.md`,
+            processorUsed: doc.processor_used || "azure_doc_intelligence",
+            parse_cost: doc.parse_cost ?? undefined,
+          },
+          processorUsed: doc.processor_used || undefined,
+          selectedModels: config.selected_models || [],
+          status: "completed" as const,
+          entities: (config.entities || []).map((e: any) => ({
+            name: e.name,
+            prompt: e.prompt,
+            systemPrompt: e.system_prompt,
+          })),
+        })),
+        entities: (config.entities || []).map((e: any) => ({
+          name: e.name,
+          prompt: e.prompt,
+        })),
+      };
+
+      setDocumentData((prev) => ({ ...prev, ...restoredData }));
+      sessionCreationInProgressRef.current = false;
+
+      toast.success(
+        `Loaded shared session "${sessionData.name}". A copy will be created when you make changes.`
+      );
+
+      // Navigate to extraction (read-only view of the shared data)
+      setCurrentStep("extraction");
+    } catch (error) {
+      console.error("Error restoring shared session:", error);
+      toast.error("Failed to load shared session");
+    } finally {
+      setLoading(false);
+      restoringSessionRef.current = false;
+    }
+  };
+
   const renderStep = () => {
     switch (currentStep) {
       case "auth_callback":
@@ -1757,6 +1839,7 @@ export default function App() {
           <SessionHistoryPage
             userId={userInfo?.id || ""}
             onRestoreSession={handleRestoreSession}
+            onRestoreSharedSession={handleRestoreSharedSession}
             onSessionDeleted={(sessionId) =>
               handleSessionDeleted(userInfo?.id || "", sessionId)
             }
