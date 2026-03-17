@@ -306,12 +306,23 @@ export function EntityExtractionPage({
   // Batch processing state
   const [isBatchRunning, setIsBatchRunning] = useState(false);
 
+  // "Rerun Failed" state: tracks per-file-per-model in-flight rerun counts
+  const [isRerunningFailed, setIsRerunningFailed] = useState(false);
+  const [rerunFailedProgress, setRerunFailedProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
+
   // Report in-flight status to parent for navigation guards
   useEffect(() => {
-    const busy = isExtracting || isGeneratingParagraph || isBatchRunning;
+    const busy =
+      isExtracting ||
+      isGeneratingParagraph ||
+      isBatchRunning ||
+      isRerunningFailed;
     onInFlightChange?.(busy ? "extraction" : null);
     return () => onInFlightChange?.(null);
-  }, [isExtracting, isGeneratingParagraph, isBatchRunning]);
+  }, [isExtracting, isGeneratingParagraph, isBatchRunning, isRerunningFailed]);
 
   // Helper to create session
   const createSession = async () => {
@@ -1854,9 +1865,16 @@ export function EntityExtractionPage({
       const currentModelResult =
         extractionsByModel[selectedModel] || results[0]?.result;
 
+      // Merge new results into existing extractionsByModel — do not discard
+      // prior results for models that weren't re-run in this call.
+      const mergedExtractionsByModel = {
+        ...(entity.extractionsByModel || {}),
+        ...extractionsByModel,
+      };
+
       const updatedEntity = {
         ...entity,
-        extractionsByModel,
+        extractionsByModel: mergedExtractionsByModel,
         // For backward compatibility and display:
         extracted: currentModelResult?.extracted || "No result",
         answer: currentModelResult?.answer,
@@ -1912,7 +1930,7 @@ export function EntityExtractionPage({
   };
 
   const handleRunSingleEntity = async (index: number) => {
-    if (isExtracting) return;
+    if (isExtracting || isRerunningFailed) return;
 
     const entity = entities[index];
     if (!entity.name || !entity.prompt) return;
@@ -1982,16 +2000,16 @@ export function EntityExtractionPage({
       }
 
       // Update parent state with the new entity
-      // Update parent state with the new entity
       // (removed legacy setDocumentData call)
 
-      // Update files state
+      // Update files state — use functional updater to get latest prev state,
+      // and use prev file's entity list to avoid stale closure over `entities`.
       setFiles((prev) =>
         prev.map((f) =>
           f.fileId === selectedFileId
             ? {
                 ...f,
-                entities: entities.map((e, i) =>
+                entities: (f.entities || []).map((e: Entity, i: number) =>
                   i === index ? updatedEntity : e
                 ),
               }
@@ -1999,20 +2017,20 @@ export function EntityExtractionPage({
         )
       );
 
-      // Update parent
-      setDocumentData({
-        ...documentData,
-        uploadedFiles: files.map((f) =>
+      // Sync documentData using functional updater form to avoid stale closure
+      setDocumentData((prev) => ({
+        ...prev,
+        uploadedFiles: (prev.uploadedFiles || []).map((f) =>
           f.fileId === selectedFileId
             ? {
                 ...f,
-                entities: entities.map((e, i) =>
+                entities: (f.entities || []).map((e: Entity, i: number) =>
                   i === index ? updatedEntity : e
                 ),
               }
             : f
         ),
-      });
+      }));
     } catch (err: any) {
       if (err.name !== "AbortError") {
         alert(`Extraction failed: ${err.message} `);
@@ -2020,6 +2038,202 @@ export function EntityExtractionPage({
     } finally {
       setIsExtracting(false);
       abortControllerRef.current = null;
+    }
+  };
+
+  // Rerun all failed or not-yet-extracted entities for the current file.
+  // "Failed" = entity.extracted starts with "Error:" or is missing.
+  // Uses all pre-selected models (same as the original extraction run).
+  // Progress is surfaced via rerunFailedProgress state.
+  const handleRerunFailedEntities = async () => {
+    if (isExtracting || isBatchRunning || isRerunningFailed) return;
+
+    const failedEntities = entities.filter(
+      (e) => !e.extracted || e.extracted.startsWith("Error:")
+    );
+
+    if (failedEntities.length === 0) return;
+
+    const conversionId =
+      currentFile.processingResult?.conversionId || documentData.conversionId;
+    if (!conversionId) {
+      alert("No conversion ID available. Please process a document first.");
+      return;
+    }
+
+    const preSelectedModels =
+      currentFile?.selectedModels || documentData.selectedModels || [];
+    const modelsToUse =
+      preSelectedModels.length > 0 ? preSelectedModels : [selectedModel];
+
+    const processorUsed =
+      currentFile.processingResult?.processorUsed || documentData.processorUsed;
+
+    // Ensure we have a session
+    if (!sessionIdRef.current) {
+      await createSession();
+    }
+
+    setIsRerunningFailed(true);
+    onInvalidateDownstream?.();
+    setRerunFailedProgress({ completed: 0, total: failedEntities.length });
+
+    // Clear error state from failed entities so they show as extracting
+    setExtractingEntities(
+      (prev) => new Set([...prev, ...failedEntities.map((e) => e.name)])
+    );
+
+    console.log(
+      `[RerunFailed] Rerunning ${failedEntities.length} failed/missing entities with ${modelsToUse.length} model(s)`
+    );
+
+    try {
+      // Use the batched approach: send all failed entities per model in one request
+      // (same pattern as processFile for cloud models)
+      const modelResults: Array<{
+        modelId: string;
+        resultsByEntity: Record<string, any>;
+        success: boolean;
+      }> = [];
+
+      const macbookModels = modelsToUse.filter((mId: string) => {
+        const mObj = availableModels.find((m) => m.id === mId);
+        return mObj?.provider?.toLowerCase().includes("macbook");
+      });
+      const cloudModels = modelsToUse.filter(
+        (mId: string) => !macbookModels.includes(mId)
+      );
+
+      // Cloud models: run all failed entities batched per model
+      if (cloudModels.length > 0) {
+        const cloudResults = await Promise.all(
+          cloudModels.map(async (modelId: string) => {
+            try {
+              const resultsByEntity = await extractAllEntitiesForModelBatched(
+                failedEntities,
+                conversionId,
+                modelId,
+                processorUsed,
+                undefined,
+                sessionIdRef.current || undefined
+              );
+              return { modelId, resultsByEntity, success: true };
+            } catch (err) {
+              console.error(`[RerunFailed] Model ${modelId} failed:`, err);
+              return { modelId, resultsByEntity: {}, success: false };
+            }
+          })
+        );
+        modelResults.push(...cloudResults);
+      }
+
+      // Macbook models: sequential per entity
+      for (const modelId of macbookModels) {
+        const modelObj = availableModels.find((m) => m.id === modelId);
+        const resultsByEntity: Record<string, any> = {};
+        for (const entity of failedEntities) {
+          try {
+            const modelConfig = {
+              modelType: "macbook" as string,
+              modelId: modelObj?.id,
+              deployment: modelObj?.deployment,
+              apiVersion: modelObj?.api_version,
+            };
+            const singleResult = await extractEntityFromApi(
+              entity,
+              conversionId,
+              modelConfig,
+              processorUsed,
+              undefined,
+              sessionIdRef.current || undefined
+            );
+            resultsByEntity[entity.name] = {
+              extracted: singleResult.extracted,
+              answer: singleResult.answer || singleResult.extracted,
+              references: singleResult.references || [],
+              duration: singleResult.duration,
+              promptTokens: singleResult.promptTokens,
+              completionTokens: singleResult.completionTokens,
+              cost: singleResult.cost ?? undefined,
+            };
+          } catch (err) {
+            const errText = `Error: ${err instanceof Error ? err.message : String(err)}`;
+            resultsByEntity[entity.name] = { extracted: errText };
+          }
+        }
+        modelResults.push({ modelId, resultsByEntity, success: true });
+      }
+
+      // Merge results back into entities — compute updated list once, apply to both setters
+      let completed = 0;
+      const mergedEntities = entities.map((entity) => {
+        const wasFailed =
+          !entity.extracted || entity.extracted.startsWith("Error:");
+        if (!wasFailed) return entity;
+
+        const newExtractionsByModel: Record<string, any> = {
+          ...(entity.extractionsByModel || {}),
+        };
+
+        for (const { modelId, resultsByEntity, success } of modelResults) {
+          if (!success) continue;
+          const entityResult = resultsByEntity[entity.name];
+          if (entityResult) {
+            newExtractionsByModel[modelId] = entityResult;
+          }
+        }
+
+        // Pick primary model's result for display
+        const primaryData =
+          newExtractionsByModel[selectedModel] ||
+          Object.values(newExtractionsByModel)[0];
+
+        completed++;
+
+        return {
+          ...entity,
+          extractionsByModel: newExtractionsByModel,
+          extracted: primaryData?.extracted || "No result",
+          answer: primaryData?.answer,
+          references: primaryData?.references || [],
+          duration: primaryData?.duration,
+          promptTokens: primaryData?.promptTokens,
+          completionTokens: primaryData?.completionTokens,
+          cost: primaryData?.cost,
+        };
+      });
+
+      setRerunFailedProgress({ completed, total: failedEntities.length });
+      setEntities(mergedEntities);
+
+      // Sync files state so the parent documentData stays consistent
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.fileId === selectedFileId ? { ...f, entities: mergedEntities } : f
+        )
+      );
+
+      // Sync documentData so downstream pages (e.g. eval page) see updated entities
+      setDocumentData((prev) => ({
+        ...prev,
+        uploadedFiles: (prev.uploadedFiles || []).map((f) =>
+          f.fileId === selectedFileId ? { ...f, entities: mergedEntities } : f
+        ),
+      }));
+
+      console.log(
+        `[RerunFailed] Done — ${completed}/${failedEntities.length} entities updated`
+      );
+    } catch (err) {
+      console.error("[RerunFailed] Unexpected error:", err);
+    } finally {
+      setIsRerunningFailed(false);
+      setRerunFailedProgress(null);
+      setExtractingEntities((prev) => {
+        const next = new Set(prev);
+        failedEntities.forEach((e) => next.delete(e.name));
+        return next;
+      });
     }
   };
 
@@ -2912,10 +3126,48 @@ export function EntityExtractionPage({
                       from template)
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={addEntity}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Entity
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const failedCount = entities.filter(
+                        (e) => !e.extracted || e.extracted.startsWith("Error:")
+                      ).length;
+                      if (failedCount === 0) return null;
+                      return (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRerunFailedEntities}
+                          disabled={
+                            isExtracting ||
+                            isBatchRunning ||
+                            isRerunningFailed ||
+                            !selectedModel ||
+                            availableModels.length === 0
+                          }
+                          className="border-red-300 text-red-700 hover:bg-red-50 hover:border-red-400"
+                          title={`Rerun ${failedCount} failed or missing extraction${failedCount !== 1 ? "s" : ""}`}
+                        >
+                          {isRerunningFailed ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              {rerunFailedProgress
+                                ? `${rerunFailedProgress.completed}/${rerunFailedProgress.total}`
+                                : "Rerunning..."}
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Rerun Failed ({failedCount})
+                            </>
+                          )}
+                        </Button>
+                      );
+                    })()}
+                    <Button variant="outline" size="sm" onClick={addEntity}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Entity
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -2927,7 +3179,8 @@ export function EntityExtractionPage({
 
                   // If batch processing this file, use the global status index
                   // Otherwise use the local extractingEntities set
-                  const isExtracting = isProcessingThisFile
+                  // Named isThisEntityExtracting to avoid shadowing the outer isExtracting state
+                  const isThisEntityExtracting = isProcessingThisFile
                     ? index + 1 === fileStatus.currentEntityIndex
                     : extractingEntities.has(entity.name);
 
@@ -2943,11 +3196,13 @@ export function EntityExtractionPage({
                       key={index}
                       id={`entity - card - ${index} `}
                       className={`rounded - 2xl border p - 5 space - y - 5 transition - all duration - 300 ${
-                        isExtracting
+                        isThisEntityExtracting
                           ? "border-blue-300 bg-blue-50/40 shadow-md"
                           : isCompleted
                             ? "border-emerald-200 bg-emerald-50/30"
-                            : "border-gray-200 bg-white"
+                            : entity.extracted?.startsWith("Error:")
+                              ? "border-red-200 bg-red-50/20"
+                              : "border-gray-200 bg-white"
                       } `}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
@@ -2955,7 +3210,7 @@ export function EntityExtractionPage({
                           <span className="text-sm font-semibold text-blue-900">
                             Entity {index + 1}
                           </span>
-                          {isExtracting && (
+                          {isThisEntityExtracting && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                               <Sparkles className="h-3.5 w-3.5 animate-spin" />
                               {fileProcessingStatus[selectedFileId]
@@ -2964,12 +3219,20 @@ export function EntityExtractionPage({
                                 : "Extracting"}
                             </span>
                           )}
-                          {isCompleted && !isExtracting && (
+                          {isCompleted && !isThisEntityExtracting && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
                               <CheckCircle className="h-3.5 w-3.5" />
                               Completed
                             </span>
                           )}
+                          {entity.extracted?.startsWith("Error:") &&
+                            !isThisEntityExtracting &&
+                            !isCompleted && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                Failed
+                              </span>
+                            )}
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                           <span className="rounded-full bg-white px-3 py-1 font-medium shadow-sm">
@@ -2984,7 +3247,11 @@ export function EntityExtractionPage({
                               size="sm"
                               className="h-7 px-2 text-muted-foreground"
                               onClick={() => removeEntity(index)}
-                              disabled={isExtracting}
+                              disabled={
+                                isThisEntityExtracting ||
+                                isExtracting ||
+                                isBatchRunning
+                              }
                             >
                               <X className="h-4 w-4" />
                             </Button>
@@ -2992,23 +3259,32 @@ export function EntityExtractionPage({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                            className={`h-7 px-2 hover:bg-blue-50 ${
+                              entity.extracted?.startsWith("Error:")
+                                ? "text-red-600 hover:text-red-800"
+                                : "text-blue-600 hover:text-blue-800"
+                            }`}
                             onClick={() => handleRunSingleEntity(index)}
                             disabled={
                               isExtracting ||
+                              isBatchRunning ||
+                              isRerunningFailed ||
                               !entity.name ||
                               !entity.prompt ||
                               !selectedModel
                             }
                             title={
-                              entity.extracted
-                                ? "Re-run this entity"
-                                : "Run this entity"
+                              entity.extracted?.startsWith("Error:")
+                                ? "Rerun failed extraction"
+                                : entity.extracted
+                                  ? "Re-run this entity"
+                                  : "Run this entity"
                             }
                           >
-                            {isExtracting &&
-                            extractingEntities.has(entity.name) ? (
+                            {isThisEntityExtracting ? (
                               <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                            ) : entity.extracted?.startsWith("Error:") ? (
+                              <RefreshCw className="h-3.5 w-3.5" />
                             ) : entity.extracted ? (
                               <RefreshCw className="h-3.5 w-3.5" />
                             ) : (
