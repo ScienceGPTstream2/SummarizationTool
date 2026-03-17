@@ -350,42 +350,17 @@ export class SettingsManager {
   // This is the source of truth - all models come from backend secrets.toml
   async getAvailableModelsAsync(): Promise<ModelConfig[]> {
     // Fetch models from backend (these are the source of truth)
-    let backendModels = await this.fetchBackendModels();
-    let isFallback = false;
+    // The /api/models endpoint already only returns models that are configured,
+    // so no additional filtering by serverConfig is needed here.
+    const backendModels = await this.fetchBackendModels();
 
     // Fallback to local models if backend returns empty (e.g. dev mode or auth error)
     if (backendModels.length === 0) {
       console.warn("Backend models empty, falling back to local defaults");
-      backendModels = allModels;
-      isFallback = true;
+      return allModels;
     }
 
-    // Filter by server configuration availability
-    return backendModels.filter((model) => {
-      // If we are using fallback models, assume they are available (dev/offline mode)
-      if (isFallback) return true;
-
-      // For Azure provider, only check server config
-      if (model.provider && model.provider.toLowerCase().includes("azure")) {
-        return this.serverConfig.is_azure_openai_configured;
-      }
-
-      // For Gemini provider, only check server config (uses service account from secrets.toml)
-      if (model.provider && model.provider.toLowerCase().includes("gemini")) {
-        return this.serverConfig.is_gemini_configured;
-      }
-
-      // For Anthropic provider, always available (uses server-side service account)
-      if (
-        model.provider &&
-        model.provider.toLowerCase().includes("anthropic")
-      ) {
-        return true;
-      }
-
-      // For other providers, default to true (backend will handle validation)
-      return true;
-    });
+    return backendModels;
   }
 }
 
