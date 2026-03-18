@@ -136,25 +136,35 @@ export function ProcessingPage({
     }
   }, [availableParsers, globalParser]);
 
-  // Lazy-fetch figures for restored sessions: when a file has a conversionId
-  // and figuresCount > 0 but no figures array, fetch from the API so the
-  // FigureGallery and TablesGallery can render.
+  // Lazy-fetch figures & tables for restored sessions: when a file has a
+  // conversionId but no figures array, call the process endpoint (returns
+  // cached data) to get figures, figures_found, and tables_found in one call.
   useEffect(() => {
     const fetchMissingFigures = async () => {
       const filesToFetch = files.filter(
         (f) =>
           f.status === "completed" &&
           f.processingResult?.conversionId &&
-          !f.processingResult?.figures &&
-          (f.processingResult?.figuresCount ?? 0) > 0
+          !f.processingResult?.figures
       );
 
       if (filesToFetch.length === 0) return;
 
       for (const file of filesToFetch) {
         try {
+          // Use the process endpoint which returns cached results including
+          // figures array, figures_found count, AND tables_found count.
           const response = await authenticatedFetch(
-            `/api/documents/${file.processingResult!.conversionId}/figures`
+            `/api/documents/process/file/${file.processingResult!.conversionId}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                processor:
+                  file.processingResult?.processorUsed ||
+                  "azure_doc_intelligence",
+              }),
+            }
           );
           if (response.ok) {
             const data = await response.json();
@@ -166,7 +176,9 @@ export function ProcessingPage({
                       processingResult: {
                         ...f.processingResult,
                         figures: data.figures || [],
-                        figuresCount: data.figures_count ?? data.figures?.length ?? 0,
+                        figuresCount:
+                          data.figures_found ?? data.figures?.length ?? 0,
+                        tablesCount: data.tables_found ?? f.processingResult?.tablesCount ?? 0,
                       },
                     }
                   : f

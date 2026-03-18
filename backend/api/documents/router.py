@@ -231,9 +231,22 @@ async def process_uploaded_file(
                         _raw = cached_metadata.get("conversion_time")
                         if isinstance(_raw, (int, float)):
                             _cached_dur = float(_raw)
+                    # Also try the upload metadata.json (file_path.parent)
+                    # which always has original_filename from the upload step
+                    _upload_meta_filename = None
+                    try:
+                        import json as _json_up
+                        _upload_meta_path = file_path.parent / "metadata.json"
+                        if _upload_meta_path.exists():
+                            _upload_meta = _json_up.loads(_upload_meta_path.read_text())
+                            _upload_meta_filename = _upload_meta.get("original_filename")
+                    except Exception:
+                        pass
+
                     _cached_filename = (
                         _cached_doc_filename
                         or cached_metadata.get("original_filename")
+                        or _upload_meta_filename
                         or file_path.name
                     )
                     cost_tracker.record_call(
