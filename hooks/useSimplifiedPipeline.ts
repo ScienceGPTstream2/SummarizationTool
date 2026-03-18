@@ -13,8 +13,8 @@ import {
 } from "../components/ExportUtils";
 import { DocumentData } from "../App";
 
-export type PipelineStage =
-  | "idle"
+export type FileStage =
+  | "queued"
   | "uploading"
   | "processing"
   | "extracting"
@@ -23,20 +23,24 @@ export type PipelineStage =
   | "complete"
   | "error";
 
-export interface PipelineProgress {
-  stage: PipelineStage;
-  fileIndex: number;
-  totalFiles: number;
+export interface FileProgress {
+  fileName: string;
+  stage: FileStage;
   entityIndex: number;
   totalEntities: number;
-  percent: number;
-  message: string;
   error?: string;
+}
+
+export interface ExtractedEntity {
+  name: string;
+  extracted: string;
 }
 
 export interface FileResult {
   fileName: string;
   blob: Blob;
+  summary: string;
+  entities: ExtractedEntity[];
 }
 
 export interface PipelineOptions {
@@ -44,124 +48,170 @@ export interface PipelineOptions {
   modelOverride?: ModelConfig | null;
 }
 
-const STAGE_WEIGHTS: Record<PipelineStage, number> = {
-  idle: 0,
-  uploading: 0.1,
-  processing: 0.35,
-  extracting: 0.8,
-  summarizing: 0.9,
-  exporting: 0.95,
-  complete: 1,
-  error: 0,
+export interface PipelineState {
+  running: boolean;
+  fileProgress: FileProgress[];
+  completedCount: number;
+  totalFiles: number;
+  error?: string;
+}
+
+const STAGE_LABEL: Record<FileStage, string> = {
+  queued: "Queued",
+  uploading: "Uploading",
+  processing: "Processing document",
+  extracting: "Extracting entities",
+  summarizing: "Generating summary",
+  exporting: "Creating report",
+  complete: "Complete",
+  error: "Error",
 };
 
-function computePercent(
-  stage: PipelineStage,
-  fileIndex: number,
-  totalFiles: number,
-  entityIndex: number,
-  totalEntities: number
-): number {
-  const fileWeight = 1 / Math.max(totalFiles, 1);
-  const fileBase = fileIndex * fileWeight;
-
-  const prevStageWeight = getPrevStageWeight(stage);
-  const curStageWeight = STAGE_WEIGHTS[stage] ?? 0;
-  const stageSpan = curStageWeight - prevStageWeight;
-
-  let intraStageProgress = 0;
-  if (stage === "extracting" && totalEntities > 0) {
-    intraStageProgress = entityIndex / totalEntities;
-  } else if (
-    stage === "complete" ||
-    stage === "summarizing" ||
-    stage === "exporting"
-  ) {
-    intraStageProgress = 1;
-  }
-
-  const fileProgress = prevStageWeight + stageSpan * intraStageProgress;
-  return Math.min(Math.round((fileBase + fileWeight * fileProgress) * 100), 100);
-}
-
-function getPrevStageWeight(stage: PipelineStage): number {
-  const order: PipelineStage[] = [
-    "idle",
-    "uploading",
-    "processing",
-    "extracting",
-    "summarizing",
-    "exporting",
-    "complete",
-  ];
-  const idx = order.indexOf(stage);
-  if (idx <= 0) return 0;
-  return STAGE_WEIGHTS[order[idx - 1]] ?? 0;
-}
+export { STAGE_LABEL };
 
 export function useSimplifiedPipeline() {
-  const [progress, setProgress] = useState<PipelineProgress>({
-    stage: "idle",
-    fileIndex: 0,
+  const [state, setState] = useState<PipelineState>({
+    running: false,
+    fileProgress: [],
+    completedCount: 0,
     totalFiles: 0,
-    entityIndex: 0,
-    totalEntities: 0,
-    percent: 0,
-    message: "",
   });
 
   const [results, setResults] = useState<FileResult[]>([]);
   const abortRef = useRef(false);
 
-  const updateProgress = useCallback(
-    (
-      stage: PipelineStage,
-      fileIndex: number,
-      totalFiles: number,
-      entityIndex: number,
-      totalEntities: number,
-      message: string,
-      error?: string
-    ) => {
-      const percent = computePercent(
-        stage,
-        fileIndex,
-        totalFiles,
-        entityIndex,
-        totalEntities
-      );
-      setProgress({
-        stage,
-        fileIndex,
-        totalFiles,
-        entityIndex,
-        totalEntities,
-        percent,
-        message,
-        error,
+  const updateFile = useCallback(
+    (index: number, update: Partial<FileProgress>) => {
+      setState((prev) => {
+        const next = [...prev.fileProgress];
+        next[index] = { ...next[index], ...update };
+        const completedCount = next.filter(
+          (f) => f.stage === "complete" || f.stage === "error"
+        ).length;
+        return { ...prev, fileProgress: next, completedCount };
       });
     },
     []
   );
 
+  const processOneFile = useCallback(
+    async (
+      file: File,
+      fileIndex: number,
+      token: string,
+      bestModel: ModelSelectionResult,
+      processorOverride: string,
+      studyType: string,
+      templateEntities: Array<{ name: string; prompt: string }>,
+      summaryPrompt: string
+    ): Promise<FileResult> => {
+      const fileHash = await uploadFile(file, fileIndex, token, updateFile);
+      if (abortRef.current) throw new Error("Cancelled");
+
+      updateFile(fileIndex, { stage: "processing" });
+      const processorUsed = await processDocument(
+        fileHash,
+        processorOverride,
+        token
+      );
+      if (abortRef.current) throw new Error("Cancelled");
+
+      updateFile(fileIndex, {
+        stage: "extracting",
+        entityIndex: 0,
+        totalEntities: templateEntities.length,
+      });
+      const extractedEntities = await extractAllEntities(
+        fileHash,
+        templateEntities,
+        bestModel,
+        processorUsed,
+        token,
+        fileIndex,
+        updateFile,
+        abortRef
+      );
+
+      updateFile(fileIndex, { stage: "summarizing" });
+      const finalSummary = await generateSummary(
+        extractedEntities,
+        summaryPrompt,
+        bestModel,
+        token
+      );
+      if (abortRef.current) throw new Error("Cancelled");
+
+      updateFile(fileIndex, { stage: "exporting" });
+      const studyTypeId =
+        studyType === "epidemiology"
+          ? "level-1-epidemiology"
+          : studyType === "toxicology"
+            ? "level-1-in-vivo"
+            : studyType;
+
+      const docData: DocumentData = {
+        file,
+        fileId: fileHash,
+        parser: processorUsed,
+        extractedText: "",
+        annotatedOutput: "",
+        studyType: studyTypeId,
+        selectedModel: bestModel.modelId,
+        entities: extractedEntities,
+        finalSummary,
+        processorUsed,
+      };
+
+      const exportOptions: EntityExportOptions = {
+        selectedModel: bestModel.modelId,
+        summaryPrompt,
+      };
+
+      const blob = await generateWordDocument(docData, exportOptions);
+
+      updateFile(fileIndex, { stage: "complete" });
+
+      return {
+        fileName: file.name,
+        blob,
+        summary: finalSummary,
+        entities: extractedEntities.map((e) => ({
+          name: e.name,
+          extracted: e.extracted,
+        })),
+      };
+    },
+    [updateFile]
+  );
+
   const run = useCallback(
     async (
       files: File[],
-      studyType: "epidemiology" | "toxicology",
+      studyType: string,
       templateEntities: Array<{ name: string; prompt: string }>,
       summaryPrompt: string,
       options?: PipelineOptions
     ) => {
       abortRef.current = false;
       setResults([]);
-      const totalFiles = files.length;
-      const fileResults: FileResult[] = [];
+
+      const initialProgress: FileProgress[] = files.map((f) => ({
+        fileName: f.name,
+        stage: "queued" as FileStage,
+        entityIndex: 0,
+        totalEntities: templateEntities.length,
+      }));
+
+      setState({
+        running: true,
+        fileProgress: initialProgress,
+        completedCount: 0,
+        totalFiles: files.length,
+      });
 
       try {
         const token = await getValidToken();
         if (!token) throw new Error("Not authenticated");
-
-        updateProgress("uploading", 0, totalFiles, 0, 0, "Selecting best model...");
 
         let bestModel: ModelSelectionResult;
         if (options?.modelOverride) {
@@ -172,247 +222,67 @@ export function useSimplifiedPipeline() {
 
         const processorOverride = options?.processor || "auto";
 
-        for (let fi = 0; fi < files.length; fi++) {
-          if (abortRef.current) throw new Error("Cancelled");
+        // Process all files in parallel
+        const settled = await Promise.allSettled(
+          files.map((file, idx) =>
+            processOneFile(
+              file,
+              idx,
+              token,
+              bestModel,
+              processorOverride,
+              studyType,
+              templateEntities,
+              summaryPrompt
+            )
+          )
+        );
 
-          const file = files[fi];
-          const fileLabel =
-            totalFiles > 1
-              ? `File ${fi + 1}/${totalFiles}: ${file.name}`
-              : file.name;
-
-          // ── UPLOAD ──
-          updateProgress(
-            "uploading",
-            fi,
-            totalFiles,
-            0,
-            0,
-            `Uploading ${fileLabel}...`
-          );
-
-          const formData = new FormData();
-          formData.append("file", file);
-          const uploadRes = await fetch("/api/upload", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          });
-          if (!uploadRes.ok) {
-            const err = await uploadRes.text();
-            throw new Error(`Upload failed for ${file.name}: ${err}`);
+        const fileResults: FileResult[] = [];
+        for (let i = 0; i < settled.length; i++) {
+          const result = settled[i];
+          if (result.status === "fulfilled") {
+            fileResults.push(result.value);
+          } else {
+            const msg =
+              result.reason instanceof Error
+                ? result.reason.message
+                : "Unknown error";
+            updateFile(i, { stage: "error", error: msg });
           }
-          const uploadData = await uploadRes.json();
-          const fileHash: string = uploadData.file_hash;
-
-          // ── PROCESS ──
-          updateProgress(
-            "processing",
-            fi,
-            totalFiles,
-            0,
-            0,
-            `Processing ${fileLabel}...`
-          );
-
-          const processRes = await fetch(
-            `/api/documents/process/file/${fileHash}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ processor: processorOverride }),
-            }
-          );
-          if (!processRes.ok) {
-            const err = await processRes.text();
-            throw new Error(`Processing failed for ${file.name}: ${err}`);
-          }
-          const processData = await processRes.json();
-          const processorUsed: string =
-            processData.processor_used || "azure_doc_intelligence";
-
-          // ── EXTRACT (per entity for progress) ──
-          const totalEntities = templateEntities.length;
-          const extractedEntities: Array<{
-            name: string;
-            prompt: string;
-            extracted: string;
-            references?: any[];
-            duration?: number;
-            promptTokens?: number;
-            completionTokens?: number;
-          }> = [];
-
-          for (let ei = 0; ei < templateEntities.length; ei++) {
-            if (abortRef.current) throw new Error("Cancelled");
-
-            const entity = templateEntities[ei];
-            updateProgress(
-              "extracting",
-              fi,
-              totalFiles,
-              ei,
-              totalEntities,
-              `Extracting "${entity.name}" (${ei + 1}/${totalEntities}) from ${fileLabel}...`
-            );
-
-            const extractBody: Record<string, unknown> = {
-              conversion_id: fileHash,
-              entities: [{ name: entity.name, prompt: entity.prompt }],
-              model_type: bestModel.modelType,
-              model_id: bestModel.modelId,
-              deployment: bestModel.deployment,
-              api_version: bestModel.apiVersion,
-              processor_used: processorUsed,
-              temperature: 0.0,
-            };
-
-            const extractRes = await fetch("/api/extract", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify(extractBody),
-            });
-
-            if (!extractRes.ok) {
-              const err = await extractRes.text();
-              throw new Error(
-                `Extraction failed for entity "${entity.name}": ${err}`
-              );
-            }
-
-            const extractData = await extractRes.json();
-            const entityResult = extractData.extracted_entities?.[0];
-            if (entityResult) {
-              const meta = entityResult.meta || {};
-              extractedEntities.push({
-                name: entityResult.name,
-                prompt: entity.prompt,
-                extracted: entityResult.extracted || "",
-                references: entityResult.references,
-                duration: meta.duration,
-                promptTokens: meta.prompt_tokens,
-                completionTokens: meta.completion_tokens,
-              });
-            }
-          }
-
-          // ── SUMMARIZE ──
-          updateProgress(
-            "summarizing",
-            fi,
-            totalFiles,
-            totalEntities,
-            totalEntities,
-            `Generating summary for ${fileLabel}...`
-          );
-
-          let finalSummary = "";
-          const summaryBody: Record<string, unknown> = {
-            entities: extractedEntities.map((e) => ({
-              name: e.name,
-              extracted: e.extracted,
-            })),
-            summary_prompt: summaryPrompt,
-            model_type: bestModel.modelType,
-            model_id: bestModel.modelId,
-            deployment: bestModel.deployment,
-            api_version: bestModel.apiVersion,
-            temperature: 0.0,
-          };
-
-          const summaryRes = await fetch("/api/generate_paragraph", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(summaryBody),
-          });
-
-          if (summaryRes.ok) {
-            const summaryData = await summaryRes.json();
-            finalSummary = summaryData.summary || "";
-          }
-
-          // ── EXPORT ──
-          updateProgress(
-            "exporting",
-            fi,
-            totalFiles,
-            totalEntities,
-            totalEntities,
-            `Generating Word document for ${fileLabel}...`
-          );
-
-          const studyTypeId =
-            studyType === "epidemiology"
-              ? "level-1-epidemiology"
-              : "level-1-in-vivo";
-
-          const docData: DocumentData = {
-            file,
-            fileId: fileHash,
-            parser: processorUsed,
-            extractedText: "",
-            annotatedOutput: "",
-            studyType: studyTypeId,
-            selectedModel: bestModel.modelId,
-            entities: extractedEntities,
-            finalSummary,
-            processorUsed,
-          };
-
-          const exportOptions: EntityExportOptions = {
-            selectedModel: bestModel.modelId,
-            summaryPrompt,
-          };
-
-          const blob = await generateWordDocument(docData, exportOptions);
-          fileResults.push({ fileName: file.name, blob });
         }
 
         setResults(fileResults);
-        updateProgress(
-          "complete",
-          totalFiles,
-          totalFiles,
-          0,
-          0,
-          `Done! ${totalFiles === 1 ? "1 document" : `${totalFiles} documents`} ready for download.`
-        );
+        setState((prev) => ({
+          ...prev,
+          running: false,
+          error:
+            fileResults.length === 0
+              ? "All files failed to process"
+              : fileResults.length < files.length
+                ? `${files.length - fileResults.length} of ${files.length} files had errors`
+                : undefined,
+        }));
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : "An unknown error occurred";
-        updateProgress(
-          "error",
-          progress.fileIndex,
-          progress.totalFiles,
-          progress.entityIndex,
-          progress.totalEntities,
-          "Pipeline failed",
-          message
-        );
+        setState((prev) => ({
+          ...prev,
+          running: false,
+          error: message,
+        }));
       }
     },
-    [updateProgress]
+    [processOneFile, updateFile]
   );
 
   const reset = useCallback(() => {
     abortRef.current = true;
-    setProgress({
-      stage: "idle",
-      fileIndex: 0,
+    setState({
+      running: false,
+      fileProgress: [],
+      completedCount: 0,
       totalFiles: 0,
-      entityIndex: 0,
-      totalEntities: 0,
-      percent: 0,
-      message: "",
     });
     setResults([]);
   }, []);
@@ -428,5 +298,177 @@ export function useSimplifiedPipeline() {
     }
   }, [results]);
 
-  return { progress, results, run, reset, downloadResults };
+  const downloadSingleResult = useCallback((result: FileResult) => {
+    const baseName = result.fileName.replace(/\.pdf$/i, "");
+    downloadFile(
+      result.blob,
+      `${baseName}_extraction_report.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+  }, []);
+
+  return { state, results, run, reset, downloadResults, downloadSingleResult };
+}
+
+// ── Helper functions ──
+
+async function uploadFile(
+  file: File,
+  fileIndex: number,
+  token: string,
+  updateFile: (index: number, update: Partial<FileProgress>) => void
+): Promise<string> {
+  updateFile(fileIndex, { stage: "uploading" });
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Upload failed for ${file.name}: ${err}`);
+  }
+  const data = await res.json();
+  return data.file_hash as string;
+}
+
+async function processDocument(
+  fileHash: string,
+  processor: string,
+  token: string
+): Promise<string> {
+  const res = await fetch(`/api/documents/process/file/${fileHash}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ processor }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Processing failed: ${err}`);
+  }
+  const data = await res.json();
+  return (data.processor_used as string) || "azure_doc_intelligence";
+}
+
+async function extractAllEntities(
+  fileHash: string,
+  templateEntities: Array<{ name: string; prompt: string }>,
+  bestModel: ModelSelectionResult,
+  processorUsed: string,
+  token: string,
+  fileIndex: number,
+  updateFile: (index: number, update: Partial<FileProgress>) => void,
+  abortRef: React.MutableRefObject<boolean>
+): Promise<
+  Array<{
+    name: string;
+    prompt: string;
+    extracted: string;
+    references?: any[];
+    duration?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+  }>
+> {
+  // Send all entities in a single batched request (matching EntityExtractionPage pattern)
+  const extractBody = {
+    conversion_id: fileHash,
+    entities: templateEntities.map((e) => ({
+      name: e.name,
+      prompt: e.prompt,
+    })),
+    model_type: bestModel.modelType,
+    model_id: bestModel.modelId,
+    deployment: bestModel.deployment,
+    api_version: bestModel.apiVersion,
+    processor_used: processorUsed,
+    temperature: 0.0,
+  };
+
+  const res = await fetch("/api/extract", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(extractBody),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Extraction failed: ${err}`);
+  }
+
+  const data = await res.json();
+  const extracted: Array<{
+    name: string;
+    prompt: string;
+    extracted: string;
+    references?: any[];
+    duration?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+  }> = [];
+
+  const entityResults = data.extracted_entities || [];
+  for (let ei = 0; ei < entityResults.length; ei++) {
+    if (abortRef.current) throw new Error("Cancelled");
+    const entityResult = entityResults[ei];
+    const meta = entityResult.meta || {};
+    extracted.push({
+      name: entityResult.name,
+      prompt:
+        templateEntities.find((t) => t.name === entityResult.name)?.prompt ||
+        "",
+      extracted: entityResult.extracted || "",
+      references: entityResult.references,
+      duration: meta.duration,
+      promptTokens: meta.prompt_tokens,
+      completionTokens: meta.completion_tokens,
+    });
+    updateFile(fileIndex, { entityIndex: ei + 1 });
+  }
+
+  return extracted;
+}
+
+async function generateSummary(
+  extractedEntities: Array<{ name: string; extracted: string }>,
+  summaryPrompt: string,
+  bestModel: ModelSelectionResult,
+  token: string
+): Promise<string> {
+  const body = {
+    entities: extractedEntities.map((e) => ({
+      name: e.name,
+      extracted: e.extracted,
+    })),
+    summary_prompt: summaryPrompt,
+    model_type: bestModel.modelType,
+    model_id: bestModel.modelId,
+    deployment: bestModel.deployment,
+    api_version: bestModel.apiVersion,
+    temperature: 0.0,
+  };
+
+  const res = await fetch("/api/generate_paragraph", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (res.ok) {
+    const data = await res.json();
+    return (data.summary as string) || "";
+  }
+  return "";
 }

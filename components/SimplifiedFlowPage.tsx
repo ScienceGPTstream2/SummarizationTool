@@ -12,17 +12,23 @@ import {
   AlertCircle,
   Sparkles,
   ChevronDown,
+  ChevronRight,
   SlidersHorizontal,
+  Beaker,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   useSimplifiedPipeline,
-  PipelineStage,
   PipelineOptions,
+  FileResult,
+  FileStage,
+  STAGE_LABEL,
 } from "../hooks/useSimplifiedPipeline";
 import {
   loadStudyTypeTemplate,
   getAvailableStudyTypes,
+  getStudyTypeDisplayName,
 } from "./TemplateLoader";
 import {
   fetchAllModels,
@@ -31,7 +37,7 @@ import {
 } from "../utils/modelSelection";
 import { motion, AnimatePresence } from "framer-motion";
 
-type StudyType = "epidemiology" | "toxicology" | null;
+type StudyType = "epidemiology" | "toxicology" | "custom" | null;
 
 const PARSER_OPTIONS = [
   { value: "docling", label: "Docling (recommended)" },
@@ -48,23 +54,13 @@ interface SimplifiedFlowPageProps {
   onSwitchToAdvanced: () => void;
 }
 
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  idle: "",
-  uploading: "Uploading",
-  processing: "Processing Document",
-  extracting: "Extracting Entities",
-  summarizing: "Generating Summary",
-  exporting: "Creating Report",
-  complete: "Complete",
-  error: "Error",
-};
-
-const STAGE_ORDER: PipelineStage[] = [
+const FILE_STAGE_ORDER: FileStage[] = [
   "uploading",
   "processing",
   "extracting",
   "summarizing",
   "exporting",
+  "complete",
 ];
 
 export function SimplifiedFlowPage({
@@ -106,19 +102,63 @@ export function SimplifiedFlowPage({
     };
   }, [availableModels.length]);
 
+  // When user clicks a card, set the matching default template
   useEffect(() => {
-    if (studyType && !selectedTemplateId) {
-      setSelectedTemplateId(DEFAULT_TEMPLATES[studyType] || "");
+    if (studyType === "epidemiology" || studyType === "toxicology") {
+      setSelectedTemplateId(DEFAULT_TEMPLATES[studyType]);
     }
-  }, [studyType, selectedTemplateId]);
+  }, [studyType]);
 
-  const { progress, results, run, reset, downloadResults } =
+  const handleTemplateChange = useCallback(
+    (templateId: string) => {
+      setSelectedTemplateId(templateId);
+      if (templateId === DEFAULT_TEMPLATES.epidemiology) {
+        setStudyType("epidemiology");
+      } else if (templateId === DEFAULT_TEMPLATES.toxicology) {
+        setStudyType("toxicology");
+      } else {
+        setStudyType("custom");
+        if (!optionsOpen) setOptionsOpen(true);
+      }
+    },
+    [optionsOpen]
+  );
+
+  const customTemplateName =
+    studyType === "custom" && selectedTemplateId
+      ? getStudyTypeDisplayName(selectedTemplateId)
+      : "";
+
+  const { state, results, run, reset, downloadResults, downloadSingleResult } =
     useSimplifiedPipeline();
+  const [expandedResultIndex, setExpandedResultIndex] = useState<number | null>(null);
 
-  const isRunning =
-    progress.stage !== "idle" &&
-    progress.stage !== "complete" &&
-    progress.stage !== "error";
+  const isRunning = state.running;
+  const isIdle = !isRunning && state.fileProgress.length === 0;
+  const isDone = !isRunning && state.fileProgress.length > 0;
+  const hasResults = results.length > 0;
+  const allSucceeded =
+    isDone &&
+    state.fileProgress.every((f) => f.stage === "complete");
+  const overallPercent =
+    state.totalFiles > 0
+      ? Math.round(
+          (state.fileProgress.reduce((acc, f) => {
+            const idx = FILE_STAGE_ORDER.indexOf(f.stage);
+            return acc + (idx >= 0 ? idx / (FILE_STAGE_ORDER.length - 1) : 0);
+          }, 0) /
+            state.totalFiles) *
+            100
+        )
+      : 0;
+
+  // Auto-expand first result when pipeline completes
+  useEffect(() => {
+    if (isDone && hasResults) {
+      const timer = setTimeout(() => setExpandedResultIndex(0), 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isDone, hasResults]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -159,7 +199,9 @@ export function SimplifiedFlowPage({
     if (!studyType || files.length === 0 || isRunning) return;
 
     const templateId =
-      selectedTemplateId || DEFAULT_TEMPLATES[studyType] || "";
+      selectedTemplateId ||
+      (studyType !== "custom" ? DEFAULT_TEMPLATES[studyType] : "") ||
+      "";
     const resolved = loadStudyTypeTemplate(templateId);
 
     const summaryPrompt =
@@ -173,7 +215,9 @@ export function SimplifiedFlowPage({
       if (model) opts.modelOverride = model;
     }
 
-    run(files, studyType, resolved.entities, summaryPrompt, opts);
+    const pipelineStudyType =
+      studyType === "custom" ? selectedTemplateId : studyType;
+    run(files, pipelineStudyType, resolved.entities, summaryPrompt, opts);
   }, [
     studyType,
     files,
@@ -190,14 +234,26 @@ export function SimplifiedFlowPage({
     setStudyType(null);
     setFiles([]);
     setSelectedTemplateId("");
+    setOptionsOpen(false);
+    setExpandedResultIndex(null);
   }, [reset]);
 
-  const canRun = studyType !== null && files.length > 0 && !isRunning;
+  const handleRerun = useCallback(() => {
+    reset();
+    setOptionsOpen(true);
+    setExpandedResultIndex(null);
+  }, [reset]);
+
+  const canRun =
+    studyType !== null &&
+    files.length > 0 &&
+    !isRunning &&
+    (studyType !== "custom" || !!selectedTemplateId);
 
   return (
     <div className="min-h-[80vh] flex flex-col items-center justify-center max-w-4xl mx-auto px-2">
       <AnimatePresence mode="wait">
-        {progress.stage === "idle" ? (
+        {isIdle ? (
           <motion.div
             key="landing"
             initial={{ opacity: 0, y: 20 }}
@@ -291,6 +347,34 @@ export function SimplifiedFlowPage({
                   )}
                 </button>
               </div>
+
+              {/* Custom template indicator */}
+              <AnimatePresence>
+                {studyType === "custom" && customTemplateName && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, height: "auto", scale: 1 }}
+                    exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                  >
+                    <div className="flex items-center gap-3 px-5 py-3.5 rounded-xl border-2 border-primary bg-primary/5 shadow-md shadow-primary/10">
+                      <div className="p-2.5 rounded-lg bg-primary/15 text-primary">
+                        <Beaker className="h-6 w-6" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-base text-foreground truncate">
+                          {customTemplateName}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Custom template
+                        </div>
+                      </div>
+                      <CheckCircle2 className="h-6 w-6 text-primary shrink-0" />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
             </div>
 
             {/* File Upload */}
@@ -444,16 +528,17 @@ export function SimplifiedFlowPage({
                           Extraction Template
                         </label>
                         <select
-                          value={
-                            selectedTemplateId ||
-                            (studyType ? DEFAULT_TEMPLATES[studyType] : "")
-                          }
+                          value={selectedTemplateId}
                           onChange={(e) =>
-                            setSelectedTemplateId(e.target.value)
+                            handleTemplateChange(e.target.value)
                           }
-                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          className={`w-full h-11 rounded-md border px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${
+                            studyType === "custom"
+                              ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                              : "border-border bg-background"
+                          }`}
                         >
-                          {!studyType && (
+                          {!selectedTemplateId && (
                             <option value="" disabled>
                               Select a study type first
                             </option>
@@ -484,7 +569,205 @@ export function SimplifiedFlowPage({
               </Button>
             </div>
           </motion.div>
+        ) : isDone && hasResults ? (
+          /* ═══ RESULTS VIEW ═══ */
+          <motion.div
+            key="results"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.35 }}
+            className="w-full space-y-8"
+          >
+            {/* Results header */}
+            <motion.div
+              className="text-center space-y-3"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+            >
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
+                <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
+              </div>
+              <h2 className="text-3xl font-semibold text-foreground">
+                {results.length === 1
+                  ? "Your Report is Ready"
+                  : `${results.length} Reports Ready`}
+              </h2>
+              <p className="text-lg text-muted-foreground">
+                Click on a study below to view the summary and extracted data
+              </p>
+            </motion.div>
+
+            {/* Result cards */}
+            <div className="space-y-4">
+              {results.map((result, idx) => {
+                const isExpanded = expandedResultIndex === idx;
+                const summaryPreview = result.summary
+                  ? result.summary.length > 160
+                    ? result.summary.slice(0, 160) + "..."
+                    : result.summary
+                  : "";
+                return (
+                  <motion.div
+                    key={`${result.fileName}-${idx}`}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.15 + idx * 0.08 }}
+                    className={`rounded-xl border-2 overflow-hidden transition-colors duration-200 ${
+                      isExpanded
+                        ? "border-primary/50 bg-card shadow-lg shadow-primary/5"
+                        : "border-border bg-card hover:border-primary/30 hover:shadow-md"
+                    }`}
+                  >
+                    {/* Card header */}
+                    <button
+                      onClick={() =>
+                        setExpandedResultIndex(isExpanded ? null : idx)
+                      }
+                      className="w-full text-left px-6 py-5 transition-colors"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`p-2.5 rounded-lg shrink-0 ${
+                          isExpanded
+                            ? "bg-primary/15 text-primary"
+                            : "bg-muted text-muted-foreground"
+                        }`}>
+                          <FileText className="h-6 w-6" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-1">
+                            <span className="text-lg font-semibold text-foreground truncate">
+                              {result.fileName.replace(/\.pdf$/i, "")}
+                            </span>
+                            <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">
+                              {result.entities.length} entities
+                            </span>
+                          </div>
+                          {/* Summary preview — only when collapsed */}
+                          {!isExpanded && summaryPreview && (
+                            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2 mt-1">
+                              {summaryPreview}
+                            </p>
+                          )}
+                        </div>
+                        <div className="shrink-0 pt-1">
+                          <motion.div
+                            animate={{ rotate: isExpanded ? 90 : 0 }}
+                            transition={{ duration: 0.2 }}
+                          >
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                          </motion.div>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Expanded content */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-6 pb-6 space-y-5 border-t border-border pt-5">
+                            {/* Summary */}
+                            {result.summary && (
+                              <div className="space-y-2.5">
+                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                                  Summary
+                                </h4>
+                                <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 rounded-lg p-5">
+                                  {result.summary}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Entities */}
+                            {result.entities.length > 0 && (
+                              <div className="space-y-2.5">
+                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                                  Extracted Entities
+                                </h4>
+                                <div className="space-y-2.5">
+                                  {result.entities.map((entity, ei) => (
+                                    <div
+                                      key={ei}
+                                      className="rounded-lg border border-border bg-background p-4"
+                                    >
+                                      <div className="text-sm font-semibold text-primary mb-1.5">
+                                        {entity.name}
+                                      </div>
+                                      <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+                                        {entity.extracted || (
+                                          <span className="text-muted-foreground italic">
+                                            No data extracted
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Per-file download */}
+                            <div className="flex justify-end pt-1">
+                              <Button
+                                variant="outline"
+                                onClick={() => downloadSingleResult(result)}
+                                className="text-sm"
+                              >
+                                <Download className="h-4 w-4 mr-1.5" />
+                                Download Report
+                              </Button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Actions */}
+            <motion.div
+              className="flex justify-center gap-4 pt-2"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.2 + results.length * 0.08 }}
+            >
+              <Button size="lg" onClick={downloadResults} className="px-10 py-3 text-lg h-auto">
+                <Download className="h-5 w-5 mr-2.5" />
+                {results.length === 1
+                  ? "Download Report"
+                  : `Download All ${results.length} Reports`}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleRerun}
+                className="px-10 py-3 text-lg h-auto"
+              >
+                <RefreshCw className="h-5 w-5 mr-2.5" />
+                Re-run
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleStartOver}
+                className="px-10 py-3 text-lg h-auto"
+              >
+                <RotateCcw className="h-5 w-5 mr-2.5" />
+                Start Over
+              </Button>
+            </motion.div>
+          </motion.div>
         ) : (
+          /* ═══ PROCESSING VIEW — per-file progress cards ═══ */
           <motion.div
             key="progress"
             initial={{ opacity: 0, y: 20 }}
@@ -493,151 +776,132 @@ export function SimplifiedFlowPage({
             transition={{ duration: 0.3 }}
             className="w-full space-y-8"
           >
-            {/* Progress Header */}
+            {/* Header */}
             <div className="text-center space-y-3">
-              {progress.stage === "complete" ? (
-                <>
-                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
-                    <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
-                  </div>
-                  <h2 className="text-3xl font-semibold text-foreground">
-                    Reports Ready
-                  </h2>
-                </>
-              ) : progress.stage === "error" ? (
-                <>
-                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 mb-2">
-                    <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
-                  </div>
-                  <h2 className="text-3xl font-semibold text-foreground">
-                    Something Went Wrong
-                  </h2>
-                </>
-              ) : (
-                <>
-                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 mb-2">
-                    <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                  </div>
-                  <h2 className="text-3xl font-semibold text-foreground">
-                    Processing...
-                  </h2>
-                </>
-              )}
-              <p className="text-lg text-muted-foreground">{progress.message}</p>
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 mb-2">
+                <Loader2 className="h-10 w-10 text-primary animate-spin" />
+              </div>
+              <h2 className="text-3xl font-semibold text-foreground">
+                Processing {state.totalFiles === 1 ? "Study" : `${state.totalFiles} Studies`}
+              </h2>
+              <p className="text-lg text-muted-foreground">
+                {state.completedCount} of {state.totalFiles} complete
+                {state.totalFiles > 1 && " — files are processed in parallel"}
+              </p>
             </div>
 
-            {/* Stage Steps */}
-            <div className="space-y-1.5">
-              {STAGE_ORDER.map((stage) => {
-                const currentIdx = STAGE_ORDER.indexOf(progress.stage);
-                const stageIdx = STAGE_ORDER.indexOf(stage);
-                const isActive = progress.stage === stage;
-                const isComplete =
-                  progress.stage === "complete" || currentIdx > stageIdx;
-                const isPending = currentIdx < stageIdx;
+            {/* Overall progress bar */}
+            <div className="space-y-2.5">
+              <div className="h-3.5 bg-muted rounded-full overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-primary"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${overallPercent}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>{state.completedCount} / {state.totalFiles} files</span>
+                <span>{overallPercent}%</span>
+              </div>
+            </div>
+
+            {/* Per-file status cards */}
+            <div className="space-y-3">
+              {state.fileProgress.map((fp, idx) => {
+                const isActive =
+                  fp.stage !== "queued" &&
+                  fp.stage !== "complete" &&
+                  fp.stage !== "error";
+                const isFileComplete = fp.stage === "complete";
+                const isFileError = fp.stage === "error";
 
                 return (
-                  <div
-                    key={stage}
-                    className={`
-                      flex items-center gap-3.5 px-5 py-3 rounded-lg transition-colors
-                      ${isActive ? "bg-primary/5" : ""}
-                    `}
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.25, delay: idx * 0.05 }}
+                    className={`flex items-center gap-4 px-5 py-4 rounded-xl border transition-colors ${
+                      isFileComplete
+                        ? "border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20"
+                        : isFileError
+                          ? "border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20"
+                          : isActive
+                            ? "border-primary/30 bg-primary/5"
+                            : "border-border bg-card"
+                    }`}
                   >
+                    {/* Status icon */}
                     <div className="shrink-0">
-                      {isComplete ? (
+                      {isFileComplete ? (
                         <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+                      ) : isFileError ? (
+                        <AlertCircle className="h-6 w-6 text-red-500" />
                       ) : isActive ? (
                         <Loader2 className="h-6 w-6 text-primary animate-spin" />
                       ) : (
                         <div className="h-6 w-6 rounded-full border-2 border-border" />
                       )}
                     </div>
-                    <span
-                      className={`text-base font-medium ${
-                        isActive
-                          ? "text-foreground"
-                          : isComplete
-                            ? "text-muted-foreground"
-                            : isPending
-                              ? "text-muted-foreground/50"
-                              : "text-muted-foreground"
-                      }`}
-                    >
-                      {STAGE_LABELS[stage]}
-                    </span>
-                    {isActive &&
-                      progress.stage === "extracting" &&
-                      progress.totalEntities > 0 && (
-                        <span className="text-sm text-muted-foreground ml-auto">
-                          {progress.entityIndex}/{progress.totalEntities}{" "}
-                          entities
-                        </span>
-                      )}
-                  </div>
+
+                    {/* File info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-base font-medium text-foreground truncate">
+                        {fp.fileName.replace(/\.pdf$/i, "")}
+                      </div>
+                      <div className={`text-sm ${
+                        isFileError
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-muted-foreground"
+                      }`}>
+                        {isFileError && fp.error
+                          ? fp.error
+                          : STAGE_LABEL[fp.stage]}
+                      </div>
+                    </div>
+
+                    {/* Entity progress for extracting stage */}
+                    {fp.stage === "extracting" && fp.totalEntities > 0 && (
+                      <span className="text-sm text-muted-foreground shrink-0">
+                        {fp.entityIndex}/{fp.totalEntities} entities
+                      </span>
+                    )}
+                  </motion.div>
                 );
               })}
             </div>
 
-            {/* Progress Bar */}
-            <div className="space-y-2.5">
-              <div className="h-3.5 bg-muted rounded-full overflow-hidden">
-                <motion.div
-                  className={`h-full rounded-full ${
-                    progress.stage === "error"
-                      ? "bg-red-500"
-                      : progress.stage === "complete"
-                        ? "bg-green-500"
-                        : "bg-primary"
-                  }`}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress.percent}%` }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
-                />
-              </div>
-              <div className="flex justify-between text-sm text-muted-foreground">
-                <span>
-                  {progress.totalFiles > 1
-                    ? `File ${Math.min(progress.fileIndex + 1, progress.totalFiles)} of ${progress.totalFiles}`
-                    : ""}
-                </span>
-                <span>{progress.percent}%</span>
-              </div>
-            </div>
-
-            {/* Error details */}
-            {progress.stage === "error" && progress.error && (
-              <div className="p-5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
-                <p className="text-base text-red-700 dark:text-red-300">
-                  {progress.error}
-                </p>
-              </div>
+            {/* Error summary + actions (only when done with errors, not running) */}
+            {!isRunning && state.error && (
+              <>
+                <div className="p-5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+                  <p className="text-base text-red-700 dark:text-red-300">
+                    {state.error}
+                  </p>
+                </div>
+                <div className="flex justify-center gap-4 pt-3">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={handleRerun}
+                    className="px-10 py-3 text-lg h-auto"
+                  >
+                    <RefreshCw className="h-5 w-5 mr-2.5" />
+                    Retry
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={handleStartOver}
+                    className="px-10 py-3 text-lg h-auto"
+                  >
+                    <RotateCcw className="h-5 w-5 mr-2.5" />
+                    Start Over
+                  </Button>
+                </div>
+              </>
             )}
-
-            {/* Actions */}
-            <div className="flex justify-center gap-4 pt-3">
-              {progress.stage === "complete" && results.length > 0 && (
-                <Button size="lg" onClick={downloadResults} className="px-10 py-3 text-lg h-auto">
-                  <Download className="h-5 w-5 mr-2.5" />
-                  Download{" "}
-                  {results.length === 1
-                    ? "Report"
-                    : `${results.length} Reports`}
-                </Button>
-              )}
-              {(progress.stage === "complete" ||
-                progress.stage === "error") && (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={handleStartOver}
-                  className="px-10 py-3 text-lg h-auto"
-                >
-                  <RotateCcw className="h-5 w-5 mr-2.5" />
-                  Start Over
-                </Button>
-              )}
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
