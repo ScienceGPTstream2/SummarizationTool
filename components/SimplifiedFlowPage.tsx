@@ -241,9 +241,9 @@ export function SimplifiedFlowPage({
 
   const handleRerun = useCallback(() => {
     reset();
-    setOptionsOpen(true);
     setExpandedResultIndex(null);
-  }, [reset]);
+    setTimeout(() => handleRun(), 0);
+  }, [reset, handleRun]);
 
   const canRun =
     studyType !== null &&
