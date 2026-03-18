@@ -195,7 +195,7 @@ export function SimplifiedFlowPage({
   const canRun = studyType !== null && files.length > 0 && !isRunning;
 
   return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center max-w-3xl mx-auto px-4">
+    <div className="min-h-[80vh] flex flex-col items-center justify-center max-w-4xl mx-auto px-2">
       <AnimatePresence mode="wait">
         {progress.stage === "idle" ? (
           <motion.div
@@ -207,31 +207,31 @@ export function SimplifiedFlowPage({
             className="w-full space-y-8"
           >
             {/* Header */}
-            <div className="text-center space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium">
-                <Sparkles className="h-4 w-4" />
+            <div className="text-center space-y-4">
+              <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-primary/10 text-primary text-base font-medium">
+                <Sparkles className="h-5 w-5" />
                 Simplified Mode
               </div>
-              <h2 className="text-3xl font-semibold text-foreground">
-                Extract & Summarize Studies
+              <h2 className="text-4xl font-semibold text-foreground">
+                Science-GPT Summarization and Extraction Tool
               </h2>
-              <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+              <p className="text-muted-foreground text-xl max-w-2xl mx-auto">
                 Select your study type, upload PDFs, and get a Word document
                 with all extracted entities and a summary.
               </p>
             </div>
 
             {/* Study Type Selection */}
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-foreground block text-center">
+            <div className="space-y-4">
+              <label className="text-base font-medium text-foreground block text-center">
                 Study Type
               </label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-5">
                 <button
                   onClick={() => setStudyType("epidemiology")}
                   className={`
-                    relative p-6 rounded-xl border-2 transition-all duration-200
-                    flex flex-col items-center gap-3 text-center
+                    relative p-8 rounded-xl border-2 transition-all duration-200
+                    flex flex-col items-center gap-4 text-center
                     ${
                       studyType === "epidemiology"
                         ? "border-primary bg-primary/5 shadow-md shadow-primary/10"
@@ -240,21 +240,21 @@ export function SimplifiedFlowPage({
                   `}
                 >
                   <div
-                    className={`p-3 rounded-lg ${studyType === "epidemiology" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+                    className={`p-4 rounded-lg ${studyType === "epidemiology" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
                   >
-                    <Microscope className="h-6 w-6" />
+                    <Microscope className="h-8 w-8" />
                   </div>
                   <div>
-                    <div className="font-semibold text-foreground">
+                    <div className="font-semibold text-lg text-foreground">
                       Epidemiology
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <div className="text-sm text-muted-foreground mt-1">
                       Population & observational studies
                     </div>
                   </div>
                   {studyType === "epidemiology" && (
                     <div className="absolute top-3 right-3">
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
+                      <CheckCircle2 className="h-6 w-6 text-primary" />
                     </div>
                   )}
                 </button>
@@ -262,8 +262,8 @@ export function SimplifiedFlowPage({
                 <button
                   onClick={() => setStudyType("toxicology")}
                   className={`
-                    relative p-6 rounded-xl border-2 transition-all duration-200
-                    flex flex-col items-center gap-3 text-center
+                    relative p-8 rounded-xl border-2 transition-all duration-200
+                    flex flex-col items-center gap-4 text-center
                     ${
                       studyType === "toxicology"
                         ? "border-primary bg-primary/5 shadow-md shadow-primary/10"
@@ -272,21 +272,21 @@ export function SimplifiedFlowPage({
                   `}
                 >
                   <div
-                    className={`p-3 rounded-lg ${studyType === "toxicology" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+                    className={`p-4 rounded-lg ${studyType === "toxicology" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
                   >
-                    <FlaskConical className="h-6 w-6" />
+                    <FlaskConical className="h-8 w-8" />
                   </div>
                   <div>
-                    <div className="font-semibold text-foreground">
+                    <div className="font-semibold text-lg text-foreground">
                       Toxicology (In Vivo)
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <div className="text-sm text-muted-foreground mt-1">
                       In vivo developmental toxicity
                     </div>
                   </div>
                   {studyType === "toxicology" && (
                     <div className="absolute top-3 right-3">
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
+                      <CheckCircle2 className="h-6 w-6 text-primary" />
                     </div>
                   )}
                 </button>
@@ -294,8 +294,8 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* File Upload */}
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-foreground block text-center">
+            <div className="space-y-4">
+              <label className="text-base font-medium text-foreground block text-center">
                 Upload Studies (PDF)
               </label>
               <div
@@ -307,8 +307,8 @@ export function SimplifiedFlowPage({
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
                 className={`
-                  relative border-2 border-dashed rounded-xl p-8
-                  flex flex-col items-center gap-3 cursor-pointer
+                  relative border-2 border-dashed rounded-xl p-10
+                  flex flex-col items-center gap-4 cursor-pointer
                   transition-all duration-200
                   ${
                     isDragging
@@ -318,13 +318,13 @@ export function SimplifiedFlowPage({
                 `}
               >
                 <Upload
-                  className={`h-8 w-8 ${isDragging ? "text-primary" : "text-muted-foreground"}`}
+                  className={`h-10 w-10 ${isDragging ? "text-primary" : "text-muted-foreground"}`}
                 />
                 <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-base font-medium text-foreground">
                     Drop PDF files here or click to browse
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="text-sm text-muted-foreground mt-1">
                     Up to 10 files, PDF only
                   </p>
                 </div>
@@ -340,17 +340,17 @@ export function SimplifiedFlowPage({
 
               {/* File list */}
               {files.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {files.map((file, idx) => (
                     <div
                       key={`${file.name}-${idx}`}
-                      className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-muted/50 border border-border"
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/50 border border-border"
                     >
-                      <FileText className="h-4 w-4 text-primary shrink-0" />
-                      <span className="text-sm text-foreground truncate flex-1">
+                      <FileText className="h-5 w-5 text-primary shrink-0" />
+                      <span className="text-base text-foreground truncate flex-1">
                         {file.name}
                       </span>
-                      <span className="text-xs text-muted-foreground shrink-0">
+                      <span className="text-sm text-muted-foreground shrink-0">
                         {(file.size / 1024 / 1024).toFixed(1)} MB
                       </span>
                       <button
@@ -358,9 +358,9 @@ export function SimplifiedFlowPage({
                           e.stopPropagation();
                           removeFile(idx);
                         }}
-                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <X className="h-4 w-4" />
                       </button>
                     </div>
                   ))}
@@ -369,15 +369,15 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* Options toggle */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               <button
                 onClick={() => setOptionsOpen((o) => !o)}
-                className="flex items-center gap-2 mx-auto text-sm text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-2.5 mx-auto text-base text-muted-foreground hover:text-foreground transition-colors"
               >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <SlidersHorizontal className="h-4.5 w-4.5" />
                 Options
                 <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform duration-200 ${optionsOpen ? "rotate-180" : ""}`}
+                  className={`h-4.5 w-4.5 transition-transform duration-200 ${optionsOpen ? "rotate-180" : ""}`}
                 />
               </button>
 
@@ -390,16 +390,16 @@ export function SimplifiedFlowPage({
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 p-5 rounded-lg border border-border bg-muted/30">
                       {/* Parser */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-muted-foreground">
                           Document Parser
                         </label>
                         <select
                           value={selectedParser}
                           onChange={(e) => setSelectedParser(e.target.value)}
-                          className="w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                           {PARSER_OPTIONS.map((p) => (
                             <option key={p.value} value={p.value}>
@@ -410,14 +410,14 @@ export function SimplifiedFlowPage({
                       </div>
 
                       {/* Model */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-muted-foreground">
                           LLM Model
                         </label>
                         <select
                           value={selectedModelId}
                           onChange={(e) => setSelectedModelId(e.target.value)}
-                          className="w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                           <option value="">
                             {autoSelectedModelName
@@ -439,8 +439,8 @@ export function SimplifiedFlowPage({
                       </div>
 
                       {/* Template */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-muted-foreground">
                           Extraction Template
                         </label>
                         <select
@@ -451,7 +451,7 @@ export function SimplifiedFlowPage({
                           onChange={(e) =>
                             setSelectedTemplateId(e.target.value)
                           }
-                          className="w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                           {!studyType && (
                             <option value="" disabled>
@@ -472,14 +472,14 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* Run Button */}
-            <div className="flex justify-center pt-2">
+            <div className="flex justify-center pt-3">
               <Button
                 size="lg"
                 onClick={handleRun}
                 disabled={!canRun}
-                className="px-8 text-base"
+                className="px-10 py-3 text-lg h-auto"
               >
-                <Sparkles className="h-4 w-4 mr-2" />
+                <Sparkles className="h-5 w-5 mr-2.5" />
                 Extract & Summarize
               </Button>
             </div>
@@ -494,40 +494,40 @@ export function SimplifiedFlowPage({
             className="w-full space-y-8"
           >
             {/* Progress Header */}
-            <div className="text-center space-y-2">
+            <div className="text-center space-y-3">
               {progress.stage === "complete" ? (
                 <>
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
-                    <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 mb-2">
+                    <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
                   </div>
-                  <h2 className="text-2xl font-semibold text-foreground">
+                  <h2 className="text-3xl font-semibold text-foreground">
                     Reports Ready
                   </h2>
                 </>
               ) : progress.stage === "error" ? (
                 <>
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 mb-2">
-                    <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 mb-2">
+                    <AlertCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
                   </div>
-                  <h2 className="text-2xl font-semibold text-foreground">
+                  <h2 className="text-3xl font-semibold text-foreground">
                     Something Went Wrong
                   </h2>
                 </>
               ) : (
                 <>
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-2">
-                    <Loader2 className="h-8 w-8 text-primary animate-spin" />
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 mb-2">
+                    <Loader2 className="h-10 w-10 text-primary animate-spin" />
                   </div>
-                  <h2 className="text-2xl font-semibold text-foreground">
+                  <h2 className="text-3xl font-semibold text-foreground">
                     Processing...
                   </h2>
                 </>
               )}
-              <p className="text-muted-foreground">{progress.message}</p>
+              <p className="text-lg text-muted-foreground">{progress.message}</p>
             </div>
 
             {/* Stage Steps */}
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {STAGE_ORDER.map((stage) => {
                 const currentIdx = STAGE_ORDER.indexOf(progress.stage);
                 const stageIdx = STAGE_ORDER.indexOf(stage);
@@ -540,21 +540,21 @@ export function SimplifiedFlowPage({
                   <div
                     key={stage}
                     className={`
-                      flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors
+                      flex items-center gap-3.5 px-5 py-3 rounded-lg transition-colors
                       ${isActive ? "bg-primary/5" : ""}
                     `}
                   >
                     <div className="shrink-0">
                       {isComplete ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
                       ) : isActive ? (
-                        <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                        <Loader2 className="h-6 w-6 text-primary animate-spin" />
                       ) : (
-                        <div className="h-5 w-5 rounded-full border-2 border-border" />
+                        <div className="h-6 w-6 rounded-full border-2 border-border" />
                       )}
                     </div>
                     <span
-                      className={`text-sm font-medium ${
+                      className={`text-base font-medium ${
                         isActive
                           ? "text-foreground"
                           : isComplete
@@ -569,7 +569,7 @@ export function SimplifiedFlowPage({
                     {isActive &&
                       progress.stage === "extracting" &&
                       progress.totalEntities > 0 && (
-                        <span className="text-xs text-muted-foreground ml-auto">
+                        <span className="text-sm text-muted-foreground ml-auto">
                           {progress.entityIndex}/{progress.totalEntities}{" "}
                           entities
                         </span>
@@ -580,8 +580,8 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* Progress Bar */}
-            <div className="space-y-2">
-              <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+            <div className="space-y-2.5">
+              <div className="h-3.5 bg-muted rounded-full overflow-hidden">
                 <motion.div
                   className={`h-full rounded-full ${
                     progress.stage === "error"
@@ -595,7 +595,7 @@ export function SimplifiedFlowPage({
                   transition={{ duration: 0.4, ease: "easeOut" }}
                 />
               </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="flex justify-between text-sm text-muted-foreground">
                 <span>
                   {progress.totalFiles > 1
                     ? `File ${Math.min(progress.fileIndex + 1, progress.totalFiles)} of ${progress.totalFiles}`
@@ -607,18 +607,18 @@ export function SimplifiedFlowPage({
 
             {/* Error details */}
             {progress.stage === "error" && progress.error && (
-              <div className="p-4 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
-                <p className="text-sm text-red-700 dark:text-red-300">
+              <div className="p-5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+                <p className="text-base text-red-700 dark:text-red-300">
                   {progress.error}
                 </p>
               </div>
             )}
 
             {/* Actions */}
-            <div className="flex justify-center gap-3 pt-2">
+            <div className="flex justify-center gap-4 pt-3">
               {progress.stage === "complete" && results.length > 0 && (
-                <Button size="lg" onClick={downloadResults} className="px-8">
-                  <Download className="h-4 w-4 mr-2" />
+                <Button size="lg" onClick={downloadResults} className="px-10 py-3 text-lg h-auto">
+                  <Download className="h-5 w-5 mr-2.5" />
                   Download{" "}
                   {results.length === 1
                     ? "Report"
@@ -631,9 +631,9 @@ export function SimplifiedFlowPage({
                   size="lg"
                   variant="outline"
                   onClick={handleStartOver}
-                  className="px-8"
+                  className="px-10 py-3 text-lg h-auto"
                 >
-                  <RotateCcw className="h-4 w-4 mr-2" />
+                  <RotateCcw className="h-5 w-5 mr-2.5" />
                   Start Over
                 </Button>
               )}
@@ -646,7 +646,7 @@ export function SimplifiedFlowPage({
       <div className="mt-12 text-center">
         <button
           onClick={onSwitchToAdvanced}
-          className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
+          className="text-base text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
         >
           Switch to Advanced Mode
         </button>
