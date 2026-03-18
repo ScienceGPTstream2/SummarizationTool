@@ -24,7 +24,11 @@ import {
   loadStudyTypeTemplate,
   getAvailableStudyTypes,
 } from "./TemplateLoader";
-import { fetchAllModels, ModelConfig } from "../utils/modelSelection";
+import {
+  fetchAllModels,
+  pickBestFromList,
+  ModelConfig,
+} from "../utils/modelSelection";
 import { motion, AnimatePresence } from "framer-motion";
 
 type StudyType = "epidemiology" | "toxicology" | null;
@@ -77,16 +81,21 @@ export function SimplifiedFlowPage({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [autoSelectedModelName, setAutoSelectedModelName] = useState<string>("");
 
   const allTemplates = getAvailableStudyTypes();
 
+  // Fetch models eagerly (so we can always show the auto-selected model name)
   useEffect(() => {
-    if (!optionsOpen || availableModels.length > 0) return;
+    if (availableModels.length > 0) return;
     let cancelled = false;
     setModelsLoading(true);
     fetchAllModels()
       .then((models) => {
-        if (!cancelled) setAvailableModels(models);
+        if (cancelled) return;
+        setAvailableModels(models);
+        const best = pickBestFromList(models);
+        if (best) setAutoSelectedModelName(best.model.name);
       })
       .catch(() => {})
       .finally(() => {
@@ -95,7 +104,7 @@ export function SimplifiedFlowPage({
     return () => {
       cancelled = true;
     };
-  }, [optionsOpen, availableModels.length]);
+  }, [availableModels.length]);
 
   useEffect(() => {
     if (studyType && !selectedTemplateId) {
@@ -410,7 +419,11 @@ export function SimplifiedFlowPage({
                           onChange={(e) => setSelectedModelId(e.target.value)}
                           className="w-full h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
-                          <option value="">Auto (best available)</option>
+                          <option value="">
+                            {autoSelectedModelName
+                              ? `Auto — ${autoSelectedModelName}`
+                              : "Auto (best available)"}
+                          </option>
                           {modelsLoading ? (
                             <option disabled>Loading models...</option>
                           ) : (

@@ -1,16 +1,9 @@
-import { getValidToken } from "./authUtils";
+import {
+  ModelConfig,
+  settingsManager,
+} from "../components/SettingsManager";
 
-export interface ModelConfig {
-  id: string;
-  name: string;
-  provider: string;
-  model_type?: string;
-  description?: string;
-  deployment?: string;
-  api_version?: string;
-  supports_temperature?: boolean;
-  default_temperature?: number;
-}
+export type { ModelConfig };
 
 export interface ModelSelectionResult {
   model: ModelConfig;
@@ -20,43 +13,85 @@ export interface ModelSelectionResult {
   apiVersion?: string;
 }
 
+// Ranked by capability: most powerful first.
+// The first model that matches an available model wins.
 const MODEL_PRIORITY: Array<{
   match: (m: ModelConfig) => boolean;
   modelType: string;
 }> = [
+  // Tier 1 — frontier reasoning (cost-efficient first)
+  {
+    match: (m) => m.id?.includes("gemini-3-pro"),
+    modelType: "gemini",
+  },
+  {
+    match: (m) => m.id?.includes("claude-opus-4"),
+    modelType: "anthropic",
+  },
   {
     match: (m) =>
-      m.provider === "Google Gemini" &&
-      (m.name?.includes("flash") || m.id?.includes("flash")),
+      m.provider === "Azure" && m.name?.includes("gpt-5.2"),
+    modelType: "azure",
+  },
+  {
+    match: (m) =>
+      m.provider === "Azure" && m.name === "o3",
+    modelType: "azure",
+  },
+  // Tier 2 — strong reasoning
+  {
+    match: (m) => m.id?.includes("gemini-2.5-pro"),
+    modelType: "gemini",
+  },
+  {
+    match: (m) => m.id?.includes("claude-sonnet-4"),
+    modelType: "anthropic",
+  },
+  {
+    match: (m) =>
+      m.provider === "Azure" && m.name === "o3-mini",
+    modelType: "azure",
+  },
+  {
+    match: (m) =>
+      m.provider === "Azure" &&
+      (m.name === "gpt-5" || m.name === "gpt-5-mini"),
+    modelType: "azure",
+  },
+  // Tier 3 — fast & capable
+  {
+    match: (m) => m.id?.includes("gemini-2.5-flash") && !m.id?.includes("lite"),
     modelType: "gemini",
   },
   {
     match: (m) =>
-      m.provider === "Google Gemini" &&
-      (m.name?.includes("pro") || m.id?.includes("pro")),
+      m.provider === "Azure" &&
+      (m.name === "gpt-4o" || m.name === "o4-mini"),
+    modelType: "azure",
+  },
+  // Tier 4 — lightweight / fast
+  {
+    match: (m) => m.id?.includes("gemini-2.5-flash-lite"),
     modelType: "gemini",
   },
+  {
+    match: (m) =>
+      m.provider === "Azure" && m.name === "gpt-5-nano",
+    modelType: "azure",
+  },
+  // Tier 5 — Llama
+  {
+    match: (m) => m.id?.includes("llama-3.1-405b"),
+    modelType: "llama",
+  },
+  {
+    match: (m) => m.id?.includes("llama-4-maverick"),
+    modelType: "llama",
+  },
+  // Catch-all
   {
     match: (m) => m.provider === "Google Gemini",
     modelType: "gemini",
-  },
-  {
-    match: (m) =>
-      m.provider === "Azure" &&
-      (m.name === "gpt-4o" || m.id?.includes("gpt-4o")),
-    modelType: "azure",
-  },
-  {
-    match: (m) =>
-      m.provider === "Azure" &&
-      (m.name?.includes("gpt-5") || m.id?.includes("gpt-5")),
-    modelType: "azure",
-  },
-  {
-    match: (m) =>
-      m.provider === "Azure" &&
-      (m.name?.includes("gpt-4") || m.id?.includes("gpt-4")),
-    modelType: "azure",
   },
   {
     match: (m) => m.provider === "Azure",
@@ -73,52 +108,33 @@ const MODEL_PRIORITY: Array<{
 ];
 
 export async function selectBestModel(): Promise<ModelSelectionResult> {
-  const token = await getValidToken();
-  if (!token) throw new Error("Not authenticated");
-
-  const response = await fetch("/api/models", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error("Failed to fetch available models");
-
-  const models: ModelConfig[] = await response.json();
+  const models = await fetchAllModels();
   if (!models.length) throw new Error("No models available");
 
+  const result = pickBestFromList(models);
+  if (result) return result;
+
+  return modelConfigToSelection(models[0]);
+}
+
+/**
+ * Given a pre-fetched list of models, pick the best one using MODEL_PRIORITY.
+ * Returns null only if the list is empty.
+ */
+export function pickBestFromList(
+  models: ModelConfig[]
+): ModelSelectionResult | null {
+  if (!models.length) return null;
   for (const rule of MODEL_PRIORITY) {
     const match = models.find(rule.match);
-    if (match) {
-      const isGemini =
-        match.provider === "Google Gemini" || rule.modelType === "gemini";
-      return {
-        model: match,
-        modelType: isGemini ? "gemini" : rule.modelType,
-        modelId: match.id,
-        deployment: match.deployment,
-        apiVersion: match.api_version,
-      };
-    }
+    if (match) return modelConfigToSelection(match);
   }
-
-  const fallback = models[0];
-  return {
-    model: fallback,
-    modelType: "azure",
-    modelId: fallback.id,
-    deployment: fallback.deployment,
-    apiVersion: fallback.api_version,
-  };
+  return modelConfigToSelection(models[0]);
 }
 
 export async function fetchAllModels(): Promise<ModelConfig[]> {
-  const token = await getValidToken();
-  if (!token) throw new Error("Not authenticated");
-
-  const response = await fetch("/api/models", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error("Failed to fetch available models");
-
-  return response.json();
+  await settingsManager.refreshServerConfig();
+  return settingsManager.getAvailableModelsAsync();
 }
 
 export function modelConfigToSelection(
