@@ -787,12 +787,7 @@ class SupabaseDBService:
 
     def get_group_name(self, group_id: str) -> Optional[str]:
         """Get a group's name by ID."""
-        result = (
-            self.client.table("groups")
-            .select("name")
-            .eq("id", group_id)
-            .execute()
-        )
+        result = self.client.table("groups").select("name").eq("id", group_id).execute()
         return result.data[0]["name"] if result.data else None
 
     def get_user_display_name(self, user_id: str) -> Optional[str]:

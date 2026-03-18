@@ -631,7 +631,9 @@ class SessionService:
             return None
         return self.db.share_session(session_id, user_id, group_id)
 
-    def unshare_session(self, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+    def unshare_session(
+        self, user_id: str, session_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Remove sharing from a session."""
         return self.db.unshare_session(session_id, user_id)
 
@@ -654,7 +656,9 @@ class SessionService:
             group_name = None
             if gid:
                 if gid not in group_name_cache:
-                    group_name_cache[gid] = self.db.get_group_name(gid) or "Unknown Group"
+                    group_name_cache[gid] = (
+                        self.db.get_group_name(gid) or "Unknown Group"
+                    )
                 group_name = group_name_cache[gid]
 
             # Resolve sharer display name
@@ -662,7 +666,9 @@ class SessionService:
             sharer_name = None
             if sid:
                 if sid not in sharer_name_cache:
-                    sharer_name_cache[sid] = self.db.get_user_display_name(sid) or "Unknown User"
+                    sharer_name_cache[sid] = (
+                        self.db.get_user_display_name(sid) or "Unknown User"
+                    )
                 sharer_name = sharer_name_cache[sid]
 
             summary = SessionSummary(
@@ -680,14 +686,20 @@ class SessionService:
                 # Extra fields for shared session display
                 shared_by_name=sharer_name,
                 shared_group_name=group_name,
-                shared_at=self._parse_timestamp(db_session["shared_at"]) if db_session.get("shared_at") else None,
+                shared_at=(
+                    self._parse_timestamp(db_session["shared_at"])
+                    if db_session.get("shared_at")
+                    else None
+                ),
                 owner_user_id=db_session.get("user_id"),
             )
             summaries.append(summary)
 
         return summaries
 
-    def get_session_for_shared_view(self, requesting_user_id: str, session_id: str) -> Optional[Session]:
+    def get_session_for_shared_view(
+        self, requesting_user_id: str, session_id: str
+    ) -> Optional[Session]:
         """Get a shared session for viewing. Verifies the requesting user has access via group membership."""
         # Get the session (we need to bypass the user_id check since this is a shared session)
         result = (

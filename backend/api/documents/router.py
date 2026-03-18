@@ -236,10 +236,13 @@ async def process_uploaded_file(
                     _upload_meta_filename = None
                     try:
                         import json as _json_up
+
                         _upload_meta_path = file_path.parent / "metadata.json"
                         if _upload_meta_path.exists():
                             _upload_meta = _json_up.loads(_upload_meta_path.read_text())
-                            _upload_meta_filename = _upload_meta.get("original_filename")
+                            _upload_meta_filename = _upload_meta.get(
+                                "original_filename"
+                            )
                     except Exception:
                         pass
 
@@ -402,9 +405,8 @@ async def process_uploaded_file(
                 # Always persist original_filename so cache hits can display
                 # the correct document name instead of "original.pdf".
                 if "original_filename" not in _meta_data:
-                    _resolved_name = (
-                        _original_filename
-                        or (file_path.name if file_path.name != "original.pdf" else None)
+                    _resolved_name = _original_filename or (
+                        file_path.name if file_path.name != "original.pdf" else None
                     )
                     if _resolved_name:
                         _meta_data["original_filename"] = _resolved_name

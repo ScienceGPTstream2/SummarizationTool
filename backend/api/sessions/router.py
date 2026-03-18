@@ -17,8 +17,10 @@ from services.session.session_service import get_session_service
 
 class ShareSessionRequest(BaseModel):
     """Request to share a session with a group"""
+
     user_id: str
     group_id: str
+
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
