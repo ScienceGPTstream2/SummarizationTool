@@ -345,6 +345,8 @@ export interface EntityExportOptions {
   summaryPrompt?: string;
   /** The paragraph system prompt */
   paragraphSystemPrompt?: string;
+  /** Whether to include individual entity extraction results in the report (default: true) */
+  includeEntities?: boolean;
 }
 
 /**
@@ -465,6 +467,9 @@ export const generateWordDocument = async (
   );
 
   // ══════ ENTITY EXTRACTION RESULTS ══════
+  const includeEntities = options?.includeEntities !== false;
+
+  if (includeEntities) {
   sections.push(createSectionHeading("Entity Extraction Results"));
 
   for (const entity of resolvedEntities) {
@@ -579,6 +584,7 @@ export const generateWordDocument = async (
     sections.push(resultTable);
     sections.push(new Paragraph({ spacing: { after: 400 } })); // space between entities
   }
+  } // end includeEntities
 
   // ══════ SUMMARY PROMPT (if available) ══════
   const summaryPrompt =

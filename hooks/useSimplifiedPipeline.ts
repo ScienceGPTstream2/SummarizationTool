@@ -38,9 +38,10 @@ export interface ExtractedEntity {
 
 export interface FileResult {
   fileName: string;
-  blob: Blob;
   summary: string;
   entities: ExtractedEntity[];
+  docData: DocumentData;
+  exportOptions: EntityExportOptions;
 }
 
 export interface PipelineOptions {
@@ -141,7 +142,8 @@ export function useSimplifiedPipeline() {
       );
       if (abortRef.current) throw new Error("Cancelled");
 
-      updateFile(fileIndex, { stage: "exporting" });
+      updateFile(fileIndex, { stage: "complete" });
+
       const studyTypeId =
         studyType === "epidemiology"
           ? "level-1-epidemiology"
@@ -167,18 +169,15 @@ export function useSimplifiedPipeline() {
         summaryPrompt,
       };
 
-      const blob = await generateWordDocument(docData, exportOptions);
-
-      updateFile(fileIndex, { stage: "complete" });
-
       return {
         fileName: file.name,
-        blob,
         summary: finalSummary,
         entities: extractedEntities.map((e) => ({
           name: e.name,
           extracted: e.extracted,
         })),
+        docData,
+        exportOptions,
       };
     },
     [updateFile]
@@ -287,25 +286,39 @@ export function useSimplifiedPipeline() {
     setResults([]);
   }, []);
 
-  const downloadResults = useCallback(() => {
-    for (const result of results) {
+  const downloadResults = useCallback(
+    async (includeEntities: boolean) => {
+      for (const result of results) {
+        const blob = await generateWordDocument(result.docData, {
+          ...result.exportOptions,
+          includeEntities,
+        });
+        const baseName = result.fileName.replace(/\.pdf$/i, "");
+        downloadFile(
+          blob,
+          `${baseName}_extraction_report.docx`,
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+      }
+    },
+    [results]
+  );
+
+  const downloadSingleResult = useCallback(
+    async (result: FileResult, includeEntities: boolean) => {
+      const blob = await generateWordDocument(result.docData, {
+        ...result.exportOptions,
+        includeEntities,
+      });
       const baseName = result.fileName.replace(/\.pdf$/i, "");
       downloadFile(
-        result.blob,
+        blob,
         `${baseName}_extraction_report.docx`,
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       );
-    }
-  }, [results]);
-
-  const downloadSingleResult = useCallback((result: FileResult) => {
-    const baseName = result.fileName.replace(/\.pdf$/i, "");
-    downloadFile(
-      result.blob,
-      `${baseName}_extraction_report.docx`,
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    );
-  }, []);
+    },
+    []
+  );
 
   return { state, results, run, reset, downloadResults, downloadSingleResult };
 }

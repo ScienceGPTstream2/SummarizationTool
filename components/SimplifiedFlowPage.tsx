@@ -78,6 +78,7 @@ export function SimplifiedFlowPage({
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [autoSelectedModelName, setAutoSelectedModelName] = useState<string>("");
+  const [includeEntitiesInDoc, setIncludeEntitiesInDoc] = useState(false);
 
   const allTemplates = getAvailableStudyTypes();
 
@@ -474,7 +475,8 @@ export function SimplifiedFlowPage({
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 p-5 rounded-lg border border-border bg-muted/30">
+                    <div className="space-y-4 p-5 rounded-lg border border-border bg-muted/30">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                       {/* Parser */}
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-muted-foreground">
@@ -551,6 +553,8 @@ export function SimplifiedFlowPage({
                         </select>
                       </div>
                     </div>
+
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -595,7 +599,7 @@ export function SimplifiedFlowPage({
                   : `${results.length} Reports Ready`}
               </h2>
               <p className="text-lg text-muted-foreground">
-                Click on a study below to view the summary and extracted data
+                Click on a study below to view the summary
               </p>
             </motion.div>
 
@@ -640,9 +644,6 @@ export function SimplifiedFlowPage({
                             <span className="text-lg font-semibold text-foreground truncate">
                               {result.fileName.replace(/\.pdf$/i, "")}
                             </span>
-                            <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">
-                              {result.entities.length} entities
-                            </span>
                           </div>
                           {/* Summary preview — only when collapsed */}
                           {!isExpanded && summaryPreview && (
@@ -685,39 +686,11 @@ export function SimplifiedFlowPage({
                               </div>
                             )}
 
-                            {/* Entities */}
-                            {result.entities.length > 0 && (
-                              <div className="space-y-2.5">
-                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                                  Extracted Entities
-                                </h4>
-                                <div className="space-y-2.5">
-                                  {result.entities.map((entity, ei) => (
-                                    <div
-                                      key={ei}
-                                      className="rounded-lg border border-border bg-background p-4"
-                                    >
-                                      <div className="text-sm font-semibold text-primary mb-1.5">
-                                        {entity.name}
-                                      </div>
-                                      <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-                                        {entity.extracted || (
-                                          <span className="text-muted-foreground italic">
-                                            No data extracted
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
                             {/* Per-file download */}
                             <div className="flex justify-end pt-1">
                               <Button
                                 variant="outline"
-                                onClick={() => downloadSingleResult(result)}
+                                onClick={() => downloadSingleResult(result, includeEntitiesInDoc)}
                                 className="text-sm"
                               >
                                 <Download className="h-4 w-4 mr-1.5" />
@@ -733,14 +706,38 @@ export function SimplifiedFlowPage({
               })}
             </div>
 
+            {/* Download options */}
+            <motion.div
+              className="flex justify-center"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.15 + results.length * 0.08 }}
+            >
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={includeEntitiesInDoc}
+                    onChange={(e) => setIncludeEntitiesInDoc(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-6 rounded-full bg-border peer-checked:bg-primary transition-colors" />
+                  <div className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  Include individual entities in Word report
+                </span>
+              </label>
+            </motion.div>
+
             {/* Actions */}
             <motion.div
-              className="flex justify-center gap-4 pt-2"
+              className="flex justify-center gap-4"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 + results.length * 0.08 }}
             >
-              <Button size="lg" onClick={downloadResults} className="px-10 py-3 text-lg h-auto">
+              <Button size="lg" onClick={() => downloadResults(includeEntitiesInDoc)} className="px-10 py-3 text-lg h-auto">
                 <Download className="h-5 w-5 mr-2.5" />
                 {results.length === 1
                   ? "Download Report"
