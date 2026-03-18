@@ -1062,6 +1062,9 @@ export default function App() {
                 "azure_doc_intelligence",
               parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
               parseDuration: doc.parse_duration_seconds ?? undefined,
+              // Include figure/table counts so ProcessingPage can lazy-fetch
+              figuresCount: doc.figure_count ?? undefined,
+              tablesCount: doc.table_count ?? undefined,
             },
             processorUsed:
               doc.processor_used || fileConfig.processor_used || undefined,

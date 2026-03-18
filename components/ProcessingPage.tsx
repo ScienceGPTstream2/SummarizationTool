@@ -5,6 +5,7 @@ import { DocumentData } from "../App";
 import { PDFBoundingBoxViewer } from "./PDFBoundingBoxViewer";
 import { FigureGallery } from "./FigureGallery";
 import { TablesGallery } from "./TablesGallery";
+import { authenticatedFetch } from "../utils/authUtils";
 
 import { settingsManager } from "./SettingsManager";
 import {
@@ -134,6 +135,55 @@ export function ProcessingPage({
       setGlobalParser(availableParsers[0].id);
     }
   }, [availableParsers, globalParser]);
+
+  // Lazy-fetch figures for restored sessions: when a file has a conversionId
+  // and figuresCount > 0 but no figures array, fetch from the API so the
+  // FigureGallery and TablesGallery can render.
+  useEffect(() => {
+    const fetchMissingFigures = async () => {
+      const filesToFetch = files.filter(
+        (f) =>
+          f.status === "completed" &&
+          f.processingResult?.conversionId &&
+          !f.processingResult?.figures &&
+          (f.processingResult?.figuresCount ?? 0) > 0
+      );
+
+      if (filesToFetch.length === 0) return;
+
+      for (const file of filesToFetch) {
+        try {
+          const response = await authenticatedFetch(
+            `/api/documents/${file.processingResult!.conversionId}/figures`
+          );
+          if (response.ok) {
+            const data = await response.json();
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.fileId === file.fileId
+                  ? {
+                      ...f,
+                      processingResult: {
+                        ...f.processingResult,
+                        figures: data.figures || [],
+                        figuresCount: data.figures_count ?? data.figures?.length ?? 0,
+                      },
+                    }
+                  : f
+              )
+            );
+          }
+        } catch (err) {
+          console.warn(
+            `[ProcessingPage] Failed to lazy-fetch figures for ${file.fileId}:`,
+            err
+          );
+        }
+      }
+    };
+
+    fetchMissingFigures();
+  }, [files.map((f) => f.fileId).join(",")]); // Re-run when file set changes
 
   const handleProceed = () => {
     const completedFiles = files.filter((f) => f.status === "completed");

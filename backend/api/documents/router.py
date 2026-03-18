@@ -376,17 +376,30 @@ async def process_uploaded_file(
         # that Docling cost (cost_per_minute × duration/60) can be recomputed deterministically
         # even for files where parse_cost was not yet stored (legacy metadata.json files).
         try:
-            if parse_cost:
-                import json as _json
+            import json as _json
 
-                _meta_path = output_dir / "metadata.json"
-                if _meta_path.exists():
-                    _meta_data = _json.loads(_meta_path.read_text())
+            _meta_path = output_dir / "metadata.json"
+            if _meta_path.exists():
+                _meta_data = _json.loads(_meta_path.read_text())
+                _needs_write = False
+                if parse_cost:
                     _meta_data["parse_cost"] = parse_cost
                     _meta_data["parse_duration_seconds"] = actual_duration
+                    _needs_write = True
+                # Always persist original_filename so cache hits can display
+                # the correct document name instead of "original.pdf".
+                if "original_filename" not in _meta_data:
+                    _resolved_name = (
+                        _original_filename
+                        or (file_path.name if file_path.name != "original.pdf" else None)
+                    )
+                    if _resolved_name:
+                        _meta_data["original_filename"] = _resolved_name
+                        _needs_write = True
+                if _needs_write:
                     _meta_path.write_text(_json.dumps(_meta_data, indent=2))
         except Exception as _e:
-            print(f"[COST_TRACKER] Failed to write parse_cost to metadata.json: {_e}")
+            print(f"[COST_TRACKER] Failed to write metadata to metadata.json: {_e}")
 
         # Record call metric for session metrics widget.
         # Fallback: read original_filename from the file's metadata.json.
