@@ -208,7 +208,7 @@ class GeminiLLMClient:
         print(f"[LLMService] Request payload: {json.dumps(payload, indent=2)}")
 
         # Retry configuration
-        max_retries = 5
+        max_retries = 3
         base_delay = 1.0  # Start with 1 second
         max_delay = 30.0  # Cap at 30 seconds
         retryable_status_codes = [429, 500, 503, 504]  # Rate limit and server errors
@@ -244,7 +244,7 @@ class GeminiLLMClient:
 
                 resp = await asyncio.to_thread(
                     lambda: requests.post(
-                        url, headers=headers, json=payload, timeout=120
+                        url, headers=headers, json=payload, timeout=180
                     )
                 )
                 duration = time.time() - start_time
@@ -338,23 +338,23 @@ class GeminiLLMClient:
                     pass
 
                 if finish_reason == "MAX_TOKENS":
-                    if attempt < max_retries - 1:
-                        print(
-                            f"[LLMService] Output truncated (finishReason=MAX_TOKENS), will retry with more tokens..."
+                    # Return partial result immediately instead of retrying with doubled tokens.
+                    # Retrying with 2x tokens would cost another 90-135s and may still truncate.
+                    print(
+                        f"[LLMService] Output truncated (finishReason=MAX_TOKENS), returning partial result"
+                    )
+                    try:
+                        partial_text = _sanitize(
+                            raw.get("candidates", [])[0]
+                            .get("content", {})
+                            .get("parts", [])[0]
+                            .get("text", "")
                         )
-                        # Increase maxOutputTokens for next attempt to avoid truncation
-                        current_max = payload["generationConfig"].get(
-                            "maxOutputTokens", max_tokens
-                        )
-                        new_max = min(current_max * 2, 65536)  # Double it, cap at 65536
-                        payload["generationConfig"]["maxOutputTokens"] = new_max
-                        print(
-                            f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max}"
-                        )
-                        last_error = "Output truncated (MAX_TOKENS)"
-                        continue
-                    else:
-                        print(f"[LLMService] Output still truncated after max retries")
+                    except (IndexError, KeyError):
+                        partial_text = ""
+                    content = partial_text
+                    references = []
+                    break
 
                 try:
                     response_text = _sanitize(
@@ -401,7 +401,7 @@ class GeminiLLMClient:
                             current_max = payload["generationConfig"].get(
                                 "maxOutputTokens", max_tokens
                             )
-                            new_max = min(current_max * 2, 65536)
+                            new_max = min(current_max * 2, 65535)
                             payload["generationConfig"]["maxOutputTokens"] = new_max
                             print(
                                 f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max} for retry"
@@ -411,12 +411,12 @@ class GeminiLLMClient:
                         print(
                             f"[LLMService] Failed to parse structured output after all retries: {e}"
                         )
-                        print(f"[LLMService] Response text: {response_text[:500]}...")
-                        return {
-                            "success": False,
-                            "error": f"Failed to parse structured output: {str(e)}",
-                            "raw": raw,
-                        }
+                        print(
+                            f"[LLMService] Returning partial truncated response as plain text"
+                        )
+                        content = response_text  # Return raw truncated text rather than failing
+                        references = []
+                        break
                 else:
                     content = response_text
                     references = []

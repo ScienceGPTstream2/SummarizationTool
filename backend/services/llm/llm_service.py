@@ -70,7 +70,7 @@ class LLMService:
             print(f"[TIMEOUT_LOG_ERROR] Failed to write to log file: {e}")
 
     async def _call_with_timeout_logging(
-        self, operation: str, coro, timeout_seconds: int = 120
+        self, operation: str, coro, timeout_seconds: int = 240
     ):
         """
         Call an async function with timeout detection and logging.
