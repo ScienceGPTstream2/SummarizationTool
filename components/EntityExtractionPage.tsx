@@ -348,7 +348,9 @@ export function EntityExtractionPage({
         },
         body: JSON.stringify({
           user_id: user.id,
-          name: `${currentFile.file?.name || "Extraction"} Session`,
+          name: documentData.sharedSourceName
+            ? `Copy of ${documentData.sharedSourceName}`
+            : `${currentFile.file?.name || "Extraction"} Session`,
           configuration: {
             study_type: selectedStudyType,
             selected_models: availableModels

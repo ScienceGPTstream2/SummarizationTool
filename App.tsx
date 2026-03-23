@@ -919,20 +919,14 @@ export default function App() {
     return currentIdx + 1 <= highestReachableStepIndex;
   }, [currentStep, highestReachableStepIndex, staleDownstream]);
 
-  const handleRestoreSession = async (sessionId: string) => {
-    if (restoringSessionRef.current) return;
-    restoringSessionRef.current = true;
-    try {
-      setLoading(true);
-      const response = await fetch(
-        `/api/sessions/${sessionId}?user_id=${userInfo?.id}`
-      );
-      if (!response.ok) throw new Error("Failed to fetch session");
-      const sessionData = await response.json();
-      console.log("🚀 Restoring session:", sessionData.session_id);
-      const config = sessionData.configuration || {};
-      const evalConfig =
-        sessionData.evaluation_config || config.evaluation_config || {};
+  // Helper: build DocumentData from a session API response (owned OR shared).
+  // Does NOT set sessionId or sharedSourceName — callers apply those overrides.
+  const buildRestoredDocumentData = async (
+    sessionData: any
+  ): Promise<Partial<DocumentData>> => {
+    const config = sessionData.configuration || {};
+    const evalConfig =
+      sessionData.evaluation_config || config.evaluation_config || {};
 
       // Merge files_config from both sources:
       // - sessionData.files_config: Contains ground_truths (saved from EvaluationPage)
@@ -1030,7 +1024,6 @@ export default function App() {
       // Map session back to DocumentData
       const restoredData: Partial<DocumentData> = {
         studyType: sessionData.configuration.study_type || "",
-        sessionId: sessionData.session_id,
         selectedModel: sessionData.configuration.selected_models[0] || "",
         selectedModels: sessionData.configuration.selected_models,
         summaryPrompt: sessionData.configuration.summary_prompt || "",
@@ -1673,11 +1666,30 @@ export default function App() {
         }),
       };
 
+      return restoredData;
+  };
+
+  const handleRestoreSession = async (sessionId: string) => {
+    if (restoringSessionRef.current) return;
+    restoringSessionRef.current = true;
+    try {
+      setLoading(true);
+      const response = await fetch(
+        `/api/sessions/${sessionId}?user_id=${userInfo?.id}`
+      );
+      if (!response.ok) throw new Error("Failed to fetch session");
+      const sessionData = await response.json();
+      console.log("🚀 Restoring session:", sessionData.session_id);
+
+      const restoredData = await buildRestoredDocumentData(sessionData);
+      restoredData.sessionId = sessionData.session_id;
+      restoredData.sharedSourceName = undefined;
+
       console.log(
         `[restore] Restored ${restoredData.uploadedFiles?.length ?? 0} files, last_step=${sessionData.last_step}`
       );
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
-      sessionCreationInProgressRef.current = false; // Reset in case it was stuck
+      sessionCreationInProgressRef.current = false;
 
       // Load session metrics from database to populate the in-memory cache
       try {
@@ -1713,9 +1725,6 @@ export default function App() {
 
       toast.success("Session restored successfully");
 
-      // Clear any shared source tracking since this is an owned session
-      setDocumentData((prev) => ({ ...prev, sharedSourceName: undefined }));
-
       // Determine the step to restore to
       // Skip "upload" step since restored sessions don't have actual File objects
       const toolOnlySteps = [
@@ -1736,10 +1745,8 @@ export default function App() {
         restoredData.uploadedFiles &&
         restoredData.uploadedFiles.length > 0
       ) {
-        // We have files, go to study selection
         setCurrentStep("study_selection");
       } else {
-        // No files, something is wrong
         toast.error("Session has no documents");
         setCurrentStep("upload");
       }
@@ -1754,10 +1761,10 @@ export default function App() {
     }
   };
 
-  // Restore a shared session: fetch via the shared endpoint, load data into
-  // the workspace *without* creating a new session. The first write op
-  // (extraction / evaluation) in EntityExtractionPage will lazily create
-  // a clone session named "Copy of <original name>".
+  // Restore a shared session: fetch via the shared endpoint, load full data
+  // (entities, extractions, evaluations) into the workspace WITHOUT creating a
+  // new session. The first write op in EntityExtractionPage will lazily create
+  // a clone named "Copy of <original name>".
   const handleRestoreSharedSession = async (sessionId: string) => {
     if (restoringSessionRef.current) return;
     restoringSessionRef.current = true;
@@ -1769,46 +1776,11 @@ export default function App() {
       if (!response.ok) throw new Error("Failed to fetch shared session");
       const sessionData = await response.json();
 
-      // Re-use the same restore logic but WITHOUT setting sessionId.
-      // Instead, set sharedSourceName so the workspace knows it came from
-      // a shared session and will create a clone on first write.
-      const config = sessionData.configuration || {};
-
-      // Build lightweight restored data — documents + entities only
-      const restoredData: Partial<DocumentData> = {
-        studyType: config.study_type || "",
-        sessionId: undefined, // NO session yet — lazy clone
-        sharedSourceName: sessionData.name || "Shared Session",
-        selectedModel: config.selected_models?.[0] || "",
-        selectedModels: config.selected_models || [],
-        summaryPrompt: config.summary_prompt || "",
-        temperature: config.temperature ?? undefined,
-        modelTemperatures: config.model_temperatures || {},
-        uploadedFiles: sessionData.documents.map((doc: any) => ({
-          file: new File([""], doc.filename, { type: "application/pdf" }),
-          fileId: doc.file_hash,
-          studyType: config.study_type || "",
-          processingResult: {
-            conversionId: doc.file_hash,
-            fileHash: doc.file_hash,
-            markdownPath: `files/global/${doc.file_hash}/output/content.md`,
-            processorUsed: doc.processor_used || "azure_doc_intelligence",
-            parse_cost: doc.parse_cost ?? undefined,
-          },
-          processorUsed: doc.processor_used || undefined,
-          selectedModels: config.selected_models || [],
-          status: "completed" as const,
-          entities: (config.entities || []).map((e: any) => ({
-            name: e.name,
-            prompt: e.prompt,
-            systemPrompt: e.system_prompt,
-          })),
-        })),
-        entities: (config.entities || []).map((e: any) => ({
-          name: e.name,
-          prompt: e.prompt,
-        })),
-      };
+      // Build full restored data via the shared helper, then override
+      // sessionId to undefined (lazy clone) and set sharedSourceName.
+      const restoredData = await buildRestoredDocumentData(sessionData);
+      restoredData.sessionId = undefined;
+      restoredData.sharedSourceName = sessionData.name || "Shared Session";
 
       setDocumentData((prev) => ({ ...prev, ...restoredData }));
       sessionCreationInProgressRef.current = false;
@@ -1817,8 +1789,32 @@ export default function App() {
         `Loaded shared session "${sessionData.name}". A copy will be created when you make changes.`
       );
 
-      // Navigate to extraction (read-only view of the shared data)
-      setCurrentStep("extraction");
+      // Navigate to wherever the original session left off
+      const toolOnlySteps = [
+        "login",
+        "history",
+        "upload",
+        "templates",
+        "groups",
+        "executive",
+      ];
+      const validLastStep =
+        sessionData.last_step && !toolOnlySteps.includes(sessionData.last_step);
+
+      if (validLastStep) {
+        console.log(
+          "Restoring shared session to last step:",
+          sessionData.last_step
+        );
+        setCurrentStep(sessionData.last_step as Step);
+      } else if (
+        restoredData.uploadedFiles &&
+        restoredData.uploadedFiles.length > 0
+      ) {
+        setCurrentStep("extraction");
+      } else {
+        setCurrentStep("upload");
+      }
     } catch (error) {
       console.error("Error restoring shared session:", error);
       toast.error("Failed to load shared session");

@@ -219,9 +219,19 @@ async def share_session(session_id: str, request: ShareSessionRequest):
     Share a session with a group. Only the session owner can share.
     A session can only be shared with one group at a time.
     """
-    result = session_service.share_session(
-        request.user_id, session_id, request.group_id
-    )
+    try:
+        result = session_service.share_session(
+            request.user_id, session_id, request.group_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to share session. The database may need a schema migration "
+                f"to be applied (run supabase-docker/migrations/20260317160000_add_session_sharing.sql "
+                f"and reload the PostgREST schema cache). Error: {e}"
+            ),
+        )
 
     if result is None:
         raise HTTPException(
