@@ -175,7 +175,8 @@ export const transformToRows = (documentData: any): ResultRow[] => {
     for (const entity of entities) {
       const entityName = entity.name;
       const promptTemplate = entity.prompt || "";
-      const systemPrompt = entity.systemPrompt || "";
+      const systemPrompt = entity.systemPrompt ||
+        "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt.";
       const groundTruth = entity.groundTruth || "";
 
       // Identify Source Models
@@ -296,11 +297,16 @@ export const transformToRows = (documentData: any): ResultRow[] => {
       }
     }
 
-    // Paragraph Evaluation rows — one per model in summariesByModel
+    // Paragraph Generator rows — one per model in summariesByModel
     const paragraphEval = (fileItem as any).paragraphEvaluation;
     const summariesByModel = (fileItem as any).summariesByModel as
       | Record<string, string>
       | undefined;
+    const paragraphSysPrompt =
+      (fileItem as any).paragraphSystemPrompt ||
+      "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy.";
+    const paragraphUserPrompt =
+      (fileItem as any).summaryPrompt || "";
 
     if (
       paragraphEval?.groundTruth &&
@@ -316,9 +322,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
           llmSource: getDisplayModelName(modelId),
           sourceModelRaw: modelId,
           ingestion: ingestionTool,
-          systemPrompt: "",
-          promptTemplate: "",
-          entity: "Paragraph Evaluation",
+          systemPrompt: paragraphSysPrompt,
+          promptTemplate: paragraphUserPrompt,
+          entity: "Paragraph Generator",
           entityNameRaw: "__paragraph_summary__",
           actualOutput: summaryText || "",
           groundTruth: paragraphEval.groundTruth,
@@ -349,9 +355,9 @@ export const transformToRows = (documentData: any): ResultRow[] => {
         ),
         sourceModelRaw: (fileItem as any).paragraphSummaryModel || "",
         ingestion: ingestionTool,
-        systemPrompt: "",
-        promptTemplate: "",
-        entity: "Paragraph Evaluation",
+        systemPrompt: paragraphSysPrompt,
+        promptTemplate: paragraphUserPrompt,
+        entity: "Paragraph Generator",
         entityNameRaw: "__paragraph_summary__",
         actualOutput: fileItem.finalSummary || "",
         groundTruth: paragraphEval.groundTruth,
