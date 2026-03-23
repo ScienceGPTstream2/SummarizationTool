@@ -91,9 +91,7 @@ const sanitizeCell = (value: unknown): string => {
   return str;
 };
 
-const sanitizeRow = (
-  row: Record<string, string>
-): Record<string, string> => {
+const sanitizeRow = (row: Record<string, string>): Record<string, string> => {
   const sanitized: Record<string, string> = {};
   for (const [key, value] of Object.entries(row)) {
     sanitized[key] = sanitizeCell(value);
@@ -271,8 +269,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
     const paragraphSysPrompt =
       (fileItem as any).paragraphSystemPrompt ||
       "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy.";
-    const paragraphUserPrompt =
-      (fileItem as any).summaryPrompt || "";
+    const paragraphUserPrompt = (fileItem as any).summaryPrompt || "";
 
     if (
       paragraphEval?.groundTruth &&
