@@ -398,16 +398,22 @@ export function SessionMetrics() {
           <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <Badge variant="secondary">Session Metrics</Badge>
-              <span className="text-muted-foreground">
-                Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
-              </span>
-              <span className="text-muted-foreground">
-                Latency:{" "}
-                <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
-              </span>
-              <span className="text-muted-foreground">
-                Calls: <strong>{displayMetrics.total_calls}</strong>
-              </span>
+              {displayMetrics.total_cost > 0 && (
+                <span className="text-muted-foreground">
+                  Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
+                </span>
+              )}
+              {displayMetrics.total_latency > 0 && (
+                <span className="text-muted-foreground">
+                  Latency:{" "}
+                  <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
+                </span>
+              )}
+              {displayMetrics.total_calls > 0 && (
+                <span className="text-muted-foreground">
+                  Calls: <strong>{displayMetrics.total_calls}</strong>
+                </span>
+              )}
               <span className="text-xs text-muted-foreground whitespace-nowrap">
                 Click to view & refresh
               </span>
