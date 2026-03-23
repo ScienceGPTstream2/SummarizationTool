@@ -19,6 +19,14 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import {
   useSimplifiedPipeline,
   PipelineOptions,
   FileResult,
@@ -103,12 +111,34 @@ export function SimplifiedFlowPage({
     };
   }, [availableModels.length]);
 
-  // When user clicks a card, set the matching default template
+  // When user clicks a card, set the matching default template and default model
   useEffect(() => {
     if (studyType === "epidemiology" || studyType === "toxicology") {
       setSelectedTemplateId(DEFAULT_TEMPLATES[studyType]);
     }
-  }, [studyType]);
+
+    if (studyType === "epidemiology" && availableModels.length > 0) {
+      const gptModel = availableModels.find((m) =>
+        m.name?.toLowerCase().includes("gpt-5.2") || m.id?.toLowerCase().includes("gpt-5.2")
+      );
+      if (gptModel) {
+        setSelectedModelId(gptModel.id);
+      } else {
+        setSelectedModelId(""); // Fallback to auto
+      }
+    } else if (studyType === "toxicology" && availableModels.length > 0) {
+      const geminiModel = availableModels.find((m) =>
+        m.name?.toLowerCase().includes("gemini-2.5-pro") || m.id?.toLowerCase().includes("gemini-2.5-pro")
+      );
+      if (geminiModel) {
+        setSelectedModelId(geminiModel.id);
+      } else {
+        setSelectedModelId(""); // Fallback to auto
+      }
+    } else if (studyType === null) {
+      setSelectedModelId(""); // Reset when starting over
+    }
+  }, [studyType, availableModels]);
 
   const handleTemplateChange = useCallback(
     (templateId: string) => {
@@ -252,7 +282,7 @@ export function SimplifiedFlowPage({
     (studyType !== "custom" || !!selectedTemplateId);
 
   return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center max-w-4xl mx-auto px-2">
+    <div className="min-h-[80vh] flex flex-col items-center justify-center max-w-[90vw] w-full mx-auto px-2">
       <AnimatePresence mode="wait">
         {isIdle ? (
           <motion.div
@@ -279,7 +309,7 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* Study Type Selection */}
-            <div className="space-y-4">
+            <div className="space-y-4 max-w-4xl mx-auto">
               <label className="text-base font-medium text-foreground block text-center">
                 Study Type
               </label>
@@ -379,7 +409,7 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* File Upload */}
-            <div className="space-y-4">
+            <div className="space-y-4 max-w-4xl mx-auto">
               <label className="text-base font-medium text-foreground block text-center">
                 Upload Studies (PDF)
               </label>
@@ -454,7 +484,7 @@ export function SimplifiedFlowPage({
             </div>
 
             {/* Options toggle */}
-            <div className="space-y-4">
+            <div className="space-y-4 max-w-4xl mx-auto">
               <button
                 onClick={() => setOptionsOpen((o) => !o)}
                 className="flex items-center gap-2.5 mx-auto text-base text-muted-foreground hover:text-foreground transition-colors"
@@ -674,17 +704,58 @@ export function SimplifiedFlowPage({
                           className="overflow-hidden"
                         >
                           <div className="px-6 pb-6 space-y-5 border-t border-border pt-5">
-                            {/* Summary */}
-                            {result.summary && (
-                              <div className="space-y-2.5">
-                                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                                  Summary
-                                </h4>
-                                <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 rounded-lg p-5">
-                                  {result.summary}
+                            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
+                              <div className="flex flex-col min-h-0">
+                                <div className="p-4 bg-muted rounded-lg flex-1 overflow-y-auto">
+                                  <h4 className="font-bold mb-3 text-sm text-muted-foreground uppercase tracking-wide">
+                                    Summary
+                                  </h4>
+                                  <p className="whitespace-pre-wrap leading-relaxed text-base text-foreground">
+                                    {result.summary || "No summary available."}
+                                  </p>
                                 </div>
                               </div>
-                            )}
+                              <div className="flex flex-col min-h-0">
+                                <div className="border rounded-lg flex-1 overflow-y-auto flex flex-col">
+                                  <h4 className="font-bold p-4 pb-2 text-sm text-muted-foreground uppercase tracking-wide sticky top-0 bg-background z-10 flex-shrink-0">
+                                    Extracted Entities
+                                  </h4>
+                                  <div className="p-4 pt-0 flex-1 overflow-y-auto">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead className="w-[180px] text-sm font-bold">
+                                            Entity
+                                          </TableHead>
+                                          <TableHead className="text-sm font-bold">
+                                            Extracted Value
+                                          </TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {result.entities?.map((entity: any, idx: number) => (
+                                          <TableRow key={idx}>
+                                            <TableCell className="font-medium align-top text-sm py-3">
+                                              {entity.name}
+                                            </TableCell>
+                                            <TableCell className="align-top whitespace-pre-wrap text-sm py-3">
+                                              {entity.answer || entity.extracted || "-"}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                        {(!result.entities || result.entities.length === 0) && (
+                                          <TableRow>
+                                            <TableCell colSpan={2} className="text-center text-muted-foreground">
+                                              No entities extracted
+                                            </TableCell>
+                                          </TableRow>
+                                        )}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
 
                             {/* Per-file download */}
                             <div className="flex justify-end pt-1">

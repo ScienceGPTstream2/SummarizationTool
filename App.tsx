@@ -1875,7 +1875,7 @@ export default function App() {
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-medium text-foreground">
-                AI Toxicology Extraction and Summarization
+                Science-GPT Summarization Tool
               </h1>
               <div className="flex items-center gap-2">
                 {isSimplifiedMode ? (
