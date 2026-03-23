@@ -175,7 +175,8 @@ export const transformToRows = (documentData: any): ResultRow[] => {
     for (const entity of entities) {
       const entityName = entity.name;
       const promptTemplate = entity.prompt || "";
-      const systemPrompt = entity.systemPrompt ||
+      const systemPrompt =
+        entity.systemPrompt ||
         "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt.";
       const groundTruth = entity.groundTruth || "";
 
@@ -305,8 +306,7 @@ export const transformToRows = (documentData: any): ResultRow[] => {
     const paragraphSysPrompt =
       (fileItem as any).paragraphSystemPrompt ||
       "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy.";
-    const paragraphUserPrompt =
-      (fileItem as any).summaryPrompt || "";
+    const paragraphUserPrompt = (fileItem as any).summaryPrompt || "";
 
     if (
       paragraphEval?.groundTruth &&
