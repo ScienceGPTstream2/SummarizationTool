@@ -437,10 +437,7 @@ export function SessionHistoryPage({
                 </>
               )}
               {session.study_type && (
-                <Badge
-                  variant="secondary"
-                  className="text-xs font-normal"
-                >
+                <Badge variant="secondary" className="text-xs font-normal">
                   <FlaskConical className="h-3 w-3 mr-1" />
                   {formatStudyType(session.study_type)}
                 </Badge>
@@ -462,10 +459,7 @@ export function SessionHistoryPage({
           </div>
         </TableCell>
         <TableCell>
-          <Badge
-            variant="outline"
-            className={getStatusColor(session.status)}
-          >
+          <Badge variant="outline" className={getStatusColor(session.status)}>
             {session.status === "completed" ? "Finished" : "In Progress"}
           </Badge>
         </TableCell>
@@ -522,10 +516,7 @@ export function SessionHistoryPage({
             hour12: true,
           })}
         </TableCell>
-        <TableCell
-          className="text-right"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -558,15 +549,11 @@ export function SessionHistoryPage({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() => startEditing(session)}
-                  >
+                  <DropdownMenuItem onClick={() => startEditing(session)}>
                     <Pencil className="h-4 w-4 mr-2" />
                     Rename
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => openShareDialog(session)}
-                  >
+                  <DropdownMenuItem onClick={() => openShareDialog(session)}>
                     <Share2 className="h-4 w-4 mr-2" />
                     Share to Group
                   </DropdownMenuItem>
@@ -579,9 +566,7 @@ export function SessionHistoryPage({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-red-600 focus:text-red-700 focus:bg-red-50"
-                    onClick={() =>
-                      handleDeleteClick(session.session_id)
-                    }
+                    onClick={() => handleDeleteClick(session.session_id)}
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete Session
@@ -597,10 +582,7 @@ export function SessionHistoryPage({
 
   const renderEmptyState = (message: string) => (
     <TableRow>
-      <TableCell
-        colSpan={5}
-        className="h-32 text-center text-muted-foreground"
-      >
+      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
         <div className="flex flex-col items-center gap-2">
           <Activity className="h-8 w-8 opacity-20" />
           <p>{message}</p>
@@ -611,10 +593,7 @@ export function SessionHistoryPage({
 
   const renderLoadingState = () => (
     <TableRow>
-      <TableCell
-        colSpan={5}
-        className="h-24 text-center text-muted-foreground"
-      >
+      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
         Loading history...
       </TableCell>
     </TableRow>
@@ -636,11 +615,7 @@ export function SessionHistoryPage({
         </Button>
       </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="w-full"
-      >
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="my-history" className="gap-2">
             <FileText className="h-4 w-4" />
@@ -726,7 +701,8 @@ export function SessionHistoryPage({
               Share Session
             </DialogTitle>
             <DialogDescription>
-              Share &quot;{shareTargetSession && getDisplayName(shareTargetSession)}&quot;
+              Share &quot;
+              {shareTargetSession && getDisplayName(shareTargetSession)}&quot;
               with a group. All group members will be able to view and clone
               this session.
             </DialogDescription>
@@ -773,18 +749,15 @@ export function SessionHistoryPage({
 
             <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
               <p>
-                <strong>Note:</strong> Sessions can currently be shared with
-                one group at a time. Sharing to a new group will replace the
+                <strong>Note:</strong> Sessions can currently be shared with one
+                group at a time. Sharing to a new group will replace the
                 previous share.
               </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShareDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setShareDialogOpen(false)}>
               Cancel
             </Button>
             <Button

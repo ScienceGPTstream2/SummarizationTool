@@ -928,462 +928,459 @@ export default function App() {
     const evalConfig =
       sessionData.evaluation_config || config.evaluation_config || {};
 
-      // Merge files_config from both sources:
-      // - sessionData.files_config: Contains ground_truths (saved from EvaluationPage)
-      // - config.files_config: Contains entities, study_type (saved from BatchStudySelectionPage)
-      const topLevelFilesConfig = sessionData.files_config || {};
-      const configFilesConfig = config.files_config || {};
-      const filesConfig: Record<string, any> = {};
+    // Merge files_config from both sources:
+    // - sessionData.files_config: Contains ground_truths (saved from EvaluationPage)
+    // - config.files_config: Contains entities, study_type (saved from BatchStudySelectionPage)
+    const topLevelFilesConfig = sessionData.files_config || {};
+    const configFilesConfig = config.files_config || {};
+    const filesConfig: Record<string, any> = {};
 
-      // Merge all keys from both sources
-      const allFileIds = new Set([
-        ...Object.keys(topLevelFilesConfig),
-        ...Object.keys(configFilesConfig),
-      ]);
-      allFileIds.forEach((fileId) => {
-        filesConfig[fileId] = {
-          ...(configFilesConfig[fileId] || {}),
-          ...(topLevelFilesConfig[fileId] || {}),
-        };
-      });
-      // RECOVERY: Reconstruct entities from extraction results when config is incomplete or mismatched
-      let configEntities = config.entities || [];
+    // Merge all keys from both sources
+    const allFileIds = new Set([
+      ...Object.keys(topLevelFilesConfig),
+      ...Object.keys(configFilesConfig),
+    ]);
+    allFileIds.forEach((fileId) => {
+      filesConfig[fileId] = {
+        ...(configFilesConfig[fileId] || {}),
+        ...(topLevelFilesConfig[fileId] || {}),
+      };
+    });
+    // RECOVERY: Reconstruct entities from extraction results when config is incomplete or mismatched
+    let configEntities = config.entities || [];
 
-      // Always check if extraction results have entities not in config
-      if (sessionData.extraction_results?.length > 0) {
-        const configEntityNames = new Set(
-          configEntities.map((e: any) => e.name)
-        );
-        const extractionEntityNames = new Set<string>(
-          sessionData.extraction_results
-            .map((r: any) => r.entity_name as string)
-            .filter((name: string) => name !== "__paragraph_summary__")
-        );
+    // Always check if extraction results have entities not in config
+    if (sessionData.extraction_results?.length > 0) {
+      const configEntityNames = new Set(configEntities.map((e: any) => e.name));
+      const extractionEntityNames = new Set<string>(
+        sessionData.extraction_results
+          .map((r: any) => r.entity_name as string)
+          .filter((name: string) => name !== "__paragraph_summary__")
+      );
 
-        // Check if there are entity names in results that aren't in config
-        const missingFromConfig = [...extractionEntityNames].filter(
-          (name) => !configEntityNames.has(name)
-        );
+      // Check if there are entity names in results that aren't in config
+      const missingFromConfig = [...extractionEntityNames].filter(
+        (name) => !configEntityNames.has(name)
+      );
 
-        if (missingFromConfig.length > 0 || configEntities.length === 0) {
-          console.warn(
-            "Entity mismatch detected. Reconstructing from extraction results...",
-            {
-              configNames: [...configEntityNames],
-              extractionNames: [...extractionEntityNames],
-              missing: missingFromConfig,
-            }
-          );
-
-          // Try to load template prompts if study type is available
-          const studyType = sessionData.configuration.study_type;
-          let templateEntities: any[] = [];
-          if (studyType) {
-            try {
-              const { loadStudyTypeTemplate } = await import(
-                "./components/TemplateLoader"
-              );
-              templateEntities = loadStudyTypeTemplate(studyType).entities;
-            } catch (e) {
-              console.warn("Failed to load template for recovery:", e);
-            }
+      if (missingFromConfig.length > 0 || configEntities.length === 0) {
+        console.warn(
+          "Entity mismatch detected. Reconstructing from extraction results...",
+          {
+            configNames: [...configEntityNames],
+            extractionNames: [...extractionEntityNames],
+            missing: missingFromConfig,
           }
+        );
 
-          // Merge: keep existing config entities in order + add missing ones from extraction results
-          // Use template entities for ordering if available, otherwise use configEntities order
-          const orderedBaseEntities =
-            templateEntities.length > 0 ? templateEntities : configEntities;
-
-          // Start with ordered base entities
-          const mergedEntities = orderedBaseEntities.map((te: any) => {
-            // Use existing config entity if available
-            const existingEntity = configEntities.find(
-              (e: any) => e.name === te.name
+        // Try to load template prompts if study type is available
+        const studyType = sessionData.configuration.study_type;
+        let templateEntities: any[] = [];
+        if (studyType) {
+          try {
+            const { loadStudyTypeTemplate } = await import(
+              "./components/TemplateLoader"
             );
-            return existingEntity || te;
-          });
-
-          // Add any entities from extraction results that aren't in the base
-          const baseEntityNames = new Set(
-            orderedBaseEntities.map((e: any) => e.name)
-          );
-          extractionEntityNames.forEach((name: string) => {
-            if (!baseEntityNames.has(name)) {
-              mergedEntities.push({
-                name,
-                prompt: "Restored from extraction result",
-                system_prompt: "",
-              });
-            }
-          });
-
-          configEntities = mergedEntities;
+            templateEntities = loadStudyTypeTemplate(studyType).entities;
+          } catch (e) {
+            console.warn("Failed to load template for recovery:", e);
+          }
         }
-      }
 
-      // Map session back to DocumentData
-      const restoredData: Partial<DocumentData> = {
-        studyType: sessionData.configuration.study_type || "",
-        selectedModel: sessionData.configuration.selected_models[0] || "",
-        selectedModels: sessionData.configuration.selected_models,
-        summaryPrompt: sessionData.configuration.summary_prompt || "",
-        temperature: sessionData.configuration.temperature ?? undefined,
-        modelTemperatures: sessionData.configuration.model_temperatures || {},
+        // Merge: keep existing config entities in order + add missing ones from extraction results
+        // Use template entities for ordering if available, otherwise use configEntities order
+        const orderedBaseEntities =
+          templateEntities.length > 0 ? templateEntities : configEntities;
 
-        // Restore uploaded files with proper processing status
-        uploadedFiles: sessionData.documents.map((doc: any) => {
-          const fileConfig = filesConfig[doc.file_hash] || {};
-          console.log(
-            `[restore] Mapping document: ${doc.filename} (id=${doc.id}, hash=${doc.file_hash})`
+        // Start with ordered base entities
+        const mergedEntities = orderedBaseEntities.map((te: any) => {
+          // Use existing config entity if available
+          const existingEntity = configEntities.find(
+            (e: any) => e.name === te.name
           );
+          return existingEntity || te;
+        });
 
-          return {
-            file: new File([""], doc.filename, { type: "application/pdf" }),
-            fileId: doc.file_hash,
-            // Restore study type and summary prompt from file config
-            studyType: fileConfig.study_type || config.study_type || "",
-            summaryPrompt:
-              fileConfig.summary_prompt || config.summary_prompt || "",
-            // Reconstruct processing result enough for UI to look up file
-            processingResult: {
-              conversionId: doc.file_hash,
-              fileHash: doc.file_hash,
-              markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
-              processorUsed:
-                doc.processor_used ||
-                fileConfig.processor_used ||
-                "azure_doc_intelligence",
-              parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
-              parseDuration: doc.parse_duration_seconds ?? undefined,
-              // Include figure/table counts so ProcessingPage can lazy-fetch
-              figuresCount: doc.figure_count ?? undefined,
-              tablesCount: doc.table_count ?? undefined,
-            },
+        // Add any entities from extraction results that aren't in the base
+        const baseEntityNames = new Set(
+          orderedBaseEntities.map((e: any) => e.name)
+        );
+        extractionEntityNames.forEach((name: string) => {
+          if (!baseEntityNames.has(name)) {
+            mergedEntities.push({
+              name,
+              prompt: "Restored from extraction result",
+              system_prompt: "",
+            });
+          }
+        });
+
+        configEntities = mergedEntities;
+      }
+    }
+
+    // Map session back to DocumentData
+    const restoredData: Partial<DocumentData> = {
+      studyType: sessionData.configuration.study_type || "",
+      selectedModel: sessionData.configuration.selected_models[0] || "",
+      selectedModels: sessionData.configuration.selected_models,
+      summaryPrompt: sessionData.configuration.summary_prompt || "",
+      temperature: sessionData.configuration.temperature ?? undefined,
+      modelTemperatures: sessionData.configuration.model_temperatures || {},
+
+      // Restore uploaded files with proper processing status
+      uploadedFiles: sessionData.documents.map((doc: any) => {
+        const fileConfig = filesConfig[doc.file_hash] || {};
+        console.log(
+          `[restore] Mapping document: ${doc.filename} (id=${doc.id}, hash=${doc.file_hash})`
+        );
+
+        return {
+          file: new File([""], doc.filename, { type: "application/pdf" }),
+          fileId: doc.file_hash,
+          // Restore study type and summary prompt from file config
+          studyType: fileConfig.study_type || config.study_type || "",
+          summaryPrompt:
+            fileConfig.summary_prompt || config.summary_prompt || "",
+          // Reconstruct processing result enough for UI to look up file
+          processingResult: {
+            conversionId: doc.file_hash,
+            fileHash: doc.file_hash,
+            markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
             processorUsed:
-              doc.processor_used || fileConfig.processor_used || undefined,
-            paragraph_system_prompt:
-              fileConfig.paragraph_system_prompt ||
-              config.paragraph_system_prompt ||
-              "",
+              doc.processor_used ||
+              fileConfig.processor_used ||
+              "azure_doc_intelligence",
+            parse_cost: doc.parse_cost ?? fileConfig.parse_cost ?? undefined,
+            parseDuration: doc.parse_duration_seconds ?? undefined,
+            // Include figure/table counts so ProcessingPage can lazy-fetch
+            figuresCount: doc.figure_count ?? undefined,
+            tablesCount: doc.table_count ?? undefined,
+          },
+          processorUsed:
+            doc.processor_used || fileConfig.processor_used || undefined,
+          paragraph_system_prompt:
+            fileConfig.paragraph_system_prompt ||
+            config.paragraph_system_prompt ||
+            "",
 
-            // Restore finalSummary from special hidden entity - MUST filter by document_id
-            finalSummary:
+          // Restore finalSummary from special hidden entity - MUST filter by document_id
+          finalSummary:
+            sessionData.extraction_results?.find(
+              (r: any) =>
+                r.entity_name === "__paragraph_summary__" &&
+                r.document_id === doc.id
+            )?.extracted_text || "",
+
+          // Restore chosen paragraph summary model (prioritize the one with a saved score)
+          paragraphSummaryModel: (() => {
+            const scoredEval = sessionData.evaluation_results?.find(
+              (ev: any) =>
+                ev.entity_name === "__paragraph_summary__" &&
+                ev.document_id === doc.id &&
+                ev.human_score != null
+            );
+            if (scoredEval) return scoredEval.model_id;
+
+            return (
               sessionData.extraction_results?.find(
                 (r: any) =>
                   r.entity_name === "__paragraph_summary__" &&
                   r.document_id === doc.id
-              )?.extracted_text || "",
+              )?.model_id || ""
+            );
+          })(),
 
-            // Restore chosen paragraph summary model (prioritize the one with a saved score)
-            paragraphSummaryModel: (() => {
-              const scoredEval = sessionData.evaluation_results?.find(
+          // Restore paragraph generation LLM cost
+          paragraphSummaryCost:
+            sessionData.extraction_results?.find(
+              (r: any) =>
+                r.entity_name === "__paragraph_summary__" &&
+                r.document_id === doc.id
+            )?.cost ?? undefined,
+
+          // Restore paragraph evaluation record (ground truth + per-model human scores)
+          paragraphEvaluation: (() => {
+            const paragEvals =
+              sessionData.evaluation_results?.filter(
                 (ev: any) =>
                   ev.entity_name === "__paragraph_summary__" &&
-                  ev.document_id === doc.id &&
+                  ev.document_id === doc.id
+              ) ?? [];
+
+            if (paragEvals.length === 0) return undefined;
+
+            const groundTruth = paragEvals[0].ground_truth || "";
+            const humanScoreByModel: Record<string, number | null> = {};
+            for (const ev of paragEvals) {
+              if (ev.model_id) {
+                humanScoreByModel[ev.model_id] =
                   ev.human_score != null
-              );
-              if (scoredEval) return scoredEval.model_id;
+                    ? Math.round(ev.human_score * 100)
+                    : null;
+              }
+            }
+            return { groundTruth, humanScoreByModel };
+          })(),
 
-              return (
-                sessionData.extraction_results?.find(
-                  (r: any) =>
-                    r.entity_name === "__paragraph_summary__" &&
-                    r.document_id === doc.id
-                )?.model_id || ""
-              );
-            })(),
-
-            // Restore paragraph generation LLM cost
-            paragraphSummaryCost:
-              sessionData.extraction_results?.find(
+          // Restore per-model paragraph summaries
+          summariesByModel: (() => {
+            const summaries: Record<string, string> = {};
+            sessionData.extraction_results
+              ?.filter(
                 (r: any) =>
                   r.entity_name === "__paragraph_summary__" &&
-                  r.document_id === doc.id
-              )?.cost ?? undefined,
+                  r.document_id === doc.id &&
+                  r.extracted_text
+              )
+              .forEach((r: any) => {
+                summaries[r.model_id] = r.extracted_text;
+              });
+            return summaries;
+          })(),
 
-            // Restore paragraph evaluation record (ground truth + per-model human scores)
-            paragraphEvaluation: (() => {
-              const paragEvals =
-                sessionData.evaluation_results?.filter(
-                  (ev: any) =>
-                    ev.entity_name === "__paragraph_summary__" &&
-                    ev.document_id === doc.id
-                ) ?? [];
+          // Restore per-file, per-model temperatures from files_config
+          modelTemperatures: fileConfig.model_temperatures || {},
 
-              if (paragEvals.length === 0) return undefined;
-
-              const groundTruth = paragEvals[0].ground_truth || "";
-              const humanScoreByModel: Record<string, number | null> = {};
-              for (const ev of paragEvals) {
-                if (ev.model_id) {
-                  humanScoreByModel[ev.model_id] =
-                    ev.human_score != null
-                      ? Math.round(ev.human_score * 100)
-                      : null;
-                }
-              }
-              return { groundTruth, humanScoreByModel };
-            })(),
-
-            // Restore per-model paragraph summaries
-            summariesByModel: (() => {
-              const summaries: Record<string, string> = {};
+          selectedModels: config.selected_models || [],
+          status: "completed" as const,
+          entities: (() => {
+            // Get entity names that have extraction results for THIS document
+            const docExtractionNames = new Set<string>(
               sessionData.extraction_results
                 ?.filter(
                   (r: any) =>
-                    r.entity_name === "__paragraph_summary__" &&
                     r.document_id === doc.id &&
-                    r.extracted_text
+                    r.entity_name !== "__paragraph_summary__"
                 )
-                .forEach((r: any) => {
-                  summaries[r.model_id] = r.extracted_text;
+                .map((r: any) => r.entity_name as string) || []
+            );
+
+            // Use config entities as the source of truth for ORDER
+            // This preserves the original template/user-defined order
+            const baseEntities = fileConfig.entities || configEntities || [];
+            const configEntityNames = new Set(
+              baseEntities.map((e: any) => e.name)
+            );
+
+            // Start with config entities in their original order
+            const orderedEntities = [...baseEntities];
+
+            // Append any entities from extraction results that aren't in config
+            // (for backward compatibility with older sessions)
+            docExtractionNames.forEach((entityName: string) => {
+              if (!configEntityNames.has(entityName)) {
+                orderedEntities.push({
+                  name: entityName,
+                  prompt: "Restored from extraction result",
+                  system_prompt: "",
                 });
-              return summaries;
-            })(),
+              }
+            });
 
-            // Restore per-file, per-model temperatures from files_config
-            modelTemperatures: fileConfig.model_temperatures || {},
+            return orderedEntities;
+          })().map((e: any) => {
+            // Find extraction result for this entity
+            const result = sessionData.extraction_results?.find(
+              (r: any) => r.entity_name === e.name && r.document_id === doc.id
+            );
 
-            selectedModels: config.selected_models || [],
-            status: "completed" as const,
-            entities: (() => {
-              // Get entity names that have extraction results for THIS document
-              const docExtractionNames = new Set<string>(
-                sessionData.extraction_results
-                  ?.filter(
-                    (r: any) =>
-                      r.document_id === doc.id &&
-                      r.entity_name !== "__paragraph_summary__"
-                  )
-                  .map((r: any) => r.entity_name as string) || []
-              );
+            // Find evaluation results for this entity - MUST filter by document_id to avoid cross-file contamination
+            const entityEvaluations =
+              sessionData.evaluation_results?.filter(
+                (ev: any) =>
+                  ev.entity_name === e.name &&
+                  (ev.document_id === doc.id || !ev.document_id) // Match by document or legacy (no doc_id)
+              ) || [];
 
-              // Use config entities as the source of truth for ORDER
-              // This preserves the original template/user-defined order
-              const baseEntities = fileConfig.entities || configEntities || [];
-              const configEntityNames = new Set(
-                baseEntities.map((e: any) => e.name)
-              );
+            // Extract ground truth from files_config first, then fallback to evaluation results
+            const groundTruth =
+              fileConfig.ground_truths?.[e.name] ||
+              entityEvaluations.find((ev: any) => ev.ground_truth)
+                ?.ground_truth ||
+              "";
 
-              // Start with config entities in their original order
-              const orderedEntities = [...baseEntities];
+            // Group evaluation scores by model for reconstructing evaluationResults
+            const evaluationsByJudge = entityEvaluations.reduce(
+              (acc: any, ev: any) => {
+                // The API returns nested scores array
+                if (ev.scores && Array.isArray(ev.scores)) {
+                  ev.scores.forEach((scoreItem: any) => {
+                    const key =
+                      scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
+                    // Use ONLY per-score human_score to avoid cross-judge contamination
+                    // Don't fall back to ev.human_score as it may contain another judge's score
+                    const itemHumanScore = scoreItem.human_score;
 
-              // Append any entities from extraction results that aren't in config
-              // (for backward compatibility with older sessions)
-              docExtractionNames.forEach((entityName: string) => {
-                if (!configEntityNames.has(entityName)) {
-                  orderedEntities.push({
-                    name: entityName,
-                    prompt: "Restored from extraction result",
-                    system_prompt: "",
-                  });
-                }
-              });
-
-              return orderedEntities;
-            })().map((e: any) => {
-              // Find extraction result for this entity
-              const result = sessionData.extraction_results?.find(
-                (r: any) => r.entity_name === e.name && r.document_id === doc.id
-              );
-
-              // Find evaluation results for this entity - MUST filter by document_id to avoid cross-file contamination
-              const entityEvaluations =
-                sessionData.evaluation_results?.filter(
-                  (ev: any) =>
-                    ev.entity_name === e.name &&
-                    (ev.document_id === doc.id || !ev.document_id) // Match by document or legacy (no doc_id)
-                ) || [];
-
-              // Extract ground truth from files_config first, then fallback to evaluation results
-              const groundTruth =
-                fileConfig.ground_truths?.[e.name] ||
-                entityEvaluations.find((ev: any) => ev.ground_truth)
-                  ?.ground_truth ||
-                "";
-
-              // Group evaluation scores by model for reconstructing evaluationResults
-              const evaluationsByJudge = entityEvaluations.reduce(
-                (acc: any, ev: any) => {
-                  // The API returns nested scores array
-                  if (ev.scores && Array.isArray(ev.scores)) {
-                    ev.scores.forEach((scoreItem: any) => {
-                      const key =
-                        scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
-                      // Use ONLY per-score human_score to avoid cross-judge contamination
-                      // Don't fall back to ev.human_score as it may contain another judge's score
-                      const itemHumanScore = scoreItem.human_score;
-
-                      if (!acc[key]) {
-                        acc[key] = {
-                          provider: scoreItem.judge_model?.includes("gemini")
-                            ? "vertex_ai"
-                            : "azure_openai",
-                          model: scoreItem.judge_model || "unknown",
-                          metrics: [],
-                          aggregate_score: 0,
-                          all_passed: true,
-                          evaluation_time: scoreItem.evaluation_time || 0,
-                          evaluation_cost: scoreItem.evaluation_cost || 0,
-                          human_score: itemHumanScore,
-                        };
-                      } else {
-                        // Accumulate cost and time from each metric
-                        acc[key].evaluation_time +=
-                          scoreItem.evaluation_time || 0;
-                        acc[key].evaluation_cost +=
-                          scoreItem.evaluation_cost || 0;
-                        if (itemHumanScore != null) {
-                          // Update with per-judge human_score if available
-                          acc[key].human_score = itemHumanScore;
-                        }
-                      }
-
-                      acc[key].metrics.push({
-                        metric_name: scoreItem.metric,
-                        score: scoreItem.score,
-                        threshold: 0.7,
-                        success: (scoreItem.score || 0) >= 0.7,
-                        reason: scoreItem.reasoning || "",
-                      });
-                    });
-                  } else {
-                    // Legacy flat structure fallback
-                    const key = ev.judge_model || "unknown";
                     if (!acc[key]) {
                       acc[key] = {
-                        provider: ev.judge_model?.includes("gemini")
+                        provider: scoreItem.judge_model?.includes("gemini")
                           ? "vertex_ai"
                           : "azure_openai",
-                        model: ev.judge_model,
+                        model: scoreItem.judge_model || "unknown",
                         metrics: [],
                         aggregate_score: 0,
                         all_passed: true,
-                        evaluation_time: ev.evaluation_time || 0,
-                        evaluation_cost: ev.evaluation_cost || 0,
-                        human_score: ev.human_score,
+                        evaluation_time: scoreItem.evaluation_time || 0,
+                        evaluation_cost: scoreItem.evaluation_cost || 0,
+                        human_score: itemHumanScore,
                       };
                     } else {
-                      // Accumulate cost and time
-                      acc[key].evaluation_time += ev.evaluation_time || 0;
-                      acc[key].evaluation_cost += ev.evaluation_cost || 0;
-                      if (ev.human_score != null) {
-                        // Update human_score from subsequent evaluations if set
-                        acc[key].human_score = ev.human_score;
+                      // Accumulate cost and time from each metric
+                      acc[key].evaluation_time +=
+                        scoreItem.evaluation_time || 0;
+                      acc[key].evaluation_cost +=
+                        scoreItem.evaluation_cost || 0;
+                      if (itemHumanScore != null) {
+                        // Update with per-judge human_score if available
+                        acc[key].human_score = itemHumanScore;
                       }
                     }
-                    if (ev.metric && ev.score !== null) {
-                      acc[key].metrics.push({
-                        metric_name: ev.metric,
-                        score: ev.score,
-                        threshold: 0.7,
-                        success: ev.score >= 0.7,
-                        reason: ev.reasoning || "",
-                      });
+
+                    acc[key].metrics.push({
+                      metric_name: scoreItem.metric,
+                      score: scoreItem.score,
+                      threshold: 0.7,
+                      success: (scoreItem.score || 0) >= 0.7,
+                      reason: scoreItem.reasoning || "",
+                    });
+                  });
+                } else {
+                  // Legacy flat structure fallback
+                  const key = ev.judge_model || "unknown";
+                  if (!acc[key]) {
+                    acc[key] = {
+                      provider: ev.judge_model?.includes("gemini")
+                        ? "vertex_ai"
+                        : "azure_openai",
+                      model: ev.judge_model,
+                      metrics: [],
+                      aggregate_score: 0,
+                      all_passed: true,
+                      evaluation_time: ev.evaluation_time || 0,
+                      evaluation_cost: ev.evaluation_cost || 0,
+                      human_score: ev.human_score,
+                    };
+                  } else {
+                    // Accumulate cost and time
+                    acc[key].evaluation_time += ev.evaluation_time || 0;
+                    acc[key].evaluation_cost += ev.evaluation_cost || 0;
+                    if (ev.human_score != null) {
+                      // Update human_score from subsequent evaluations if set
+                      acc[key].human_score = ev.human_score;
                     }
                   }
-                  return acc;
-                },
-                {}
-              );
-
-              // Calculate aggregate scores
-              const evaluationResults = Object.values(evaluationsByJudge).map(
-                (evalResult: any) => {
-                  const avgScore =
-                    evalResult.metrics.length > 0
-                      ? evalResult.metrics.reduce(
-                          (sum: number, m: any) => sum + m.score,
-                          0
-                        ) / evalResult.metrics.length
-                      : 0;
-                  return {
-                    ...evalResult,
-                    aggregate_score: avgScore,
-                    all_passed: evalResult.metrics.every((m: any) => m.success),
-                  };
+                  if (ev.metric && ev.score !== null) {
+                    acc[key].metrics.push({
+                      metric_name: ev.metric,
+                      score: ev.score,
+                      threshold: 0.7,
+                      success: ev.score >= 0.7,
+                      reason: ev.reasoning || "",
+                    });
+                  }
                 }
-              );
+                return acc;
+              },
+              {}
+            );
 
-              return {
-                name: e.name,
-                prompt: e.prompt,
-                systemPrompt: e.system_prompt,
-                extracted: result?.extracted_text || "",
-                references: result?.references || [],
-                // Top-level token/duration for display (from first/default extraction result)
-                duration: result?.duration_ms
-                  ? result.duration_ms / 1000
-                  : undefined,
-                promptTokens: result?.prompt_tokens,
-                completionTokens: result?.completion_tokens,
-                groundTruth: groundTruth,
-                evaluationResults: evaluationResults,
-                extractionsByModel: sessionData.extraction_results
-                  ?.filter(
-                    (r: any) =>
-                      r.entity_name === e.name && r.document_id === doc.id
-                  )
-                  .reduce((acc: any, r: any) => {
-                    // Find evaluations for THIS SPECIFIC source model (r.model_id)
-                    const modelEvaluations = entityEvaluations.filter(
-                      (ev: any) => ev.model_id === r.model_id
-                    );
+            // Calculate aggregate scores
+            const evaluationResults = Object.values(evaluationsByJudge).map(
+              (evalResult: any) => {
+                const avgScore =
+                  evalResult.metrics.length > 0
+                    ? evalResult.metrics.reduce(
+                        (sum: number, m: any) => sum + m.score,
+                        0
+                      ) / evalResult.metrics.length
+                    : 0;
+                return {
+                  ...evalResult,
+                  aggregate_score: avgScore,
+                  all_passed: evalResult.metrics.every((m: any) => m.success),
+                };
+              }
+            );
 
-                    // Build evaluationResults for this specific source model
-                    const modelEvalsByJudge = modelEvaluations.reduce(
-                      (judgeAcc: any, ev: any) => {
-                        if (ev.scores && Array.isArray(ev.scores)) {
-                          ev.scores.forEach((scoreItem: any) => {
-                            const key = scoreItem.judge_model || "unknown";
-                            // Use ONLY per-score human_score to avoid cross-judge contamination
-                            const itemHumanScore = scoreItem.human_score;
-                            if (!judgeAcc[key]) {
-                              judgeAcc[key] = {
-                                provider: scoreItem.judge_model?.includes(
-                                  "gemini"
-                                )
-                                  ? "vertex_ai"
-                                  : scoreItem.judge_model?.includes("claude")
-                                    ? "anthropic"
-                                    : "azure_openai",
-                                model: scoreItem.judge_model || "unknown",
-                                metrics: [],
-                                aggregate_score: 0,
-                                all_passed: true,
-                                evaluation_time: scoreItem.evaluation_time || 0,
-                                evaluation_cost: scoreItem.evaluation_cost || 0,
-                                human_score: itemHumanScore,
-                              };
-                            } else {
-                              // Accumulate cost and time
-                              judgeAcc[key].evaluation_time +=
-                                scoreItem.evaluation_time || 0;
-                              judgeAcc[key].evaluation_cost +=
-                                scoreItem.evaluation_cost || 0;
-                              if (itemHumanScore != null) {
-                                // Update with per-judge human_score if available
-                                judgeAcc[key].human_score = itemHumanScore;
-                              }
+            return {
+              name: e.name,
+              prompt: e.prompt,
+              systemPrompt: e.system_prompt,
+              extracted: result?.extracted_text || "",
+              references: result?.references || [],
+              // Top-level token/duration for display (from first/default extraction result)
+              duration: result?.duration_ms
+                ? result.duration_ms / 1000
+                : undefined,
+              promptTokens: result?.prompt_tokens,
+              completionTokens: result?.completion_tokens,
+              groundTruth: groundTruth,
+              evaluationResults: evaluationResults,
+              extractionsByModel: sessionData.extraction_results
+                ?.filter(
+                  (r: any) =>
+                    r.entity_name === e.name && r.document_id === doc.id
+                )
+                .reduce((acc: any, r: any) => {
+                  // Find evaluations for THIS SPECIFIC source model (r.model_id)
+                  const modelEvaluations = entityEvaluations.filter(
+                    (ev: any) => ev.model_id === r.model_id
+                  );
+
+                  // Build evaluationResults for this specific source model
+                  const modelEvalsByJudge = modelEvaluations.reduce(
+                    (judgeAcc: any, ev: any) => {
+                      if (ev.scores && Array.isArray(ev.scores)) {
+                        ev.scores.forEach((scoreItem: any) => {
+                          const key = scoreItem.judge_model || "unknown";
+                          // Use ONLY per-score human_score to avoid cross-judge contamination
+                          const itemHumanScore = scoreItem.human_score;
+                          if (!judgeAcc[key]) {
+                            judgeAcc[key] = {
+                              provider: scoreItem.judge_model?.includes(
+                                "gemini"
+                              )
+                                ? "vertex_ai"
+                                : scoreItem.judge_model?.includes("claude")
+                                  ? "anthropic"
+                                  : "azure_openai",
+                              model: scoreItem.judge_model || "unknown",
+                              metrics: [],
+                              aggregate_score: 0,
+                              all_passed: true,
+                              evaluation_time: scoreItem.evaluation_time || 0,
+                              evaluation_cost: scoreItem.evaluation_cost || 0,
+                              human_score: itemHumanScore,
+                            };
+                          } else {
+                            // Accumulate cost and time
+                            judgeAcc[key].evaluation_time +=
+                              scoreItem.evaluation_time || 0;
+                            judgeAcc[key].evaluation_cost +=
+                              scoreItem.evaluation_cost || 0;
+                            if (itemHumanScore != null) {
+                              // Update with per-judge human_score if available
+                              judgeAcc[key].human_score = itemHumanScore;
                             }
-                            judgeAcc[key].metrics.push({
-                              metric_name: scoreItem.metric,
-                              score: scoreItem.score,
-                              threshold: 0.7,
-                              success: (scoreItem.score || 0) >= 0.7,
-                              reason: scoreItem.reasoning || "",
-                            });
+                          }
+                          judgeAcc[key].metrics.push({
+                            metric_name: scoreItem.metric,
+                            score: scoreItem.score,
+                            threshold: 0.7,
+                            success: (scoreItem.score || 0) >= 0.7,
+                            reason: scoreItem.reasoning || "",
                           });
-                        }
-                        return judgeAcc;
-                      },
-                      {}
-                    );
+                        });
+                      }
+                      return judgeAcc;
+                    },
+                    {}
+                  );
 
-                    // Calculate aggregate scores for this source model's evaluations
-                    const modelEvalResults = Object.values(
-                      modelEvalsByJudge
-                    ).map((evalResult: any) => {
+                  // Calculate aggregate scores for this source model's evaluations
+                  const modelEvalResults = Object.values(modelEvalsByJudge).map(
+                    (evalResult: any) => {
                       const avgScore =
                         evalResult.metrics.length > 0
                           ? evalResult.metrics.reduce(
@@ -1398,275 +1395,269 @@ export default function App() {
                           (m: any) => m.success
                         ),
                       };
-                    });
+                    }
+                  );
 
-                    // NOTE: Do NOT set extraction-level humanScore here.
-                    // Each judge's evaluation has its own human_score in evaluationResults.
-                    // Setting a top-level humanScore would cause it to "leak" to other judges
-                    // in BatchResultsPage when they don't have their own human_score.
+                  // NOTE: Do NOT set extraction-level humanScore here.
+                  // Each judge's evaluation has its own human_score in evaluationResults.
+                  // Setting a top-level humanScore would cause it to "leak" to other judges
+                  // in BatchResultsPage when they don't have their own human_score.
 
-                    acc[r.model_id] = {
-                      extracted: r.extracted_text,
-                      references: r.references || [],
-                      // Token usage and cost tracking
-                      promptTokens: r.prompt_tokens,
-                      completionTokens: r.completion_tokens,
-                      duration: r.duration_ms
-                        ? r.duration_ms / 1000
-                        : undefined,
-                      cost: r.cost,
-                      // Evaluations specific to this source model
-                      evaluationResults: modelEvalResults,
-                    };
-                    return acc;
-                  }, {}),
-              };
-            }),
-          };
-        }),
+                  acc[r.model_id] = {
+                    extracted: r.extracted_text,
+                    references: r.references || [],
+                    // Token usage and cost tracking
+                    promptTokens: r.prompt_tokens,
+                    completionTokens: r.completion_tokens,
+                    duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
+                    cost: r.cost,
+                    // Evaluations specific to this source model
+                    evaluationResults: modelEvalResults,
+                  };
+                  return acc;
+                }, {}),
+            };
+          }),
+        };
+      }),
 
-        // Legacy compatibility for single file reference
-        fileId: sessionData.documents[0]?.file_hash || "",
-        conversionId: sessionData.documents[0]?.file_hash || "",
-        file: new File(
-          [""],
-          sessionData.documents[0]?.filename || "Restored Document",
-          { type: "application/pdf" }
-        ),
-        evaluationConfig: {
-          selectedMetrics: evalConfig.selected_metrics || [
-            "correctness",
-            "completeness",
-            "relevance",
-            "safety",
-          ],
-          selectedProviders: evalConfig.selected_providers || [],
-          selectedSourceModels: evalConfig.selected_source_models || [],
-          customEvaluationSteps:
-            evalConfig.custom_evaluation_steps &&
-            Object.keys(evalConfig.custom_evaluation_steps).length > 0
-              ? evalConfig.custom_evaluation_steps
-              : undefined, // Let EvaluationPage merge with its own defaults
-        },
-        entities: configEntities.map((e: any) => {
-          const result = sessionData.extraction_results?.find(
-            (r: any) =>
-              r.entity_name === e.name &&
-              r.document_id === sessionData.documents[0]?.id
-          );
+      // Legacy compatibility for single file reference
+      fileId: sessionData.documents[0]?.file_hash || "",
+      conversionId: sessionData.documents[0]?.file_hash || "",
+      file: new File(
+        [""],
+        sessionData.documents[0]?.filename || "Restored Document",
+        { type: "application/pdf" }
+      ),
+      evaluationConfig: {
+        selectedMetrics: evalConfig.selected_metrics || [
+          "correctness",
+          "completeness",
+          "relevance",
+          "safety",
+        ],
+        selectedProviders: evalConfig.selected_providers || [],
+        selectedSourceModels: evalConfig.selected_source_models || [],
+        customEvaluationSteps:
+          evalConfig.custom_evaluation_steps &&
+          Object.keys(evalConfig.custom_evaluation_steps).length > 0
+            ? evalConfig.custom_evaluation_steps
+            : undefined, // Let EvaluationPage merge with its own defaults
+      },
+      entities: configEntities.map((e: any) => {
+        const result = sessionData.extraction_results?.find(
+          (r: any) =>
+            r.entity_name === e.name &&
+            r.document_id === sessionData.documents[0]?.id
+        );
 
-          // Find evaluation results for this entity - MUST filter by document_id to avoid cross-file contamination
-          const docId = sessionData.documents[0]?.id;
-          const entityEvaluations =
-            sessionData.evaluation_results?.filter(
-              (ev: any) =>
-                ev.entity_name === e.name &&
-                (ev.document_id === docId || !ev.document_id) // Match by document or legacy (no doc_id)
-            ) || [];
-          // Get ground truth from files_config first, fallback to evaluation results
-          const groundTruth =
-            filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
-              e.name
-            ] ||
-            entityEvaluations.find((ev: any) => ev.ground_truth)
-              ?.ground_truth ||
-            "";
+        // Find evaluation results for this entity - MUST filter by document_id to avoid cross-file contamination
+        const docId = sessionData.documents[0]?.id;
+        const entityEvaluations =
+          sessionData.evaluation_results?.filter(
+            (ev: any) =>
+              ev.entity_name === e.name &&
+              (ev.document_id === docId || !ev.document_id) // Match by document or legacy (no doc_id)
+          ) || [];
+        // Get ground truth from files_config first, fallback to evaluation results
+        const groundTruth =
+          filesConfig[sessionData.documents[0]?.file_hash]?.ground_truths?.[
+            e.name
+          ] ||
+          entityEvaluations.find((ev: any) => ev.ground_truth)?.ground_truth ||
+          "";
 
-          // Group and reconstruct evaluation results
-          const evaluationsByJudge = entityEvaluations.reduce(
-            (acc: any, ev: any) => {
-              // The API returns nested scores array
-              if (ev.scores && Array.isArray(ev.scores)) {
-                ev.scores.forEach((scoreItem: any) => {
-                  const key =
-                    scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
-                  // Use ONLY per-score human_score to avoid cross-judge contamination
-                  const itemHumanScore = scoreItem.human_score;
+        // Group and reconstruct evaluation results
+        const evaluationsByJudge = entityEvaluations.reduce(
+          (acc: any, ev: any) => {
+            // The API returns nested scores array
+            if (ev.scores && Array.isArray(ev.scores)) {
+              ev.scores.forEach((scoreItem: any) => {
+                const key =
+                  scoreItem.judge_model || result?.model_id || "unknown"; // Use score's judge model or fallback
+                // Use ONLY per-score human_score to avoid cross-judge contamination
+                const itemHumanScore = scoreItem.human_score;
 
-                  if (!acc[key]) {
-                    acc[key] = {
-                      provider: scoreItem.judge_model?.includes("gemini")
-                        ? "vertex_ai"
-                        : "azure_openai",
-                      model: scoreItem.judge_model || "unknown",
-                      metrics: [],
-                      aggregate_score: 0,
-                      all_passed: true,
-                      evaluation_time: 0,
-                      human_score: itemHumanScore,
-                    };
-                  } else if (itemHumanScore != null) {
-                    // Update with per-judge human_score if available
-                    acc[key].human_score = itemHumanScore;
-                  }
-
-                  acc[key].metrics.push({
-                    metric_name: scoreItem.metric,
-                    score: scoreItem.score,
-                    threshold: 0.7,
-                    success: (scoreItem.score || 0) >= 0.7,
-                    reason: scoreItem.reasoning || "",
-                  });
-                });
-              } else {
-                // Legacy flat structure fallback
-                const key = ev.judge_model || "unknown";
                 if (!acc[key]) {
                   acc[key] = {
-                    provider: ev.judge_model?.includes("gemini")
+                    provider: scoreItem.judge_model?.includes("gemini")
                       ? "vertex_ai"
                       : "azure_openai",
-                    model: ev.judge_model,
+                    model: scoreItem.judge_model || "unknown",
                     metrics: [],
                     aggregate_score: 0,
                     all_passed: true,
                     evaluation_time: 0,
-                    human_score: ev.human_score,
+                    human_score: itemHumanScore,
                   };
-                } else if (ev.human_score != null) {
-                  // Update human_score from subsequent evaluations if set
-                  acc[key].human_score = ev.human_score;
+                } else if (itemHumanScore != null) {
+                  // Update with per-judge human_score if available
+                  acc[key].human_score = itemHumanScore;
                 }
-                if (ev.metric && ev.score !== null) {
-                  acc[key].metrics.push({
-                    metric_name: ev.metric,
-                    score: ev.score,
-                    threshold: 0.7,
-                    success: ev.score >= 0.7,
-                    reason: ev.reasoning || "",
-                  });
-                }
-              }
-              return acc;
-            },
-            {}
-          );
 
-          const evaluationResults = Object.values(evaluationsByJudge).map(
-            (evalResult: any) => {
-              const avgScore =
-                evalResult.metrics.length > 0
-                  ? evalResult.metrics.reduce(
-                      (sum: number, m: any) => sum + m.score,
-                      0
-                    ) / evalResult.metrics.length
-                  : 0;
-              return {
-                ...evalResult,
-                aggregate_score: avgScore,
-                all_passed: evalResult.metrics.every((m: any) => m.success),
-              };
-            }
-          );
-
-          return {
-            name: e.name,
-            prompt: e.prompt,
-            extracted: result?.extracted_text || "",
-            references: result?.references || [],
-            // Top-level token/duration for display (from first/default extraction result)
-            duration: result?.duration_ms
-              ? result.duration_ms / 1000
-              : undefined,
-            promptTokens: result?.prompt_tokens,
-            completionTokens: result?.completion_tokens,
-            groundTruth: groundTruth,
-            evaluationResults: evaluationResults,
-            extractionsByModel: sessionData.extraction_results
-              ?.filter(
-                (r: any) =>
-                  r.entity_name === e.name &&
-                  r.document_id === sessionData.documents[0]?.id
-              )
-              .reduce((acc: any, r: any) => {
-                const modelEvaluations = entityEvaluations.filter(
-                  (ev: any) => ev.model_id === r.model_id
-                );
-
-                // Build evaluationResults for this specific source model
-                const modelEvalsByJudge = modelEvaluations.reduce(
-                  (judgeAcc: any, ev: any) => {
-                    if (ev.scores && Array.isArray(ev.scores)) {
-                      ev.scores.forEach((scoreItem: any) => {
-                        const key = scoreItem.judge_model || "unknown";
-                        // Use ONLY per-score human_score to avoid cross-judge contamination
-                        const itemHumanScore = scoreItem.human_score;
-                        if (!judgeAcc[key]) {
-                          judgeAcc[key] = {
-                            provider: scoreItem.judge_model?.includes("gemini")
-                              ? "vertex_ai"
-                              : scoreItem.judge_model?.includes("claude")
-                                ? "anthropic"
-                                : "azure_openai",
-                            model: scoreItem.judge_model || "unknown",
-                            metrics: [],
-                            aggregate_score: 0,
-                            all_passed: true,
-                            evaluation_time: 0,
-                            human_score: itemHumanScore,
-                          };
-                        } else if (itemHumanScore != null) {
-                          judgeAcc[key].human_score = itemHumanScore;
-                        }
-                        judgeAcc[key].metrics.push({
-                          metric_name: scoreItem.metric,
-                          score: scoreItem.score,
-                          threshold: 0.7,
-                          success: (scoreItem.score || 0) >= 0.7,
-                          reason: scoreItem.reasoning || "",
-                        });
-                      });
-                    }
-                    return judgeAcc;
-                  },
-                  {}
-                );
-
-                // Calculate aggregate scores for this source model's evaluations
-                const modelEvalResults = Object.values(modelEvalsByJudge).map(
-                  (evalResult: any) => {
-                    const avgScore =
-                      evalResult.metrics.length > 0
-                        ? evalResult.metrics.reduce(
-                            (sum: number, m: any) => sum + (m.score || 0),
-                            0
-                          ) / evalResult.metrics.length
-                        : 0;
-                    return {
-                      ...evalResult,
-                      aggregate_score: avgScore,
-                      all_passed: evalResult.metrics.every(
-                        (m: any) => m.success
-                      ),
-                    };
-                  }
-                );
-
-                // Get human score from evaluations for this model
-                const humanScore = modelEvaluations.find(
-                  (ev: any) => ev.human_score != null
-                )?.human_score;
-
-                acc[r.model_id] = {
-                  extracted: r.extracted_text,
-                  references: r.references || [],
-                  // Token usage and cost tracking
-                  promptTokens: r.prompt_tokens,
-                  completionTokens: r.completion_tokens,
-                  duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
-                  cost: r.cost,
-                  // Evaluations specific to this source model
-                  evaluationResults: modelEvalResults,
-                  // Use ?? instead of || to preserve human_score of 0
-                  humanScore: humanScore ?? undefined,
+                acc[key].metrics.push({
+                  metric_name: scoreItem.metric,
+                  score: scoreItem.score,
+                  threshold: 0.7,
+                  success: (scoreItem.score || 0) >= 0.7,
+                  reason: scoreItem.reasoning || "",
+                });
+              });
+            } else {
+              // Legacy flat structure fallback
+              const key = ev.judge_model || "unknown";
+              if (!acc[key]) {
+                acc[key] = {
+                  provider: ev.judge_model?.includes("gemini")
+                    ? "vertex_ai"
+                    : "azure_openai",
+                  model: ev.judge_model,
+                  metrics: [],
+                  aggregate_score: 0,
+                  all_passed: true,
+                  evaluation_time: 0,
+                  human_score: ev.human_score,
                 };
-                return acc;
-              }, {}),
-          };
-        }),
-      };
+              } else if (ev.human_score != null) {
+                // Update human_score from subsequent evaluations if set
+                acc[key].human_score = ev.human_score;
+              }
+              if (ev.metric && ev.score !== null) {
+                acc[key].metrics.push({
+                  metric_name: ev.metric,
+                  score: ev.score,
+                  threshold: 0.7,
+                  success: ev.score >= 0.7,
+                  reason: ev.reasoning || "",
+                });
+              }
+            }
+            return acc;
+          },
+          {}
+        );
 
-      return restoredData;
+        const evaluationResults = Object.values(evaluationsByJudge).map(
+          (evalResult: any) => {
+            const avgScore =
+              evalResult.metrics.length > 0
+                ? evalResult.metrics.reduce(
+                    (sum: number, m: any) => sum + m.score,
+                    0
+                  ) / evalResult.metrics.length
+                : 0;
+            return {
+              ...evalResult,
+              aggregate_score: avgScore,
+              all_passed: evalResult.metrics.every((m: any) => m.success),
+            };
+          }
+        );
+
+        return {
+          name: e.name,
+          prompt: e.prompt,
+          extracted: result?.extracted_text || "",
+          references: result?.references || [],
+          // Top-level token/duration for display (from first/default extraction result)
+          duration: result?.duration_ms ? result.duration_ms / 1000 : undefined,
+          promptTokens: result?.prompt_tokens,
+          completionTokens: result?.completion_tokens,
+          groundTruth: groundTruth,
+          evaluationResults: evaluationResults,
+          extractionsByModel: sessionData.extraction_results
+            ?.filter(
+              (r: any) =>
+                r.entity_name === e.name &&
+                r.document_id === sessionData.documents[0]?.id
+            )
+            .reduce((acc: any, r: any) => {
+              const modelEvaluations = entityEvaluations.filter(
+                (ev: any) => ev.model_id === r.model_id
+              );
+
+              // Build evaluationResults for this specific source model
+              const modelEvalsByJudge = modelEvaluations.reduce(
+                (judgeAcc: any, ev: any) => {
+                  if (ev.scores && Array.isArray(ev.scores)) {
+                    ev.scores.forEach((scoreItem: any) => {
+                      const key = scoreItem.judge_model || "unknown";
+                      // Use ONLY per-score human_score to avoid cross-judge contamination
+                      const itemHumanScore = scoreItem.human_score;
+                      if (!judgeAcc[key]) {
+                        judgeAcc[key] = {
+                          provider: scoreItem.judge_model?.includes("gemini")
+                            ? "vertex_ai"
+                            : scoreItem.judge_model?.includes("claude")
+                              ? "anthropic"
+                              : "azure_openai",
+                          model: scoreItem.judge_model || "unknown",
+                          metrics: [],
+                          aggregate_score: 0,
+                          all_passed: true,
+                          evaluation_time: 0,
+                          human_score: itemHumanScore,
+                        };
+                      } else if (itemHumanScore != null) {
+                        judgeAcc[key].human_score = itemHumanScore;
+                      }
+                      judgeAcc[key].metrics.push({
+                        metric_name: scoreItem.metric,
+                        score: scoreItem.score,
+                        threshold: 0.7,
+                        success: (scoreItem.score || 0) >= 0.7,
+                        reason: scoreItem.reasoning || "",
+                      });
+                    });
+                  }
+                  return judgeAcc;
+                },
+                {}
+              );
+
+              // Calculate aggregate scores for this source model's evaluations
+              const modelEvalResults = Object.values(modelEvalsByJudge).map(
+                (evalResult: any) => {
+                  const avgScore =
+                    evalResult.metrics.length > 0
+                      ? evalResult.metrics.reduce(
+                          (sum: number, m: any) => sum + (m.score || 0),
+                          0
+                        ) / evalResult.metrics.length
+                      : 0;
+                  return {
+                    ...evalResult,
+                    aggregate_score: avgScore,
+                    all_passed: evalResult.metrics.every((m: any) => m.success),
+                  };
+                }
+              );
+
+              // Get human score from evaluations for this model
+              const humanScore = modelEvaluations.find(
+                (ev: any) => ev.human_score != null
+              )?.human_score;
+
+              acc[r.model_id] = {
+                extracted: r.extracted_text,
+                references: r.references || [],
+                // Token usage and cost tracking
+                promptTokens: r.prompt_tokens,
+                completionTokens: r.completion_tokens,
+                duration: r.duration_ms ? r.duration_ms / 1000 : undefined,
+                cost: r.cost,
+                // Evaluations specific to this source model
+                evaluationResults: modelEvalResults,
+                // Use ?? instead of || to preserve human_score of 0
+                humanScore: humanScore ?? undefined,
+              };
+              return acc;
+            }, {}),
+        };
+      }),
+    };
+
+    return restoredData;
   };
 
   const handleRestoreSession = async (sessionId: string) => {

@@ -178,7 +178,10 @@ export function ProcessingPage({
                         figures: data.figures || [],
                         figuresCount:
                           data.figures_found ?? data.figures?.length ?? 0,
-                        tablesCount: data.tables_found ?? f.processingResult?.tablesCount ?? 0,
+                        tablesCount:
+                          data.tables_found ??
+                          f.processingResult?.tablesCount ??
+                          0,
                       },
                     }
                   : f
