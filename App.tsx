@@ -882,7 +882,9 @@ export default function App() {
         import("./utils/session").then(({ resetSessionId }) => {
           resetSessionId();
         });
-        setCurrentStep(previousWorkflowStep === "simplified" ? "simplified" : "upload");
+        setCurrentStep(
+          previousWorkflowStep === "simplified" ? "simplified" : "upload"
+        );
       } else {
         setCurrentStep(previousWorkflowStep);
       }

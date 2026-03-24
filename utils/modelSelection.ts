@@ -1,7 +1,4 @@
-import {
-  ModelConfig,
-  settingsManager,
-} from "../components/SettingsManager";
+import { ModelConfig, settingsManager } from "../components/SettingsManager";
 
 export type { ModelConfig };
 
@@ -29,13 +26,11 @@ const MODEL_PRIORITY: Array<{
     modelType: "anthropic",
   },
   {
-    match: (m) =>
-      m.provider === "Azure" && m.name?.includes("gpt-5.2"),
+    match: (m) => m.provider === "Azure" && m.name?.includes("gpt-5.2"),
     modelType: "azure",
   },
   {
-    match: (m) =>
-      m.provider === "Azure" && m.name === "o3",
+    match: (m) => m.provider === "Azure" && m.name === "o3",
     modelType: "azure",
   },
   // Tier 2 — strong reasoning
@@ -48,14 +43,12 @@ const MODEL_PRIORITY: Array<{
     modelType: "anthropic",
   },
   {
-    match: (m) =>
-      m.provider === "Azure" && m.name === "o3-mini",
+    match: (m) => m.provider === "Azure" && m.name === "o3-mini",
     modelType: "azure",
   },
   {
     match: (m) =>
-      m.provider === "Azure" &&
-      (m.name === "gpt-5" || m.name === "gpt-5-mini"),
+      m.provider === "Azure" && (m.name === "gpt-5" || m.name === "gpt-5-mini"),
     modelType: "azure",
   },
   // Tier 3 — fast & capable
@@ -65,8 +58,7 @@ const MODEL_PRIORITY: Array<{
   },
   {
     match: (m) =>
-      m.provider === "Azure" &&
-      (m.name === "gpt-4o" || m.name === "o4-mini"),
+      m.provider === "Azure" && (m.name === "gpt-4o" || m.name === "o4-mini"),
     modelType: "azure",
   },
   // Tier 4 — lightweight / fast
@@ -75,8 +67,7 @@ const MODEL_PRIORITY: Array<{
     modelType: "gemini",
   },
   {
-    match: (m) =>
-      m.provider === "Azure" && m.name === "gpt-5-nano",
+    match: (m) => m.provider === "Azure" && m.name === "gpt-5-nano",
     modelType: "azure",
   },
   // Tier 5 — Llama

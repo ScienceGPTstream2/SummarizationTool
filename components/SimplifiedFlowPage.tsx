@@ -85,7 +85,8 @@ export function SimplifiedFlowPage({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
-  const [autoSelectedModelName, setAutoSelectedModelName] = useState<string>("");
+  const [autoSelectedModelName, setAutoSelectedModelName] =
+    useState<string>("");
   const [includeEntitiesInDoc, setIncludeEntitiesInDoc] = useState(false);
 
   const allTemplates = getAvailableStudyTypes();
@@ -118,8 +119,10 @@ export function SimplifiedFlowPage({
     }
 
     if (studyType === "epidemiology" && availableModels.length > 0) {
-      const gptModel = availableModels.find((m) =>
-        m.name?.toLowerCase().includes("gpt-5.2") || m.id?.toLowerCase().includes("gpt-5.2")
+      const gptModel = availableModels.find(
+        (m) =>
+          m.name?.toLowerCase().includes("gpt-5.2") ||
+          m.id?.toLowerCase().includes("gpt-5.2")
       );
       if (gptModel) {
         setSelectedModelId(gptModel.id);
@@ -127,8 +130,10 @@ export function SimplifiedFlowPage({
         setSelectedModelId(""); // Fallback to auto
       }
     } else if (studyType === "toxicology" && availableModels.length > 0) {
-      const geminiModel = availableModels.find((m) =>
-        m.name?.toLowerCase().includes("gemini-2.5-pro") || m.id?.toLowerCase().includes("gemini-2.5-pro")
+      const geminiModel = availableModels.find(
+        (m) =>
+          m.name?.toLowerCase().includes("gemini-2.5-pro") ||
+          m.id?.toLowerCase().includes("gemini-2.5-pro")
       );
       if (geminiModel) {
         setSelectedModelId(geminiModel.id);
@@ -162,15 +167,16 @@ export function SimplifiedFlowPage({
 
   const { state, results, run, reset, downloadResults, downloadSingleResult } =
     useSimplifiedPipeline();
-  const [expandedResultIndex, setExpandedResultIndex] = useState<number | null>(null);
+  const [expandedResultIndex, setExpandedResultIndex] = useState<number | null>(
+    null
+  );
 
   const isRunning = state.running;
   const isIdle = !isRunning && state.fileProgress.length === 0;
   const isDone = !isRunning && state.fileProgress.length > 0;
   const hasResults = results.length > 0;
   const allSucceeded =
-    isDone &&
-    state.fileProgress.every((f) => f.stage === "complete");
+    isDone && state.fileProgress.every((f) => f.stage === "complete");
   const overallPercent =
     state.totalFiles > 0
       ? Math.round(
@@ -196,8 +202,8 @@ export function SimplifiedFlowPage({
       e.preventDefault();
       setIsDragging(false);
       if (isRunning) return;
-      const droppedFiles = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type === "application/pdf"
+      const droppedFiles = Array.from(e.dataTransfer.files).filter(
+        (f) => f.type === "application/pdf"
       );
       if (droppedFiles.length > 0) {
         setFiles((prev) => [...prev, ...droppedFiles].slice(0, 10));
@@ -405,7 +411,6 @@ export function SimplifiedFlowPage({
                   </motion.div>
                 )}
               </AnimatePresence>
-
             </div>
 
             {/* File Upload */}
@@ -506,84 +511,83 @@ export function SimplifiedFlowPage({
                     className="overflow-hidden"
                   >
                     <div className="space-y-4 p-5 rounded-lg border border-border bg-muted/30">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                      {/* Parser */}
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-muted-foreground">
-                          Document Parser
-                        </label>
-                        <select
-                          value={selectedParser}
-                          onChange={(e) => setSelectedParser(e.target.value)}
-                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                          {PARSER_OPTIONS.map((p) => (
-                            <option key={p.value} value={p.value}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Model */}
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-muted-foreground">
-                          LLM Model
-                        </label>
-                        <select
-                          value={selectedModelId}
-                          onChange={(e) => setSelectedModelId(e.target.value)}
-                          className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                          <option value="">
-                            {autoSelectedModelName
-                              ? `Auto — ${autoSelectedModelName}`
-                              : "Auto (best available)"}
-                          </option>
-                          {modelsLoading ? (
-                            <option disabled>Loading models...</option>
-                          ) : (
-                            availableModels.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name}
-                                {m.provider ? ` (${m.provider})` : ""}
-                                {m.description ? ` — ${m.description}` : ""}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                        {/* Parser */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-muted-foreground">
+                            Document Parser
+                          </label>
+                          <select
+                            value={selectedParser}
+                            onChange={(e) => setSelectedParser(e.target.value)}
+                            className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          >
+                            {PARSER_OPTIONS.map((p) => (
+                              <option key={p.value} value={p.value}>
+                                {p.label}
                               </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
+                            ))}
+                          </select>
+                        </div>
 
-                      {/* Template */}
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-muted-foreground">
-                          Extraction Template
-                        </label>
-                        <select
-                          value={selectedTemplateId}
-                          onChange={(e) =>
-                            handleTemplateChange(e.target.value)
-                          }
-                          className={`w-full h-11 rounded-md border px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${
-                            studyType === "custom"
-                              ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-                              : "border-border bg-background"
-                          }`}
-                        >
-                          {!selectedTemplateId && (
-                            <option value="" disabled>
-                              Select a study type first
+                        {/* Model */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-muted-foreground">
+                            LLM Model
+                          </label>
+                          <select
+                            value={selectedModelId}
+                            onChange={(e) => setSelectedModelId(e.target.value)}
+                            className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          >
+                            <option value="">
+                              {autoSelectedModelName
+                                ? `Auto — ${autoSelectedModelName}`
+                                : "Auto (best available)"}
                             </option>
-                          )}
-                          {allTemplates.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                            {modelsLoading ? (
+                              <option disabled>Loading models...</option>
+                            ) : (
+                              availableModels.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name}
+                                  {m.provider ? ` (${m.provider})` : ""}
+                                  {m.description ? ` — ${m.description}` : ""}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </div>
 
+                        {/* Template */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-muted-foreground">
+                            Extraction Template
+                          </label>
+                          <select
+                            value={selectedTemplateId}
+                            onChange={(e) =>
+                              handleTemplateChange(e.target.value)
+                            }
+                            className={`w-full h-11 rounded-md border px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${
+                              studyType === "custom"
+                                ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                                : "border-border bg-background"
+                            }`}
+                          >
+                            {!selectedTemplateId && (
+                              <option value="" disabled>
+                                Select a study type first
+                              </option>
+                            )}
+                            {allTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   </motion.div>
                 )}
@@ -662,11 +666,13 @@ export function SimplifiedFlowPage({
                       className="w-full text-left px-6 py-5 transition-colors"
                     >
                       <div className="flex items-start gap-4">
-                        <div className={`p-2.5 rounded-lg shrink-0 ${
-                          isExpanded
-                            ? "bg-primary/15 text-primary"
-                            : "bg-muted text-muted-foreground"
-                        }`}>
+                        <div
+                          className={`p-2.5 rounded-lg shrink-0 ${
+                            isExpanded
+                              ? "bg-primary/15 text-primary"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
                           <FileText className="h-6 w-6" />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -733,19 +739,27 @@ export function SimplifiedFlowPage({
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
-                                        {result.entities?.map((entity: any, idx: number) => (
-                                          <TableRow key={idx}>
-                                            <TableCell className="font-medium align-top text-sm py-3">
-                                              {entity.name}
-                                            </TableCell>
-                                            <TableCell className="align-top whitespace-pre-wrap text-sm py-3">
-                                              {entity.answer || entity.extracted || "-"}
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                        {(!result.entities || result.entities.length === 0) && (
+                                        {result.entities?.map(
+                                          (entity: any, idx: number) => (
+                                            <TableRow key={idx}>
+                                              <TableCell className="font-medium align-top text-sm py-3">
+                                                {entity.name}
+                                              </TableCell>
+                                              <TableCell className="align-top whitespace-pre-wrap text-sm py-3">
+                                                {entity.answer ||
+                                                  entity.extracted ||
+                                                  "-"}
+                                              </TableCell>
+                                            </TableRow>
+                                          )
+                                        )}
+                                        {(!result.entities ||
+                                          result.entities.length === 0) && (
                                           <TableRow>
-                                            <TableCell colSpan={2} className="text-center text-muted-foreground">
+                                            <TableCell
+                                              colSpan={2}
+                                              className="text-center text-muted-foreground"
+                                            >
                                               No entities extracted
                                             </TableCell>
                                           </TableRow>
@@ -761,7 +775,12 @@ export function SimplifiedFlowPage({
                             <div className="flex justify-end pt-1">
                               <Button
                                 variant="outline"
-                                onClick={() => downloadSingleResult(result, includeEntitiesInDoc)}
+                                onClick={() =>
+                                  downloadSingleResult(
+                                    result,
+                                    includeEntitiesInDoc
+                                  )
+                                }
                                 className="text-sm"
                               >
                                 <Download className="h-4 w-4 mr-1.5" />
@@ -782,7 +801,10 @@ export function SimplifiedFlowPage({
               className="flex justify-center"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.15 + results.length * 0.08 }}
+              transition={{
+                duration: 0.3,
+                delay: 0.15 + results.length * 0.08,
+              }}
             >
               <label className="flex items-center gap-3 cursor-pointer">
                 <div className="relative">
@@ -808,7 +830,11 @@ export function SimplifiedFlowPage({
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 + results.length * 0.08 }}
             >
-              <Button size="lg" onClick={() => downloadResults(includeEntitiesInDoc)} className="px-10 py-3 text-lg h-auto">
+              <Button
+                size="lg"
+                onClick={() => downloadResults(includeEntitiesInDoc)}
+                className="px-10 py-3 text-lg h-auto"
+              >
                 <Download className="h-5 w-5 mr-2.5" />
                 {results.length === 1
                   ? "Download Report"
@@ -850,7 +876,10 @@ export function SimplifiedFlowPage({
                 <Loader2 className="h-10 w-10 text-primary animate-spin" />
               </div>
               <h2 className="text-3xl font-semibold text-foreground">
-                Processing {state.totalFiles === 1 ? "Study" : `${state.totalFiles} Studies`}
+                Processing{" "}
+                {state.totalFiles === 1
+                  ? "Study"
+                  : `${state.totalFiles} Studies`}
               </h2>
               <p className="text-lg text-muted-foreground">
                 {state.completedCount} of {state.totalFiles} complete
@@ -869,7 +898,9 @@ export function SimplifiedFlowPage({
                 />
               </div>
               <div className="flex justify-between text-sm text-muted-foreground">
-                <span>{state.completedCount} / {state.totalFiles} files</span>
+                <span>
+                  {state.completedCount} / {state.totalFiles} files
+                </span>
                 <span>{overallPercent}%</span>
               </div>
             </div>
@@ -918,11 +949,13 @@ export function SimplifiedFlowPage({
                       <div className="text-base font-medium text-foreground truncate">
                         {fp.fileName.replace(/\.pdf$/i, "")}
                       </div>
-                      <div className={`text-sm ${
-                        isFileError
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-muted-foreground"
-                      }`}>
+                      <div
+                        className={`text-sm ${
+                          isFileError
+                            ? "text-red-600 dark:text-red-400"
+                            : "text-muted-foreground"
+                        }`}
+                      >
                         {isFileError && fp.error
                           ? fp.error
                           : STAGE_LABEL[fp.stage]}
