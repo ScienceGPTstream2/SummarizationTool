@@ -2204,6 +2204,15 @@ export function EvaluationPage({
   const executeBatchEvaluation = async (options?: {
     pendingOnly?: boolean;
   }) => {
+    // Guard: session_id is required by the backend job queue
+    if (!documentData.sessionId) {
+      toast.error("No active session", {
+        description:
+          "Cannot run evaluation without a session. Please start a new session or restore one from history.",
+      });
+      return;
+    }
+
     setIsEvaluating(true);
     setEvaluationProgress(0);
     setEvaluationComplete(false);
