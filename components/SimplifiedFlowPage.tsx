@@ -29,7 +29,6 @@ import {
 import {
   useSimplifiedPipeline,
   PipelineOptions,
-  FileResult,
   FileStage,
   STAGE_LABEL,
 } from "../hooks/useSimplifiedPipeline";
@@ -175,8 +174,6 @@ export function SimplifiedFlowPage({
   const isIdle = !isRunning && state.fileProgress.length === 0;
   const isDone = !isRunning && state.fileProgress.length > 0;
   const hasResults = results.length > 0;
-  const allSucceeded =
-    isDone && state.fileProgress.every((f) => f.stage === "complete");
   const overallPercent =
     state.totalFiles > 0
       ? Math.round(
