@@ -8,6 +8,7 @@ from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
 from .llama import LlamaLLMClient
 from .macbook import MacbookLLMClient
+from .retry_utils import CircuitBreaker, CircuitState
 import toml
 
 # The load_secrets_to_env function is moved to backend/main.py to ensure early loading.
@@ -40,6 +41,22 @@ class LLMService:
         self.anthropic_client = AnthropicLLMClient()
         self.llama_client = LlamaLLMClient()
         self.macbook_client = MacbookLLMClient()
+
+        # One circuit breaker per provider
+        self.circuit_breakers: Dict[str, CircuitBreaker] = {
+            "azure": CircuitBreaker(name="azure"),
+            "gemini": CircuitBreaker(name="gemini"),
+            "anthropic": CircuitBreaker(name="anthropic"),
+            "llama": CircuitBreaker(name="llama"),
+            "macbook": CircuitBreaker(name="macbook"),
+        }
+
+        # Inject circuit breakers into clients so they can call check/record
+        self.azure_client.circuit_breaker = self.circuit_breakers["azure"]
+        self.gemini_client.circuit_breaker = self.circuit_breakers["gemini"]
+        self.anthropic_client.circuit_breaker = self.circuit_breakers["anthropic"]
+        self.llama_client.circuit_breaker = self.circuit_breakers["llama"]
+        self.macbook_client.circuit_breaker = self.circuit_breakers["macbook"]
 
         # Timeout logging setup
         self.timeout_log_dir = (
@@ -276,6 +293,12 @@ class LLMService:
                 "error": f"Request timed out for {model_type} model",
             }
         except Exception as e:
+            from .retry_utils import CircuitOpenError
+            if isinstance(e, CircuitOpenError):
+                return {
+                    "success": False,
+                    "error": f"Circuit breaker OPEN for {model_type} — provider appears to be down. Retry in ~30s.",
+                }
             # Log other errors that might be timeout-related
             error_msg = str(e).lower()
             if any(
@@ -439,6 +462,13 @@ class LLMService:
             return result
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}
+
+    def get_circuit_breaker_states(self) -> Dict[str, Any]:
+        """Return a snapshot of each provider's circuit breaker state."""
+        return {
+            name: cb.as_dict()
+            for name, cb in self.circuit_breakers.items()
+        }
 
     def _record_session_metrics(
         self, session_id: Optional[str], provider: str, result: Dict[str, Any]

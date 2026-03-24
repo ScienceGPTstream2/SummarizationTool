@@ -7,6 +7,7 @@ from utils.text_utils import sanitize_text
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
 from anthropic import AnthropicVertex
+from .retry_utils import CircuitBreaker, CircuitOpenError, DEFAULT_RETRY_CONFIG
 
 
 class AnthropicLLMClient:
@@ -22,6 +23,9 @@ class AnthropicLLMClient:
 
         # Client is disabled if service account is missing
         self.disabled = not self.service_account_path
+
+        # Circuit breaker injected by LLMService after construction
+        self.circuit_breaker: Optional[CircuitBreaker] = None
 
         # Set the Google Application Credentials environment variable if service account found
         if self.service_account_path:
@@ -90,33 +94,63 @@ class AnthropicLLMClient:
                 used_service_account_path
             )
 
+        # Check circuit breaker before attempting the call
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
+
+        # Retry configuration (mirrors Azure/Gemini/Llama)
+        import random
+        retry_config = DEFAULT_RETRY_CONFIG
+        last_error: Optional[str] = None
+
         try:
-            # Initialize the Anthropic Vertex client
+            # Initialize the Anthropic Vertex client (shared across retries)
             client = AnthropicVertex(region=used_location, project_id=used_project_id)
+        except Exception as e:
+            return {"success": False, "error": f"Anthropic client init failed: {e}"}
+
+        for attempt in range(retry_config.max_retries):
+            if attempt > 0:
+                delay = min(
+                    retry_config.base_delay * (2 ** (attempt - 1)),
+                    retry_config.max_delay,
+                )
+                if retry_config.jitter:
+                    delay += random.uniform(0, 1)
+                print(
+                    f"[LLMService] Anthropic retry attempt {attempt + 1}/{retry_config.max_retries} "
+                    f"after {delay:.2f}s …"
+                )
+                await asyncio.sleep(delay)
 
             start_time = time.time()
-            print(f"[LLMService] Making Anthropic request...")
+            print(f"[LLMService] Making Anthropic request (attempt {attempt + 1})...")
 
             # Check if structured outputs are requested
             use_structured_outputs = response_json_schema is not None
 
-            if use_structured_outputs:
-                # Note: Vertex AI doesn't support structured outputs API feature yet
-                # Use prompt engineering to get structured JSON output instead
-                print(
-                    f"[LLMService] Using prompt-based structured outputs (Vertex AI doesn't support structured outputs API)"
-                )
-                try:
-                    # Generate JSON schema description for the prompt
-                    if isinstance(response_json_schema, dict):
-                        schema_description = json.dumps(response_json_schema, indent=2)
-                    else:
-                        raise ValueError(
-                            f"response_json_schema must be a dict, got: {type(response_json_schema)}"
-                        )
+            try:
+                if use_structured_outputs:
+                    # Note: Vertex AI doesn't support structured outputs API feature yet
+                    # Use prompt engineering to get structured JSON output instead
+                    print(
+                        f"[LLMService] Using prompt-based structured outputs (Vertex AI doesn't support structured outputs API)"
+                    )
+                    try:
+                        # Generate JSON schema description for the prompt
+                        if isinstance(response_json_schema, dict):
+                            schema_description = json.dumps(response_json_schema, indent=2)
+                        else:
+                            raise ValueError(
+                                f"response_json_schema must be a dict, got: {type(response_json_schema)}"
+                            )
 
-                    # Enhance system message with JSON format instructions
-                    json_format_instruction = f"""You must respond with valid JSON that matches this exact schema:
+                        # Enhance system message with JSON format instructions
+                        json_format_instruction = f"""You must respond with valid JSON that matches this exact schema:
 
 {schema_description}
 
@@ -126,108 +160,171 @@ Important:
 - Use the exact field names from the schema
 - For the "references" array, each item must have a "text" field with the exact excerpt from the markdown"""
 
-                    enhanced_system = (
-                        f"{system}\n\n{json_format_instruction}"
-                        if system
-                        else json_format_instruction
-                    )
-
-                    # Enhance user message to emphasize JSON output
-                    enhanced_messages = messages.copy()
-                    if enhanced_messages and len(enhanced_messages) > 0:
-                        enhanced_messages[-1][
-                            "content"
-                        ] = f"""{enhanced_messages[-1]["content"]}
-
-IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text."""
-                    else:
-                        enhanced_messages.append(
-                            {
-                                "role": "user",
-                                "content": "IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text.",
-                            }
+                        enhanced_system = (
+                            f"{system}\n\n{json_format_instruction}"
+                            if system
+                            else json_format_instruction
                         )
 
-                    # Build request parameters (regular API call, no beta features)
+                        # Enhance user message to emphasize JSON output
+                        enhanced_messages = messages.copy()
+                        if enhanced_messages and len(enhanced_messages) > 0:
+                            enhanced_messages[-1][
+                                "content"
+                            ] = f"""{enhanced_messages[-1]["content"]}
+
+IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text."""
+                        else:
+                            enhanced_messages.append(
+                                {
+                                    "role": "user",
+                                    "content": "IMPORTANT: Respond with valid JSON only, matching the schema above. Do not include markdown code blocks or any other text.",
+                                }
+                            )
+
+                        # Build request parameters (regular API call, no beta features)
+                        request_params = {
+                            "model": model_id,
+                            "max_tokens": max_tokens,
+                            "messages": enhanced_messages,
+                        }
+
+                        if enhanced_system:
+                            request_params["system"] = enhanced_system
+
+                        if temperature != 1.0:
+                            request_params["temperature"] = temperature
+
+                        # Make the API call
+                        response = await asyncio.to_thread(
+                            lambda: client.messages.create(**request_params)
+                        )
+
+                        duration = time.time() - start_time
+
+                        # Extract and parse JSON from response
+                        content_text = (
+                            response.content[0].text
+                            if response.content and len(response.content) > 0
+                            else "{}"
+                        )
+
+                        # Try to extract JSON from markdown code blocks if present
+                        json_text = content_text.strip()
+                        if json_text.startswith("```"):
+                            # Remove markdown code block markers
+                            lines = json_text.split("\n")
+                            # Remove first line (```json or ```)
+                            if lines[0].startswith("```"):
+                                lines = lines[1:]
+                            # Remove last line (```)
+                            if lines and lines[-1].strip() == "```":
+                                lines = lines[:-1]
+                            json_text = "\n".join(lines)
+
+                        # Parse JSON
+                        try:
+                            parsed_json = json.loads(sanitize_text(json_text))
+                        except json.JSONDecodeError as e:
+                            print(f"[LLMService] JSON parsing failed: {e}")
+                            print(f"[LLMService] Response text: {json_text[:500]}")
+                            raise ValueError(f"Failed to parse JSON response: {e}")
+
+                        # Extract content and references from parsed JSON
+                        content = parsed_json.get("answer", "")
+                        references = parsed_json.get("references", [])
+                        # Ensure references is a list of dicts with "text" field
+                        if references and isinstance(references, list):
+                            references = [
+                                (
+                                    {"text": ref["text"]}
+                                    if isinstance(ref, dict) and "text" in ref
+                                    else {"text": str(ref)}
+                                )
+                                for ref in references
+                            ]
+                        else:
+                            references = []
+
+                        print(
+                            f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
+                        )
+                        print(f"[LLMService] Extracted content length: {len(content)}")
+                        print(f"[LLMService] References count: {len(references)}")
+
+                        usage = response.usage
+                        input_tokens = usage.input_tokens if usage else None
+                        output_tokens = usage.output_tokens if usage else None
+
+                        structured_result = {
+                            "success": True,
+                            "content": content,
+                            "answer": content,
+                            "references": references,
+                            "raw": response.model_dump(),
+                            "meta": {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "model": model_id,
+                                "duration": duration,
+                                "prompt_tokens": input_tokens,
+                                "completion_tokens": output_tokens,
+                            },
+                        }
+                        if cb is not None:
+                            await cb.record_success()
+                        return structured_result
+                    except Exception as e:
+                        print(f"[LLMService] Structured output request failed: {e}")
+                        print(f"[LLMService] Exception type: {type(e).__name__}")
+                        import traceback
+
+                        print(f"[LLMService] Traceback: {traceback.format_exc()}")
+                        # Fallback to regular API call
+                        print(f"[LLMService] Falling back to regular API call...")
+                        use_structured_outputs = False
+
+                if not use_structured_outputs:
+                    # Regular API call (no structured outputs)
                     request_params = {
-                        "model": model_id,
                         "max_tokens": max_tokens,
-                        "messages": enhanced_messages,
+                        "messages": messages,
+                        "model": model_id,
                     }
 
-                    if enhanced_system:
-                        request_params["system"] = enhanced_system
+                    if system:
+                        request_params["system"] = system
 
                     if temperature != 1.0:
                         request_params["temperature"] = temperature
 
                     # Make the API call
-                    response = await asyncio.to_thread(
+                    message = await asyncio.to_thread(
                         lambda: client.messages.create(**request_params)
                     )
 
                     duration = time.time() - start_time
 
-                    # Extract and parse JSON from response
-                    content_text = (
-                        response.content[0].text
-                        if response.content and len(response.content) > 0
-                        else "{}"
-                    )
-
-                    # Try to extract JSON from markdown code blocks if present
-                    json_text = content_text.strip()
-                    if json_text.startswith("```"):
-                        # Remove markdown code block markers
-                        lines = json_text.split("\n")
-                        # Remove first line (```json or ```)
-                        if lines[0].startswith("```"):
-                            lines = lines[1:]
-                        # Remove last line (```)
-                        if lines and lines[-1].strip() == "```":
-                            lines = lines[:-1]
-                        json_text = "\n".join(lines)
-
-                    # Parse JSON
-                    try:
-                        parsed_json = json.loads(sanitize_text(json_text))
-                    except json.JSONDecodeError as e:
-                        print(f"[LLMService] JSON parsing failed: {e}")
-                        print(f"[LLMService] Response text: {json_text[:500]}")
-                        raise ValueError(f"Failed to parse JSON response: {e}")
-
-                    # Extract content and references from parsed JSON
-                    content = parsed_json.get("answer", "")
-                    references = parsed_json.get("references", [])
-                    # Ensure references is a list of dicts with "text" field
-                    if references and isinstance(references, list):
-                        references = [
-                            (
-                                {"text": ref["text"]}
-                                if isinstance(ref, dict) and "text" in ref
-                                else {"text": str(ref)}
-                            )
-                            for ref in references
-                        ]
-                    else:
-                        references = []
-
                     print(
-                        f"[LLMService] Structured output extracted - Duration: {duration:.2f}s"
+                        f"[LLMService] Anthropic response received - Duration: {duration:.2f}s"
                     )
-                    print(f"[LLMService] Extracted content length: {len(content)}")
-                    print(f"[LLMService] References count: {len(references)}")
 
-                    usage = response.usage
+                    # Extract content from response
+                    content = ""
+                    if message.content and len(message.content) > 0:
+                        content = message.content[0].text
+
+                    print(f"[LLMService] Extracted content length: {len(content)}")
+
+                    usage = message.usage
                     input_tokens = usage.input_tokens if usage else None
                     output_tokens = usage.output_tokens if usage else None
 
-                    return {
+                    success_result = {
                         "success": True,
                         "content": content,
                         "answer": content,
-                        "references": references,
-                        "raw": response.model_dump(),
+                        "references": [],
+                        "raw": message.model_dump(),
                         "meta": {
                             "timestamp": datetime.utcnow().isoformat(),
                             "model": model_id,
@@ -236,73 +333,35 @@ IMPORTANT: Respond with valid JSON only, matching the schema above. Do not inclu
                             "completion_tokens": output_tokens,
                         },
                     }
-                except Exception as e:
-                    print(f"[LLMService] Structured output request failed: {e}")
-                    print(f"[LLMService] Exception type: {type(e).__name__}")
-                    import traceback
+                    if cb is not None:
+                        await cb.record_success()
+                    return success_result
 
-                    print(f"[LLMService] Traceback: {traceback.format_exc()}")
-                    # Fallback to regular API call
-                    print(f"[LLMService] Falling back to regular API call...")
-                    use_structured_outputs = False
+            except Exception as e:
+                print(f"[LLMService] Anthropic attempt {attempt + 1} failed: {e}")
+                print(f"[LLMService] Exception type: {type(e).__name__}")
+                import traceback
+                print(f"[LLMService] Traceback: {traceback.format_exc()}")
 
-            if not use_structured_outputs:
-                # Regular API call (no structured outputs)
-                request_params = {
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                    "model": model_id,
-                }
+                # Check if this is a retryable API error (rate limit / server error)
+                retryable = False
+                try:
+                    import anthropic as _anthropic_module
+                    if isinstance(e, _anthropic_module.APIStatusError):
+                        retryable = e.status_code in retry_config.retryable_status_codes
+                except Exception:
+                    pass
 
-                if system:
-                    request_params["system"] = system
+                last_error = str(e)
+                if cb is not None:
+                    await cb.record_failure()
 
-                if temperature != 1.0:
-                    request_params["temperature"] = temperature
+                if retryable and attempt < retry_config.max_retries - 1:
+                    continue
 
-                # Make the API call
-                message = await asyncio.to_thread(
-                    lambda: client.messages.create(**request_params)
-                )
+                return {"success": False, "error": f"Anthropic request failed: {str(e)}"}
 
-                duration = time.time() - start_time
-
-                print(
-                    f"[LLMService] Anthropic response received - Duration: {duration:.2f}s"
-                )
-
-                # Extract content from response
-                content = ""
-                if message.content and len(message.content) > 0:
-                    content = message.content[0].text
-
-                print(f"[LLMService] Extracted content length: {len(content)}")
-
-                usage = message.usage
-                input_tokens = usage.input_tokens if usage else None
-                output_tokens = usage.output_tokens if usage else None
-
-                return {
-                    "success": True,
-                    "content": content,
-                    "answer": content,
-                    "references": [],
-                    "raw": message.model_dump(),
-                    "meta": {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "model": model_id,
-                        "duration": duration,
-                        "prompt_tokens": input_tokens,
-                        "completion_tokens": output_tokens,
-                    },
-                }
-        except Exception as e:
-            print(f"[LLMService] Anthropic request failed with exception: {e}")
-            print(f"[LLMService] Exception type: {type(e).__name__}")
-            import traceback
-
-            print(f"[LLMService] Traceback: {traceback.format_exc()}")
-            return {"success": False, "error": f"Anthropic request failed: {str(e)}"}
+        return {"success": False, "error": f"Anthropic request failed after {retry_config.max_retries} attempts: {last_error}"}
 
     async def extract_entities_with_anthropic(
         self,

@@ -39,6 +39,7 @@ class ExtractionResult(BaseModel):
 
 
 from utils.text_utils import sanitize_text as _sanitize
+from .retry_utils import CircuitBreaker, CircuitOpenError
 
 
 class GeminiLLMClient:
@@ -63,6 +64,9 @@ class GeminiLLMClient:
         self.disabled = (
             not self.project_id or not self.location or not self.service_account_path
         )
+
+        # Circuit breaker injected by LLMService after construction
+        self.circuit_breaker: Optional[CircuitBreaker] = None
 
     def _find_service_account_file(self) -> Optional[Path]:
         """Find service account JSON file"""
@@ -140,6 +144,14 @@ class GeminiLLMClient:
                 "success": False,
                 "error": "Gemini project ID, location, or service account missing.",
             }
+
+        # Check circuit breaker before making any network call
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
 
         # Get access token from service account
         try:
@@ -310,6 +322,8 @@ class GeminiLLMClient:
                         print(
                             f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         last_error = error_msg
                         continue  # Retry
                     else:
@@ -317,6 +331,8 @@ class GeminiLLMClient:
                         print(
                             f"[LLMService] Max retries reached. Final error: {status_text}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         return {
                             "success": False,
                             "error": f"{status_text}: {error_msg}",
@@ -406,6 +422,8 @@ class GeminiLLMClient:
                             print(
                                 f"[LLMService] Increased maxOutputTokens: {current_max} -> {new_max} for retry"
                             )
+                            if cb is not None:
+                                await cb.record_failure()
                             last_error = f"Failed to parse structured output: {str(e)}"
                             continue  # Retry the entire request
                         print(
@@ -427,6 +445,8 @@ class GeminiLLMClient:
                 break
 
             except requests.exceptions.Timeout as e:
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(f"[LLMService] Request timeout, will retry. Error: {str(e)}")
                     last_error = str(e)
@@ -439,6 +459,8 @@ class GeminiLLMClient:
                     }
 
             except requests.exceptions.RequestException as e:
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(
                         f"[LLMService] Request exception, will retry. Error: {str(e)}"
@@ -454,10 +476,15 @@ class GeminiLLMClient:
 
         # Verify we got valid content after the retry loop
         if not resp or not raw or content is None:
+            if cb is not None:
+                await cb.record_failure()
             return {
                 "success": False,
                 "error": f"Failed to get valid response after retries. Last error: {last_error}",
             }
+
+        if cb is not None:
+            await cb.record_success()
 
         usage = raw.get("usageMetadata", {}) if isinstance(raw, dict) else {}
         prompt_tokens = usage.get("promptTokenCount")

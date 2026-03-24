@@ -8,6 +8,7 @@ from datetime import datetime
 import requests
 from pydantic import BaseModel, Field
 from openai import OpenAI
+from .retry_utils import CircuitBreaker, CircuitOpenError
 
 
 # Pydantic models for structured output
@@ -46,6 +47,9 @@ class AzureLLMClient:
         has_global_creds = self.endpoint and self.api_key
         has_configured_models = len(self.configured_models) > 0
         self.disabled = not has_global_creds and not has_configured_models
+
+        # Circuit breaker injected by LLMService after construction
+        self.circuit_breaker: Optional[CircuitBreaker] = None
 
     def _load_configured_models(self):
         """Load configured models from environment to enable API version, endpoint, and key lookup"""
@@ -214,6 +218,14 @@ class AzureLLMClient:
 
         headers = {"Content-Type": "application/json", "api-key": used_api_key}
 
+        # Check circuit breaker before attempting any network calls
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
+
         # Retry configuration
         max_retries = 3
         base_delay = 1.0  # Start with 1 second
@@ -293,6 +305,8 @@ class AzureLLMClient:
                         print(
                             f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         last_error = error_msg
                         continue  # Retry
                     else:
@@ -300,6 +314,8 @@ class AzureLLMClient:
                         print(
                             f"[LLMService] Max retries reached. Final error: {status_text}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         err = raw.get("error") if isinstance(raw, dict) else resp.text
                         error_msg = (
                             f"Azure API error (status {resp.status_code}): {err}"
@@ -326,6 +342,8 @@ class AzureLLMClient:
                         payload.pop("temperature", None)
                         continue  # Retry without temperature
 
+                    if cb is not None:
+                        await cb.record_failure()
                     error_msg = f"Azure API error (status {resp.status_code}): {err}"
                     if resp.status_code == 404:
                         error_msg += f"\n⚠️  Deployment '{used_deployment}' with API version '{used_api_version}' not found. "
@@ -338,6 +356,8 @@ class AzureLLMClient:
                 break
 
             except requests.exceptions.Timeout as e:
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(f"[LLMService] Request timeout, will retry. Error: {str(e)}")
                     last_error = str(e)
@@ -350,6 +370,8 @@ class AzureLLMClient:
                     }
 
             except requests.exceptions.RequestException as e:
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(
                         f"[LLMService] Request exception, will retry. Error: {str(e)}"
@@ -383,6 +405,8 @@ class AzureLLMClient:
         prompt_tokens = usage.get("prompt_tokens")
         completion_tokens = usage.get("completion_tokens")
 
+        if cb is not None:
+            await cb.record_success()
         return {
             "success": True,
             "content": content,
@@ -428,6 +452,14 @@ class AzureLLMClient:
         used_api_version = self._get_api_version_for_deployment(
             used_deployment, api_version
         )
+
+        # Check circuit breaker before attempting any network calls
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
 
         # Use structured outputs with OpenAI SDK
         # Check if API version supports structured outputs (2024-08-01-preview or later)
@@ -531,6 +563,8 @@ Prompt:
                         print(
                             f"[LLMService] Received {error_type} error, will retry. Error: {str(e)}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         last_error = str(e)
                         continue
                     else:
@@ -539,6 +573,8 @@ Prompt:
                             print(
                                 f"[LLMService] Max retries reached. Final error: {str(e)}"
                             )
+                        if cb is not None:
+                            await cb.record_failure()
                         raise  # Re-raise to be caught by outer try/except
 
             # Parse the structured result
@@ -552,6 +588,8 @@ Prompt:
             # Build references list
             references = [{"text": ref.text} for ref in result.references]
 
+            if cb is not None:
+                await cb.record_success()
             return {
                 "success": True,
                 "content": result.answer,  # Keep for backward compatibility
@@ -693,6 +731,8 @@ Prompt:
                             print(
                                 f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
                             )
+                            if cb is not None:
+                                await cb.record_failure()
                             last_error = error_msg
                             continue  # Retry
                         else:
@@ -700,6 +740,8 @@ Prompt:
                             print(
                                 f"[LLMService] Max retries reached. Final error: {status_text}"
                             )
+                            if cb is not None:
+                                await cb.record_failure()
                             err = (
                                 raw.get("error") if isinstance(raw, dict) else resp.text
                             )
@@ -707,6 +749,8 @@ Prompt:
 
                     # Non-retryable error or success
                     if not resp.ok:
+                        if cb is not None:
+                            await cb.record_failure()
                         err = raw.get("error") if isinstance(raw, dict) else resp.text
                         return {"success": False, "error": err, "raw": raw}
 
@@ -714,6 +758,8 @@ Prompt:
                     break
 
                 except requests.exceptions.Timeout as e:
+                    if cb is not None:
+                        await cb.record_failure()
                     if attempt < max_retries - 1:
                         print(
                             f"[LLMService] Request timeout, will retry. Error: {str(e)}"
@@ -728,6 +774,8 @@ Prompt:
                         }
 
                 except requests.exceptions.RequestException as e:
+                    if cb is not None:
+                        await cb.record_failure()
                     if attempt < max_retries - 1:
                         print(
                             f"[LLMService] Request exception, will retry. Error: {str(e)}"
@@ -765,6 +813,8 @@ Prompt:
             prompt_tokens = usage.get("prompt_tokens")
             completion_tokens = usage.get("completion_tokens")
 
+            if cb is not None:
+                await cb.record_success()
             return {
                 "success": True,
                 "content": content,

@@ -11,6 +11,7 @@ import json
 import fnmatch
 
 from services.llm.macbook_queue import get_macbook_queue
+from .retry_utils import CircuitBreaker, CircuitOpenError
 
 
 class MacbookLLMClient:
@@ -62,6 +63,9 @@ class MacbookLLMClient:
 
         # Soft failure tracking (no hard circuit breaker to avoid eager aborts)
         self._fail_count: int = 0
+
+        # Circuit breaker injected by LLMService after construction
+        self.circuit_breaker: Optional[CircuitBreaker] = None
 
     def _normalize_model_name(self, model: str) -> str:
         return (model or "").strip().lower()
@@ -267,6 +271,14 @@ class MacbookLLMClient:
         if self.disabled:
             return {"success": False, "error": "Macbook LLM is not configured."}
 
+        # Check circuit breaker before queuing the request
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
+
         url = f"{self.base_url}/api/generate"
         payload = self._build_request_payload(model_id, prompt, temperature, max_tokens)
 
@@ -295,6 +307,8 @@ class MacbookLLMClient:
             except Exception as e:
                 last_error = f"Macbook request failed: {str(e)}"
                 self._fail_count += 1
+                if cb is not None:
+                    await cb.record_failure()
                 print(
                     f"[MacbookLLM] attempt={attempts}/{self.max_attempts} model={model_id} "
                     f"prompt_len={prompt_len} error={last_error}"
@@ -309,9 +323,13 @@ class MacbookLLMClient:
                     except Exception:
                         last_error = "Invalid JSON response from Macbook LLM"
                         self._fail_count += 1
+                        if cb is not None:
+                            await cb.record_failure()
                     else:
                         # Reset breaker on success
                         self._fail_count = 0
+                        if cb is not None:
+                            await cb.record_success()
                         content = (
                             raw.get("response")
                             or raw.get("content")
@@ -356,7 +374,11 @@ class MacbookLLMClient:
                 )
                 if is_retryable:
                     self._fail_count += 1
+                    if cb is not None:
+                        await cb.record_failure()
                 else:
+                    if cb is not None:
+                        await cb.record_failure()
                     return {"success": False, "error": last_error}
 
             # Backoff before retry with jitter; cap total elapsed

@@ -8,6 +8,7 @@ from utils.text_utils import sanitize_text
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
+from .retry_utils import CircuitBreaker, CircuitOpenError
 
 # For service account authentication
 try:
@@ -58,6 +59,9 @@ class LlamaLLMClient:
             or not self.region
             or not self.service_account_path
         )
+
+        # Circuit breaker injected by LLMService after construction
+        self.circuit_breaker: Optional[CircuitBreaker] = None
 
     def _find_service_account_file(self) -> Optional[Path]:
         """Find service account JSON file (same pattern as Gemini)"""
@@ -138,6 +142,14 @@ class LlamaLLMClient:
                 "success": False,
                 "error": "Llama project ID, region, or service account missing.",
             }
+
+        # Check circuit breaker before attempting any network calls
+        cb = self.circuit_breaker
+        if cb is not None:
+            try:
+                cb.check()
+            except CircuitOpenError as e:
+                return {"success": False, "error": str(e)}
 
         # Get access token from service account (with explicit timeout to catch VM firewall hangs)
         try:
@@ -241,6 +253,11 @@ class LlamaLLMClient:
                 # Check if response is empty or not JSON
                 if not resp.content:
                     print(f"[LLMService] Llama returned empty response")
+                    if cb is not None:
+                        await cb.record_failure()
+                    if attempt < max_retries - 1:
+                        last_error = "Empty response from Llama API"
+                        continue
                     return {"success": False, "error": "Empty response from Llama API"}
 
                 print(
@@ -256,6 +273,11 @@ class LlamaLLMClient:
                     print(
                         f"[LLMService] Llama JSON decode error: {je}, Response: {resp.text}"
                     )
+                    if cb is not None:
+                        await cb.record_failure()
+                    if attempt < max_retries - 1:
+                        last_error = f"Invalid JSON response: {resp.text[:200]}"
+                        continue
                     return {
                         "success": False,
                         "error": f"Invalid JSON response: {resp.text[:200]}",
@@ -279,6 +301,8 @@ class LlamaLLMClient:
                         print(
                             f"[LLMService] Received {status_text}, will retry. Error: {error_msg}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         last_error = error_msg
                         continue  # Retry
                     else:
@@ -286,6 +310,8 @@ class LlamaLLMClient:
                         print(
                             f"[LLMService] Max retries reached. Final error: {status_text}"
                         )
+                        if cb is not None:
+                            await cb.record_failure()
                         return {
                             "success": False,
                             "error": f"{status_text}: {error_msg}",
@@ -294,6 +320,8 @@ class LlamaLLMClient:
 
                 # Non-retryable error or success
                 if not resp.ok:
+                    if cb is not None:
+                        await cb.record_failure()
                     err = raw.get("error") if isinstance(raw, dict) else resp.text
                     print(f"[LLMService] Llama Error response: {raw}")
                     return {"success": False, "error": err, "raw": raw}
@@ -302,6 +330,8 @@ class LlamaLLMClient:
                 break
 
             except requests.exceptions.Timeout as e:
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(f"[LLMService] Request timeout, will retry. Error: {str(e)}")
                     last_error = str(e)
@@ -317,6 +347,8 @@ class LlamaLLMClient:
                 print(
                     f"[LLMService] RequestException type={type(e).__name__}: {str(e)}"
                 )
+                if cb is not None:
+                    await cb.record_failure()
                 if attempt < max_retries - 1:
                     print(
                         f"[LLMService] Request exception, will retry. Error: {str(e)}"
@@ -353,7 +385,9 @@ class LlamaLLMClient:
             return {"success": False, "error": f"Unexpected response format: {raw}"}
 
         _usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
-        result = {
+        if cb is not None:
+            await cb.record_success()
+        return {
             "success": True,
             "content": content,
             "raw": raw,
@@ -365,8 +399,6 @@ class LlamaLLMClient:
                 "completion_tokens": _usage.get("completion_tokens"),
             },
         }
-
-        return result
 
     async def extract_entities_with_llama(
         self,
