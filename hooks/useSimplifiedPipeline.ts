@@ -11,6 +11,7 @@ import {
   downloadFile,
   EntityExportOptions,
 } from "../components/ExportUtils";
+import { generateExecutiveSummary } from "../utils/executiveSummaryExport";
 import { DocumentData } from "../App";
 
 export type FileStage =
@@ -320,7 +321,42 @@ export function useSimplifiedPipeline() {
     []
   );
 
-  return { state, results, run, reset, downloadResults, downloadSingleResult };
+  const downloadExecutiveResults = useCallback(async () => {
+    for (const result of results) {
+      const blob = await generateExecutiveSummary(result.docData);
+      const baseName = result.fileName.replace(/\.pdf$/i, "");
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      downloadFile(
+        blob,
+        `${baseName}_Summary_${timestamp}.docx`,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      );
+      // Small delay between downloads to prevent browser blocking
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }, [results]);
+
+  const downloadSingleExecutiveResult = useCallback(async (result: FileResult) => {
+    const blob = await generateExecutiveSummary(result.docData);
+    const baseName = result.fileName.replace(/\.pdf$/i, "");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadFile(
+      blob,
+      `${baseName}_Summary_${timestamp}.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+  }, []);
+
+  return {
+    state,
+    results,
+    run,
+    reset,
+    downloadResults,
+    downloadSingleResult,
+    downloadExecutiveResults,
+    downloadSingleExecutiveResult,
+  };
 }
 
 // ── Helper functions ──

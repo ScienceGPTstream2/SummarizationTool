@@ -164,8 +164,16 @@ export function SimplifiedFlowPage({
       ? getStudyTypeDisplayName(selectedTemplateId)
       : "";
 
-  const { state, results, run, reset, downloadResults, downloadSingleResult } =
-    useSimplifiedPipeline();
+  const {
+    state,
+    results,
+    run,
+    reset,
+    downloadResults,
+    downloadSingleResult,
+    downloadExecutiveResults,
+    downloadSingleExecutiveResult,
+  } = useSimplifiedPipeline();
   const [expandedResultIndex, setExpandedResultIndex] = useState<number | null>(
     null
   );
@@ -769,7 +777,16 @@ export function SimplifiedFlowPage({
                             </div>
 
                             {/* Per-file download */}
-                            <div className="flex justify-end pt-1">
+                            <div className="flex justify-end gap-3 pt-1">
+                              <Button
+                                onClick={() =>
+                                  downloadSingleExecutiveResult(result)
+                                }
+                                className="text-sm"
+                              >
+                                <Download className="h-4 w-4 mr-1.5" />
+                                Download Report
+                              </Button>
                               <Button
                                 variant="outline"
                                 onClick={() =>
@@ -781,7 +798,7 @@ export function SimplifiedFlowPage({
                                 className="text-sm"
                               >
                                 <Download className="h-4 w-4 mr-1.5" />
-                                Download Report
+                                Download Detailed Report
                               </Button>
                             </div>
                           </div>
@@ -822,20 +839,31 @@ export function SimplifiedFlowPage({
 
             {/* Actions */}
             <motion.div
-              className="flex justify-center gap-4"
+              className="flex justify-center gap-4 flex-wrap"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 + results.length * 0.08 }}
             >
               <Button
                 size="lg"
-                onClick={() => downloadResults(includeEntitiesInDoc)}
+                onClick={() => downloadExecutiveResults()}
                 className="px-10 py-3 text-lg h-auto"
               >
                 <Download className="h-5 w-5 mr-2.5" />
                 {results.length === 1
                   ? "Download Report"
                   : `Download All ${results.length} Reports`}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => downloadResults(includeEntitiesInDoc)}
+                className="px-10 py-3 text-lg h-auto"
+              >
+                <Download className="h-5 w-5 mr-2.5" />
+                {results.length === 1
+                  ? "Download Detailed Report"
+                  : `Download All ${results.length} Detailed Reports`}
               </Button>
               <Button
                 size="lg"
