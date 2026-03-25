@@ -16,6 +16,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 const analysisCache = new Map<string, any>();
+const analysisLoadingPromiseCache = new Map<string, Promise<any>>();
 // Cache for resolved PDF documents (not promises) - shared across all instances
 // Export so EntityExtractionPage can pre-populate it
 export const pdfDocumentCache = new Map<string, any>();
@@ -37,15 +38,16 @@ const processLoadQueue = () => {
   }
 };
 
-const queueLoad = (loadFn: () => Promise<void>): Promise<void> => {
-  return new Promise((resolve) => {
+const queueLoad = <T,>(loadFn: () => Promise<T>): Promise<T> => {
+  return new Promise((resolve, reject) => {
     const wrappedLoad = async () => {
       try {
-        await loadFn();
+        resolve(await loadFn());
+      } catch (error) {
+        reject(error);
       } finally {
         activeLoads--;
         processLoadQueue();
-        resolve();
       }
     };
 
@@ -57,6 +59,149 @@ const queueLoad = (loadFn: () => Promise<void>): Promise<void> => {
     }
   });
 };
+
+const DEFAULT_PDF_LOAD_TIMEOUT_MS = 45000;
+const DEFAULT_ANALYSIS_LOAD_TIMEOUT_MS = 15000;
+const FIT_TO_WIDTH_EPSILON = 0.001;
+
+const waitForTimedPromise = async <T,>(
+  loadingTaskPromise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+) => {
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+  );
+
+  return Promise.race([loadingTaskPromise, timeoutPromise]) as Promise<T>;
+};
+
+const waitForPdfPromise = async (
+  loadingTaskPromise: Promise<any>,
+  timeoutMs: number
+) => {
+  return waitForTimedPromise(
+    loadingTaskPromise,
+    timeoutMs,
+    "PDF loading timed out"
+  );
+};
+
+export async function loadPdfDocument(
+  fileId: string,
+  options: {
+    onProgress?: (progressData: { loaded: number; total: number }) => void;
+    timeoutMs?: number;
+  } = {}
+) {
+  const { onProgress, timeoutMs = DEFAULT_PDF_LOAD_TIMEOUT_MS } = options;
+
+  const cachedDoc = pdfDocumentCache.get(fileId);
+  if (cachedDoc) {
+    return cachedDoc;
+  }
+
+  const existingPromise = pdfLoadingPromiseCache.get(fileId);
+  if (existingPromise) {
+    return waitForPdfPromise(existingPromise, timeoutMs);
+  }
+
+  return queueLoad(async () => {
+    const recheck = pdfDocumentCache.get(fileId);
+    if (recheck) {
+      return recheck;
+    }
+
+    const queuedPromise = pdfLoadingPromiseCache.get(fileId);
+    if (queuedPromise) {
+      return waitForPdfPromise(queuedPromise, timeoutMs);
+    }
+
+    const token = await getValidToken();
+    const loadingTask = pdfjsLib.getDocument({
+      url: `/api/files/${fileId}`,
+      httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
+      disableAutoFetch: false,
+      disableStream: false,
+      rangeChunkSize: 65536,
+    });
+
+    if (onProgress) {
+      loadingTask.onProgress = onProgress;
+    }
+
+    const loadingTaskPromise = loadingTask.promise;
+    pdfLoadingPromiseCache.set(fileId, loadingTaskPromise);
+
+    try {
+      const pdf = await waitForPdfPromise(loadingTaskPromise, timeoutMs);
+      pdfDocumentCache.set(fileId, pdf);
+      return pdf;
+    } catch (error) {
+      pdfDocumentCache.delete(fileId);
+      throw error;
+    } finally {
+      pdfLoadingPromiseCache.delete(fileId);
+    }
+  });
+}
+
+export async function loadDocumentAnalysis(
+  conversionId: string,
+  options: {
+    timeoutMs?: number;
+  } = {}
+) {
+  const { timeoutMs = DEFAULT_ANALYSIS_LOAD_TIMEOUT_MS } = options;
+
+  const cachedAnalysis = analysisCache.get(conversionId);
+  if (cachedAnalysis) {
+    return cachedAnalysis;
+  }
+
+  const existingPromise = analysisLoadingPromiseCache.get(conversionId);
+  if (existingPromise) {
+    return waitForTimedPromise(
+      existingPromise,
+      timeoutMs,
+      "Analysis loading timed out"
+    );
+  }
+
+  const loadingPromise = (async () => {
+    const token = await getValidToken();
+    const response = await fetch(`/api/documents/${conversionId}/analysis`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const error: Error & { status?: number } = new Error(
+        `Analysis request failed: ${response.status}`
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    const data = await response.json();
+    analysisCache.set(conversionId, data.analysis_result);
+    return data.analysis_result;
+  })();
+
+  analysisLoadingPromiseCache.set(conversionId, loadingPromise);
+
+  try {
+    return await waitForTimedPromise(
+      loadingPromise,
+      timeoutMs,
+      "Analysis loading timed out"
+    );
+  } catch (error) {
+    analysisCache.delete(conversionId);
+    throw error;
+  } finally {
+    analysisLoadingPromiseCache.delete(conversionId);
+  }
+}
 
 interface Reference {
   text: string;
@@ -72,14 +217,28 @@ interface Reference {
     figure_id?: string;
     has_figure_reference?: boolean;
   };
+  paragraph_matches?: Array<{
+    page_number?: number | string;
+    bounding_regions?: Array<{
+      page_number?: number | string;
+      pageNumber?: number | string;
+      polygon?: number[];
+    }>;
+  }>;
+  line_matches?: Array<{
+    page_number?: number | string;
+    polygon?: number[];
+  }>;
 }
 
 interface EntityPDFViewerBetaProps {
   fileId: string;
   conversionId: string | null;
+  processorUsed?: string;
   references: Reference[];
   onPageChange?: (page: number) => void;
   focusedReferenceIndex?: number | null;
+  focusedReferenceTrigger?: number;
   figures?: Array<{
     id: string;
     page: number | null;
@@ -94,9 +253,11 @@ interface EntityPDFViewerBetaProps {
 function EntityPDFViewerBetaComponent({
   fileId,
   conversionId,
+  processorUsed,
   references,
   onPageChange,
   focusedReferenceIndex,
+  focusedReferenceTrigger = 0,
   figures,
 }: EntityPDFViewerBetaProps) {
   const [currentPage, setCurrentPage] = useState(1);
@@ -108,22 +269,170 @@ function EntityPDFViewerBetaComponent({
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pdfDocument, setPdfDocument] = useState<any>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const navigateToPageRef = useRef<((page: number) => void) | null>(null);
+  const initialReferenceNavigationKeyRef = useRef<string | null>(null);
+  const handledFocusedReferenceKeyRef = useRef<string | null>(null);
   const [pendingFocusRefIdx, setPendingFocusRefIdx] = useState<number | null>(
     null
   );
+  const [renderedPageMetrics, setRenderedPageMetrics] = useState<{
+    pageNumber: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    devicePixelRatio: number;
+    renderScale: number;
+  } | null>(null);
 
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const scrollStartRef = useRef({ left: 0, top: 0 });
+  const fitWidthRafRef = useRef<number | null>(null);
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
-  const [isVisible, setIsVisible] = useState(false);
-  const viewerContainerRef = useRef<HTMLDivElement>(null);
 
   const canPan = zoomRatio > 1.02;
+
+  const normalizePageNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const normalizePolygon = (polygon?: number[] | null): number[] | null => {
+    if (!Array.isArray(polygon) || polygon.length < 8) return null;
+    const normalized = polygon
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    return normalized.length >= 8 ? normalized : null;
+  };
+
+  const normalizeTextForMatch = (value?: string | null): string =>
+    (value || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  const getTextMatchScore = (referenceText: string, candidateText: string) => {
+    if (!referenceText || !candidateText) return 0;
+    if (referenceText === candidateText) return 1;
+    if (candidateText.includes(referenceText)) {
+      return Math.min(0.98, referenceText.length / candidateText.length + 0.25);
+    }
+    if (referenceText.includes(candidateText)) {
+      return Math.min(0.9, candidateText.length / referenceText.length);
+    }
+
+    const referenceTokens = new Set(
+      referenceText.split(/[^a-z0-9]+/).filter((token) => token.length > 2)
+    );
+    const candidateTokens = new Set(
+      candidateText.split(/[^a-z0-9]+/).filter((token) => token.length > 2)
+    );
+
+    if (referenceTokens.size === 0 || candidateTokens.size === 0) return 0;
+
+    let overlap = 0;
+    referenceTokens.forEach((token) => {
+      if (candidateTokens.has(token)) overlap++;
+    });
+
+    return overlap / Math.max(referenceTokens.size, candidateTokens.size);
+  };
+
+  const getFallbackReferenceMatch = (
+    ref: Reference
+  ): { pageNumber: number | null; polygon: number[] | null } | null => {
+    if (!analysisResult) return null;
+
+    const referenceText = normalizeTextForMatch(ref.text);
+    if (!referenceText) return null;
+
+    let bestMatch: {
+      pageNumber: number | null;
+      polygon: number[] | null;
+    } | null = null;
+    let bestScore = 0;
+
+    analysisResult?.paragraphs?.forEach((paragraph: any) => {
+      const polygon = normalizePolygon(
+        paragraph?.bounding_regions?.[0]?.polygon || null
+      );
+      if (!polygon) return;
+
+      const score = getTextMatchScore(
+        referenceText,
+        normalizeTextForMatch(paragraph?.content)
+      );
+      if (score <= bestScore) return;
+
+      bestScore = score;
+      bestMatch = {
+        pageNumber: normalizePageNumber(
+          paragraph?.bounding_regions?.[0]?.page_number
+        ),
+        polygon,
+      };
+    });
+
+    analysisResult?.pages?.forEach((page: any) => {
+      page?.lines?.forEach((line: any) => {
+        const polygon = normalizePolygon(line?.polygon || null);
+        if (!polygon) return;
+
+        const score = getTextMatchScore(
+          referenceText,
+          normalizeTextForMatch(line?.content)
+        );
+        if (score <= bestScore) return;
+
+        bestScore = score;
+        bestMatch = {
+          pageNumber: normalizePageNumber(
+            line?.page_number || page?.page_number
+          ),
+          polygon,
+        };
+      });
+    });
+
+    return bestScore >= 0.35 ? bestMatch : null;
+  };
+
+  const getReferencePageNumber = (ref: Reference): number | null => {
+    const bestMatchPage = normalizePageNumber(
+      ref.best_match?.page_number ||
+        ref.best_match?.bounding_regions?.[0]?.page_number
+    );
+    if (bestMatchPage) return bestMatchPage;
+
+    const paragraphRegion = ref.paragraph_matches?.[0]?.bounding_regions?.[0];
+    const paragraphPage = normalizePageNumber(
+      paragraphRegion?.page_number || paragraphRegion?.pageNumber
+    );
+    if (paragraphPage) return paragraphPage;
+
+    const linePage = normalizePageNumber(ref.line_matches?.[0]?.page_number);
+    if (linePage) return linePage;
+
+    return getFallbackReferenceMatch(ref)?.pageNumber ?? null;
+  };
+
+  const getReferencePolygon = (ref: Reference): number[] | null => {
+    const bestMatchPolygon = normalizePolygon(
+      ref.best_match?.bounding_regions?.[0]?.polygon || ref.best_match?.polygon
+    );
+    if (bestMatchPolygon) return bestMatchPolygon;
+
+    const paragraphPolygon = normalizePolygon(
+      ref.paragraph_matches?.[0]?.bounding_regions?.[0]?.polygon
+    );
+    if (paragraphPolygon) return paragraphPolygon;
+
+    const linePolygon = normalizePolygon(ref.line_matches?.[0]?.polygon);
+    if (linePolygon) return linePolygon;
+
+    return getFallbackReferenceMatch(ref)?.polygon ?? null;
+  };
 
   const clampZoomRatio = (value: number) => Math.min(3, Math.max(0.5, value));
 
@@ -136,27 +445,51 @@ function EntityPDFViewerBetaComponent({
   // Extract unique page numbers from references
   const referencePages = new Set<number>();
   references.forEach((ref) => {
-    if (ref.best_match) {
-      const pageNum =
-        ref.best_match.page_number ||
-        ref.best_match.bounding_regions?.[0]?.page_number;
-      if (pageNum) {
-        referencePages.add(pageNum);
-      }
+    const pageNum = getReferencePageNumber(ref);
+    if (pageNum) {
+      referencePages.add(pageNum);
     }
   });
   const pagesArray = Array.from(referencePages).sort((a, b) => a - b);
+  const firstReferencePage = pagesArray.length > 0 ? pagesArray[0] : null;
+  // Include a fingerprint of reference page numbers so the key changes when
+  // different references happen to have the same count/first-page but point to
+  // different pages (e.g. switching between two files with 3 refs each).
+  const refPagesFingerprint = pagesArray.join(",");
+  const initialReferenceNavigationKey = `${fileId}:${conversionId ?? ""}:${
+    firstReferencePage ?? "none"
+  }:${references.length}:${refPagesFingerprint}`;
 
-  // Set initial page to first reference page if references exist, otherwise stay on page 1
+  // Only auto-jump to the first reference page once per viewer dataset.
   useEffect(() => {
-    if (pagesArray.length > 0 && currentPage === 1 && pdfDocument) {
-      const firstPage = pagesArray[0];
-      setCurrentPage(firstPage);
-      if (onPageChange) {
-        onPageChange(firstPage);
-      }
+    if (
+      !pdfDocument ||
+      firstReferencePage === null ||
+      initialReferenceNavigationKeyRef.current === initialReferenceNavigationKey
+    ) {
+      return;
     }
-  }, [pagesArray.length, pdfDocument]);
+
+    initialReferenceNavigationKeyRef.current = initialReferenceNavigationKey;
+
+    // Guard against navigating to a page that doesn't exist in this PDF.
+    // totalPages may still be 0 while the document is initializing — in that
+    // case allow the navigation (the page-render effect will clamp it).
+    const targetPage =
+      totalPages > 0
+        ? Math.min(firstReferencePage, totalPages)
+        : firstReferencePage;
+    setCurrentPage(targetPage);
+    if (onPageChange) {
+      onPageChange(targetPage);
+    }
+  }, [
+    pdfDocument,
+    firstReferencePage,
+    initialReferenceNavigationKey,
+    onPageChange,
+    totalPages,
+  ]);
 
   // Expose method to navigate to a specific page
   const navigateToPage = useCallback(
@@ -181,14 +514,16 @@ function EntityPDFViewerBetaComponent({
   }, [navigateToPage]);
 
   const scrollReferenceIntoView = useCallback(
-    (refIdx: number) => {
-      const canvas = canvasRef.current;
+    (refIdx: number, pageNumber?: number) => {
+      const canvas = overlayCanvasRef.current || canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) return false;
 
       const boundingBoxes = (canvas as any).boundingBoxes || [];
       const target = boundingBoxes.find(
-        (bbox: any) => bbox.refIdx === refIdx && bbox.pageNumber === currentPage
+        (bbox: any) =>
+          bbox.refIdx === refIdx &&
+          (pageNumber === undefined || bbox.pageNumber === pageNumber)
       );
 
       if (!target) return false;
@@ -204,7 +539,7 @@ function EntityPDFViewerBetaComponent({
 
       return true;
     },
-    [currentPage]
+    []
   );
 
   useEffect(() => {
@@ -213,13 +548,21 @@ function EntityPDFViewerBetaComponent({
       focusedReferenceIndex === undefined ||
       !references[focusedReferenceIndex]
     ) {
+      handledFocusedReferenceKeyRef.current = null;
       return;
     }
 
     const ref = references[focusedReferenceIndex];
-    const targetPage =
-      ref.best_match?.page_number ||
-      ref.best_match?.bounding_regions?.[0]?.page_number;
+    const targetPage = getReferencePageNumber(ref);
+    const focusKey = `${focusedReferenceTrigger}:${focusedReferenceIndex}:${
+      targetPage ?? "none"
+    }`;
+
+    if (handledFocusedReferenceKeyRef.current === focusKey) {
+      return;
+    }
+
+    handledFocusedReferenceKeyRef.current = focusKey;
 
     setPendingFocusRefIdx(focusedReferenceIndex);
 
@@ -228,7 +571,10 @@ function EntityPDFViewerBetaComponent({
     } else {
       // Already on the right page, try to center immediately
       requestAnimationFrame(() => {
-        const success = scrollReferenceIntoView(focusedReferenceIndex);
+        const success = scrollReferenceIntoView(
+          focusedReferenceIndex,
+          targetPage || currentPage
+        );
         if (success) {
           setPendingFocusRefIdx(null);
         }
@@ -236,15 +582,17 @@ function EntityPDFViewerBetaComponent({
     }
   }, [
     focusedReferenceIndex,
+    focusedReferenceTrigger,
     references,
     navigateToPage,
     scrollReferenceIntoView,
+    currentPage,
   ]);
 
   useEffect(() => {
     if (pendingFocusRefIdx === null) return;
 
-    const success = scrollReferenceIntoView(pendingFocusRefIdx);
+    const success = scrollReferenceIntoView(pendingFocusRefIdx, currentPage);
     if (success) {
       setPendingFocusRefIdx(null);
     }
@@ -255,76 +603,101 @@ function EntityPDFViewerBetaComponent({
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
-  // Intersection Observer for lazy loading
-  useEffect(() => {
-    if (!viewerContainerRef.current) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setIsVisible(true);
-            // Once visible, we can stop observing
-            observer.disconnect();
-          }
-        });
-      },
-      {
-        rootMargin: "100px", // Start loading slightly before visible
-        threshold: 0.01,
-      }
-    );
-
-    observer.observe(viewerContainerRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
   // Fetch analysis result for coordinate system
   useEffect(() => {
-    const fetchAnalysis = async () => {
-      if (!conversionId) return;
+    let isCancelled = false;
+    const retryTimeouts: ReturnType<typeof setTimeout>[] = [];
 
-      if (analysisCache.has(conversionId)) {
-        setAnalysisResult(analysisCache.get(conversionId));
-        return;
-      }
+    if (!conversionId) {
+      setAnalysisResult(null);
+      return;
+    }
 
+    const cachedAnalysis = analysisCache.get(conversionId);
+    if (cachedAnalysis) {
+      setAnalysisResult(cachedAnalysis);
+    } else {
+      setAnalysisResult(null);
+    }
+
+    const fetchAnalysis = async (retryCount = 0) => {
       try {
-        const token = await getValidToken();
-        const response = await fetch(
-          `/api/documents/${conversionId}/analysis`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          analysisCache.set(conversionId, data.analysis_result);
-          setAnalysisResult(data.analysis_result);
+        const data = await loadDocumentAnalysis(conversionId, {
+          timeoutMs: DEFAULT_ANALYSIS_LOAD_TIMEOUT_MS,
+        });
+        if (isCancelled) return;
+        setAnalysisResult(data);
+      } catch (err: any) {
+        if (err?.status === 404 && retryCount < 4) {
+          const timeout = setTimeout(
+            () => {
+              if (!isCancelled) {
+                fetchAnalysis(retryCount + 1);
+              }
+            },
+            (retryCount + 1) * 1000
+          );
+          retryTimeouts.push(timeout);
+          return;
         }
-      } catch (err) {
         console.error("Error fetching analysis:", err);
       }
     };
 
     fetchAnalysis();
+
+    return () => {
+      isCancelled = true;
+      retryTimeouts.forEach((timeout) => clearTimeout(timeout));
+    };
   }, [conversionId]);
 
   useEffect(() => {
     setScale(fitToWidthScale * zoomRatio);
   }, [fitToWidthScale, zoomRatio]);
 
-  // Load and render PDF (only when visible)
   useEffect(() => {
-    if (!fileId || !isVisible) {
+    return () => {
+      if (fitWidthRafRef.current !== null) {
+        cancelAnimationFrame(fitWidthRafRef.current);
+      }
+    };
+  }, []);
+
+  // Force a clean canvas/viewer reset whenever the displayed document changes.
+  useEffect(() => {
+    initialReferenceNavigationKeyRef.current = null;
+    handledFocusedReferenceKeyRef.current = null;
+    setPendingFocusRefIdx(null);
+    setCurrentPage(1);
+    setTotalPages(0);
+    setRenderedPageMetrics(null);
+    setFitToWidthScale(1);
+    setZoomRatio(1);
+    setScale(1);
+
+    [canvasRef.current, overlayCanvasRef.current].forEach((canvas) => {
+      if (!canvas) return;
+      const context = canvas.getContext("2d");
+      context?.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = 0;
+      canvas.height = 0;
+      canvas.style.width = "0px";
+      canvas.style.height = "0px";
+      (canvas as any).boundingBoxes = [];
+    });
+
+    if (containerRef.current) {
+      containerRef.current.scrollLeft = 0;
+      containerRef.current.scrollTop = 0;
+    }
+  }, [fileId, conversionId]);
+
+  // Load the PDF document immediately
+  useEffect(() => {
+    if (!fileId) {
       if (!fileId) {
         console.log("[EntityPDFViewerBeta] No fileId, waiting...");
-      } else if (!isVisible) {
-        console.log("[EntityPDFViewerBeta] Not visible yet, deferring load...");
       }
       return;
     }
@@ -333,125 +706,73 @@ function EntityPDFViewerBetaComponent({
 
     const loadPDF = async () => {
       try {
-        // Check if we already have the resolved document in cache
-        const cachedDoc = pdfDocumentCache.get(fileId);
-        if (cachedDoc) {
-          console.log("[EntityPDFViewerBeta] Using cached PDF document");
-          if (!isCancelled) {
-            setPdfDocument(cachedDoc);
-            setTotalPages(cachedDoc.numPages);
-            setLoading(false);
+        setError(null);
+        setLoading(true);
+        setLoadingProgress(0);
+        setPdfDocument(null);
+        setTotalPages(0);
+        setRenderedPageMetrics(null);
 
-            // Calculate fit-to-width scale for first page
-            if (containerRef.current) {
-              try {
-                const page = await cachedDoc.getPage(1);
-                if (isCancelled) return;
-
-                const viewport = page.getViewport({ scale: 1.0 });
-                const containerWidth = containerRef.current.clientWidth - 48;
-                const calculatedScale = containerWidth / viewport.width;
-                setFitToWidthScale(calculatedScale);
-                setZoomRatio(1);
-              } catch (e) {
-                console.error("Error calculating fit-to-width:", e);
-              }
-            }
-          }
-          return;
-        }
-
-        // If not in cache, queue the load to prevent thundering herd
-        await queueLoad(async () => {
-          // Double check cache in case another instance loaded it while we were queued
-          const recheck = pdfDocumentCache.get(fileId);
-          if (recheck) {
-            if (!isCancelled) {
-              setPdfDocument(recheck);
-              setTotalPages(recheck.numPages);
-              setLoading(false);
-            }
-            return;
-          }
-
-          setLoading(true);
-          console.log("[EntityPDFViewerBeta] Loading PDF document...");
-
-          // Check if there's already a loading promise
-          let loadingTaskPromise = pdfLoadingPromiseCache.get(fileId);
-
-          if (!loadingTaskPromise) {
-            const token = await getValidToken();
-            const loadingTask = pdfjsLib.getDocument({
-              url: `/api/files/${fileId}`,
-              httpHeaders: { Authorization: `Bearer ${token}` },
-              disableAutoFetch: false,
-              disableStream: false,
-              rangeChunkSize: 65536, // 64KB chunks for faster initial render
-            });
-
-            loadingTask.onProgress = (progressData: {
-              loaded: number;
-              total: number;
-            }) => {
-              if (progressData.total > 0) {
+        const loadWithRetry = async (attempt = 0): Promise<any> => {
+          try {
+            return await loadPdfDocument(fileId, {
+              timeoutMs: DEFAULT_PDF_LOAD_TIMEOUT_MS,
+              onProgress: (progressData) => {
+                if (isCancelled || progressData.total <= 0) return;
                 const percent = Math.round(
                   (progressData.loaded / progressData.total) * 100
                 );
                 setLoadingProgress(percent);
-              }
-            };
-
-            loadingTaskPromise = loadingTask.promise;
-            pdfLoadingPromiseCache.set(fileId, loadingTaskPromise);
-          }
-
-          // Add a timeout to prevent infinite loading
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("PDF loading timed out")), 15000)
-          );
-
-          // Race between loading and timeout
-          const pdf = (await Promise.race([
-            loadingTaskPromise,
-            timeoutPromise,
-          ])) as any;
-
-          if (isCancelled) return;
-
-          console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
-
-          // Cache the resolved document
-          pdfDocumentCache.set(fileId, pdf);
-          // Clean up the promise cache
-          pdfLoadingPromiseCache.delete(fileId);
-
-          setPdfDocument(pdf);
-          setTotalPages(pdf.numPages);
-
-          // Calculate fit-to-width scale for first page
-          if (containerRef.current) {
-            try {
-              const page = await pdf.getPage(1);
-              if (isCancelled) return;
-
-              const viewport = page.getViewport({ scale: 1.0 });
-              const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
-              const calculatedScale = containerWidth / viewport.width;
-              setFitToWidthScale(calculatedScale);
-              setZoomRatio(1); // fit-to-width baseline
-              console.log(
-                "[EntityPDFViewerBeta] Fit-to-width scale:",
-                calculatedScale
-              );
-            } catch (e) {
-              console.error("Error calculating fit-to-width:", e);
-              // Non-fatal error, continue
+              },
+            });
+          } catch (error) {
+            if (attempt < 1 && !isCancelled) {
+              pdfDocumentCache.delete(fileId);
+              pdfLoadingPromiseCache.delete(fileId);
+              return loadWithRetry(attempt + 1);
             }
+            throw error;
           }
+        };
 
-          setLoading(false);
-        });
+        console.log("[EntityPDFViewerBeta] Loading PDF document...");
+        const pdf = await loadWithRetry();
+
+        if (isCancelled) return;
+
+        console.log("[EntityPDFViewerBeta] PDF loaded, pages:", pdf.numPages);
+
+        setPdfDocument(pdf);
+        setTotalPages(pdf.numPages);
+
+        // Calculate fit-to-width scale for first page
+        if (containerRef.current) {
+          try {
+            const page = await pdf.getPage(1);
+            if (isCancelled) return;
+
+            const viewport = page.getViewport({ scale: 1.0 });
+            const containerWidth =
+              containerRef.current.getBoundingClientRect().width - 48;
+            const calculatedScale = containerWidth / viewport.width;
+            setFitToWidthScale((prev) =>
+              Math.abs(prev - calculatedScale) > FIT_TO_WIDTH_EPSILON
+                ? calculatedScale
+                : prev
+            );
+            setZoomRatio(1); // fit-to-width baseline
+            console.log(
+              "[EntityPDFViewerBeta] Fit-to-width scale:",
+              calculatedScale
+            );
+          } catch (e) {
+            console.error("Error calculating fit-to-width:", e);
+            // Non-fatal error, continue
+          }
+        }
+
+        setLoadingProgress(100);
+        setLoading(false);
       } catch (err: any) {
         if (isCancelled) return;
         console.error("[EntityPDFViewerBeta] Error loading PDF:", err);
@@ -469,7 +790,7 @@ function EntityPDFViewerBetaComponent({
       isCancelled = true;
       // Note: We don't cleanup the pdfDocument here as it's shared across instances
     };
-  }, [fileId, isVisible]);
+  }, [fileId]);
 
   // Update fit-to-width scale when page changes or container resizes
   useEffect(() => {
@@ -479,9 +800,14 @@ function EntityPDFViewerBetaComponent({
       try {
         const page = await pdfDocument.getPage(currentPage);
         const viewport = page.getViewport({ scale: 1.0 });
-        const containerWidth = containerRef.current.clientWidth - 48; // Account for padding (32px) + buffer
+        const containerWidth =
+          containerRef.current.getBoundingClientRect().width - 48;
         const calculatedScale = containerWidth / viewport.width;
-        setFitToWidthScale(calculatedScale);
+        setFitToWidthScale((prev) =>
+          Math.abs(prev - calculatedScale) > FIT_TO_WIDTH_EPSILON
+            ? calculatedScale
+            : prev
+        );
       } catch (err) {
         console.error("Error calculating fit-to-width:", err);
       }
@@ -489,11 +815,15 @@ function EntityPDFViewerBetaComponent({
 
     updateFitToWidth();
 
-    updateFitToWidth();
-
     // Use ResizeObserver for more robust container resizing detection
     const resizeObserver = new ResizeObserver(() => {
-      updateFitToWidth();
+      if (fitWidthRafRef.current !== null) {
+        cancelAnimationFrame(fitWidthRafRef.current);
+      }
+      fitWidthRafRef.current = requestAnimationFrame(() => {
+        fitWidthRafRef.current = null;
+        updateFitToWidth();
+      });
     });
 
     if (containerRef.current) {
@@ -501,14 +831,29 @@ function EntityPDFViewerBetaComponent({
     }
 
     return () => {
+      if (fitWidthRafRef.current !== null) {
+        cancelAnimationFrame(fitWidthRafRef.current);
+        fitWidthRafRef.current = null;
+      }
       resizeObserver.disconnect();
     };
   }, [pdfDocument, currentPage]);
 
-  // Render current page with bounding boxes
+  // Render the current PDF page on the base canvas
   useEffect(() => {
     let renderTask: any = null;
     let isCancelled = false;
+    setRenderedPageMetrics(null);
+    if (overlayCanvasRef.current) {
+      const overlayContext = overlayCanvasRef.current.getContext("2d");
+      overlayContext?.clearRect(
+        0,
+        0,
+        overlayCanvasRef.current.width,
+        overlayCanvasRef.current.height
+      );
+      (overlayCanvasRef.current as any).boundingBoxes = [];
+    }
 
     const renderPage = async () => {
       if (!pdfDocument || !canvasRef.current) return;
@@ -563,32 +908,24 @@ function EntityPDFViewerBetaComponent({
 
         renderTask = page.render(renderContext);
         await renderTask.promise;
+        if (isCancelled) return;
 
-        // Draw bounding boxes AFTER PDF is fully rendered (only if enabled)
-        // Small delay ensures canvas is ready
-        if (showBoundingBoxes && !isCancelled) {
-          requestAnimationFrame(() => {
-            if (!isCancelled) {
-              drawReferenceBoundingBoxes(
-                context,
-                currentPage,
-                viewport.height,
-                devicePixelRatio
-              );
-
-              // Try to scroll to pending reference now that boxes are drawn
-              if (pendingFocusRefIdx !== null) {
-                const success = scrollReferenceIntoView(pendingFocusRefIdx);
-                if (success) {
-                  setPendingFocusRefIdx(null);
-                }
-              }
-            }
-          });
-        }
+        setRenderedPageMetrics({
+          pageNumber: currentPage,
+          viewportWidth: viewport.width,
+          viewportHeight: viewport.height,
+          devicePixelRatio,
+          renderScale: scale,
+        });
       } catch (err: any) {
         if (err?.name !== "RenderingCancelledException" && !isCancelled) {
           console.error("Error rendering page:", err);
+          // If the page doesn't exist (e.g. stale currentPage from a previous
+          // file's references), fall back to page 1 so the viewer isn't stuck
+          // with a permanently null renderedPageMetrics.
+          if (currentPage > 1 && totalPages > 0 && currentPage > totalPages) {
+            setCurrentPage(1);
+          }
         }
       }
     };
@@ -601,31 +938,74 @@ function EntityPDFViewerBetaComponent({
         renderTask.cancel();
       }
     };
+  }, [pdfDocument, currentPage, scale, totalPages]);
+
+  // Draw the interactive bounding-box overlay above the rendered PDF
+  useEffect(() => {
+    const overlayCanvas = overlayCanvasRef.current;
+    const pdfCanvas = canvasRef.current;
+    if (!overlayCanvas || !pdfCanvas || !renderedPageMetrics) return;
+
+    overlayCanvas.style.width = `${renderedPageMetrics.viewportWidth}px`;
+    overlayCanvas.style.height = `${renderedPageMetrics.viewportHeight}px`;
+    overlayCanvas.width =
+      renderedPageMetrics.viewportWidth * renderedPageMetrics.devicePixelRatio;
+    overlayCanvas.height =
+      renderedPageMetrics.viewportHeight * renderedPageMetrics.devicePixelRatio;
+
+    const overlayContext = overlayCanvas.getContext("2d");
+    if (!overlayContext) return;
+
+    overlayContext.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    if (showBoundingBoxes) {
+      drawReferenceBoundingBoxes(
+        overlayContext,
+        currentPage,
+        renderedPageMetrics.viewportHeight,
+        renderedPageMetrics.devicePixelRatio,
+        renderedPageMetrics.renderScale
+      );
+    } else {
+      (overlayCanvas as any).boundingBoxes = [];
+    }
+
+    if (pendingFocusRefIdx !== null) {
+      const success = scrollReferenceIntoView(pendingFocusRefIdx);
+      if (success) {
+        setPendingFocusRefIdx(null);
+      }
+    }
   }, [
-    pdfDocument,
     currentPage,
-    scale,
+    renderedPageMetrics,
     references,
+    figures,
     analysisResult,
     showBoundingBoxes,
+    focusedReferenceIndex,
+    pendingFocusRefIdx,
+    scrollReferenceIntoView,
   ]);
 
   const drawReferenceBoundingBoxes = (
     context: CanvasRenderingContext2D,
     pageNum: number,
     viewportHeight: number,
-    devicePixelRatio: number = 1
+    devicePixelRatio: number = 1,
+    renderScale: number = scale
   ) => {
     // Get processor type to determine coordinate system
-    const processor = analysisResult?.processor || "azure_doc_intelligence";
+    const processor =
+      analysisResult?.processor || processorUsed || "azure_doc_intelligence";
     const needsYFlip = processor === "docling";
 
     // Get actual page height in points from analysis result (for docling Y flip)
     // Fallback to viewport height / scale if page info not available
     const pageInfo = analysisResult?.pages?.find(
-      (p: any) => p.page_number === pageNum
+      (p: any) => normalizePageNumber(p.page_number) === pageNum
     );
-    const pageHeightInPoints = pageInfo?.height || viewportHeight / scale;
+    const pageHeightInPoints = pageInfo?.height || viewportHeight / renderScale;
 
     // Helper function to convert polygon to canvas coordinates
     // Note: Entity extraction uses raw_analysis (inches for Azure DI), while
@@ -634,43 +1014,46 @@ function EntityPDFViewerBetaComponent({
     // - Azure DI: Top-left origin (matches canvas) - NO flip needed
     // - Docling: Bottom-left origin (PDF standard) - flip Y coordinates
     const polygonToRect = (polygon: number[]) => {
-      if (!polygon || polygon.length < 8) return null;
+      const normalizedPolygon = normalizePolygon(polygon);
+      if (!normalizedPolygon) return null;
 
-      // Detect if coordinates are in inches (from raw_analysis) vs points (normalized)
-      // Entity extraction uses raw_analysis (inches), while normalized analysis uses points
-      // Check page dimensions: if page width < 20, it's likely inches; if > 200, it's points
+      // Detect whether coordinates are inches or points. When analysis metadata
+      // is temporarily unavailable during a document swap, avoid assuming
+      // "inches" by default or the boxes can be pushed far off-canvas.
       const pageWidth = pageInfo?.width || analysisResult?.pages?.[0]?.width;
-      const isNormalized =
-        pageInfo?.unit === "pt" ||
-        analysisResult?.pages?.[0]?.unit === "pt" ||
-        (pageWidth && pageWidth > 200); // Normalized pages are ~600pt wide
-
-      // Also check coordinate values as fallback
-      const maxCoord = Math.max(...polygon);
+      const pageUnit = pageInfo?.unit || analysisResult?.pages?.[0]?.unit;
+      const maxCoord = Math.max(...normalizedPolygon);
       const coordsLookLikeInches = maxCoord < 20;
+      const coordsLookLikePoints = maxCoord > 72;
+      const coordsAreNormalized =
+        pageUnit === "pt" ||
+        Boolean(pageWidth && pageWidth > 200) ||
+        coordsLookLikePoints;
 
       // Convert inches to points if needed (entity extraction uses raw_analysis)
       const needsInchConversion =
         processor === "azure_doc_intelligence" &&
-        (!isNormalized || coordsLookLikeInches);
+        (pageUnit === "in" || (!coordsAreNormalized && coordsLookLikeInches));
       const INCHES_TO_POINTS = 72;
       const conversionFactor = needsInchConversion ? INCHES_TO_POINTS : 1;
 
-      // Scale coordinates by both scale and devicePixelRatio to match scaled viewport
-      const xCoords = polygon
+      // Scale coordinates by both renderScale and devicePixelRatio to match scaled viewport
+      const xCoords = normalizedPolygon
         .filter((_, i) => i % 2 === 0)
-        .map((x) => x * conversionFactor * scale * devicePixelRatio);
-      const yCoords = polygon
+        .map((x) => x * conversionFactor * renderScale * devicePixelRatio);
+      const yCoords = normalizedPolygon
         .filter((_, i) => i % 2 === 1)
         .map((y) => {
           const yInPoints = y * conversionFactor;
           if (needsYFlip) {
             // For Docling: Y is from bottom-left (PDF standard)
             // Flip: pageHeightInPoints - yInPoints, then scale
-            return (pageHeightInPoints - yInPoints) * scale * devicePixelRatio;
+            return (
+              (pageHeightInPoints - yInPoints) * renderScale * devicePixelRatio
+            );
           } else {
             // For Azure: Y is from top-left, same as PDF.js canvas
-            return yInPoints * scale * devicePixelRatio;
+            return yInPoints * renderScale * devicePixelRatio;
           }
         });
 
@@ -687,23 +1070,17 @@ function EntityPDFViewerBetaComponent({
     context.setTransform(1, 0, 0, 1, 0, 0);
 
     const labelStackMap = new Map<string, number>();
-    const canvasElement = canvasRef.current;
+    const canvasElement = overlayCanvasRef.current;
     // Use actual canvas dimensions since coordinates are in scaled space
     const canvasWidth = canvasElement ? canvasElement.width : undefined;
     const canvasHeight = canvasElement ? canvasElement.height : undefined;
 
     references.forEach((ref, refIdx) => {
-      if (!ref.best_match) return;
-
-      const pageNumber =
-        ref.best_match.page_number ||
-        ref.best_match.bounding_regions?.[0]?.page_number;
+      const pageNumber = getReferencePageNumber(ref);
 
       if (pageNumber !== pageNum) return;
 
-      // Get polygon from bounding_regions or direct polygon
-      const polygon =
-        ref.best_match.bounding_regions?.[0]?.polygon || ref.best_match.polygon;
+      const polygon = getReferencePolygon(ref);
 
       if (!polygon) return;
 
@@ -822,13 +1199,8 @@ function EntityPDFViewerBetaComponent({
         }
       });
 
-      console.log(
-        `[PDF_VIEWER] Referenced figure IDs on page ${pageNum}:`,
-        Array.from(referencedFigureIds)
-      );
-
       figures.forEach((figure) => {
-        if (figure.page !== pageNum) return;
+        if (normalizePageNumber(figure.page) !== pageNum) return;
 
         // Only show figures that are referenced
         const figureId = figure.id;
@@ -844,7 +1216,7 @@ function EntityPDFViewerBetaComponent({
           if (!isReferenced) return;
         }
 
-        const polygon = figure.bounding_regions?.[0]?.polygon;
+        const polygon = normalizePolygon(figure.bounding_regions?.[0]?.polygon);
         if (!polygon) return;
 
         const rect = polygonToRect(polygon);
@@ -908,15 +1280,11 @@ function EntityPDFViewerBetaComponent({
     context.restore();
 
     // Store click handler info on canvas
-    if (canvasRef.current) {
-      (canvasRef.current as any).boundingBoxes = references
+    if (overlayCanvasRef.current) {
+      (overlayCanvasRef.current as any).boundingBoxes = references
         .map((ref, refIdx) => {
-          const pageNum =
-            ref.best_match?.page_number ||
-            ref.best_match?.bounding_regions?.[0]?.page_number;
-          const polygon =
-            ref.best_match?.bounding_regions?.[0]?.polygon ||
-            ref.best_match?.polygon;
+          const pageNum = getReferencePageNumber(ref);
+          const polygon = getReferencePolygon(ref);
           if (!polygon) return null;
           const rect = polygonToRect(polygon);
           if (!rect) return null;
@@ -924,18 +1292,11 @@ function EntityPDFViewerBetaComponent({
         })
         .filter(Boolean);
     }
-
-    if (pendingFocusRefIdx !== null) {
-      const success = scrollReferenceIntoView(pendingFocusRefIdx);
-      if (success) {
-        setPendingFocusRefIdx(null);
-      }
-    }
   };
 
   // Handle clicks on bounding boxes
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = overlayCanvasRef.current;
     if (!canvas) return;
 
     const handleClick = (e: MouseEvent) => {
@@ -967,7 +1328,7 @@ function EntityPDFViewerBetaComponent({
     return () => {
       canvas.removeEventListener("click", handleClick);
     };
-  }, [currentPage, references, navigateToPage]);
+  }, [currentPage, references, navigateToPage, renderedPageMetrics]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!canPan || !containerRef.current) return;
@@ -1012,25 +1373,8 @@ function EntityPDFViewerBetaComponent({
     }
   }, [isPanning]);
 
-  // Show placeholder loading until visible
-  if (!isVisible) {
-    return (
-      <div
-        ref={viewerContainerRef}
-        className="flex flex-col h-full border rounded-md overflow-hidden bg-white"
-      >
-        <div className="flex-1 flex items-center justify-center bg-gray-50">
-          <div className="text-sm text-gray-400">Loading PDF viewer...</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div
-      ref={viewerContainerRef}
-      className="flex flex-col h-full border rounded-md overflow-hidden bg-white"
-    >
+    <div className="flex flex-col h-full border rounded-md overflow-hidden bg-white">
       {/* Toolbar */}
       <div className="flex items-center justify-between p-2 border-b bg-gray-50">
         <div className="flex items-center space-x-2">
@@ -1149,10 +1493,13 @@ function EntityPDFViewerBetaComponent({
           }`}
           onMouseDown={handleMouseDown}
         >
-          <canvas
-            ref={canvasRef}
-            className="shadow-lg bg-white border border-gray-300 rounded"
-          />
+          <div className="relative inline-block">
+            <canvas
+              ref={canvasRef}
+              className="block shadow-lg bg-white border border-gray-300 rounded"
+            />
+            <canvas ref={overlayCanvasRef} className="absolute inset-0 z-10" />
+          </div>
         </div>
       </div>
     </div>

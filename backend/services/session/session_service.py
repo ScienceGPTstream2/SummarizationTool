@@ -268,12 +268,24 @@ class SessionService:
         if request.extraction_results is not None:
             # Get document mapping (file_hash -> document_id)
             docs = self.db.get_documents_by_session(session_id)
-            # For now, use session_id for extractions without specific document
             for result in request.extraction_results:
                 # Find matching document if possible
                 doc_id = None
-                if docs:
-                    doc_id = docs[0]["id"]  # Default to first document
+                if docs and result.file_hash:
+                    matched_doc = next(
+                        (d for d in docs if d.get("file_hash") == result.file_hash),
+                        None,
+                    )
+                    if matched_doc:
+                        doc_id = matched_doc["id"]
+                    else:
+                        # Skip mismatched file hashes to avoid cross-document contamination.
+                        continue
+                elif docs and len(docs) == 1:
+                    doc_id = docs[0]["id"]
+                else:
+                    # Multi-file sessions must provide file_hash for extraction results.
+                    continue
 
                 self.db.upsert_extraction_result(
                     session_id=session_id,

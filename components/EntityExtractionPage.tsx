@@ -73,8 +73,11 @@ import { loadStudyTypeTemplate } from "./TemplateLoader";
 import { TemplatePicker, ResolvedTemplate } from "./TemplatePicker";
 import { settingsManager } from "./SettingsManager";
 import type { ModelConfig } from "./SettingsManager";
-import { EntityPDFViewerBeta } from "./EntityPDFViewerBeta";
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import {
+  EntityPDFViewerBeta,
+  loadDocumentAnalysis,
+  loadPdfDocument,
+} from "./EntityPDFViewerBeta";
 import { authenticatedFetch } from "../utils/authUtils";
 
 interface Reference {
@@ -190,6 +193,8 @@ export function EntityExtractionPage({
   const [selectedFileId, setSelectedFileId] = useState<string>(
     files.length > 0 ? files[0].fileId : ""
   );
+  const selectedFileIdRef = useRef(selectedFileId);
+  const prefetchedAnalysisIdsRef = useRef<Set<string>>(new Set());
 
   // Sync files when session changes (e.g., after session restore)
   useEffect(() => {
@@ -220,6 +225,30 @@ export function EntityExtractionPage({
 
   const currentFile =
     files.find((f) => f.fileId === selectedFileId) || files[0];
+
+  const getFileDocumentId = (file?: any): string | null => {
+    if (!file) return null;
+
+    return (
+      file.processingResult?.conversionId ||
+      file.conversionId ||
+      file.fileId ||
+      (files.length === 1 ? documentData.conversionId || null : null)
+    );
+  };
+
+  const getFileProcessorUsed = (file?: any): string | undefined => {
+    if (!file) return undefined;
+
+    return (
+      file.processingResult?.processorUsed ||
+      file.processorUsed ||
+      (files.length === 1 ? documentData.processorUsed : undefined)
+    );
+  };
+
+  const currentFileDocumentId = getFileDocumentId(currentFile);
+  const currentFileProcessorUsed = getFileProcessorUsed(currentFile);
 
   const [selectedStudyType, setSelectedStudyType] = useState(
     currentFile?.studyType || ""
@@ -296,6 +325,8 @@ export function EntityExtractionPage({
   const [focusedReferenceByEntity, setFocusedReferenceByEntity] = useState<
     Record<number, number | null>
   >({});
+  const [focusedReferenceTriggerByEntity, setFocusedReferenceTriggerByEntity] =
+    useState<Record<number, number>>({});
   const [figures, setFigures] = useState<any[]>([]);
 
   // Track processing status for each file independently
@@ -489,6 +520,10 @@ export function EntityExtractionPage({
   // Sync model selection ONLY when the file selection changes (not when files data updates)
   const prevSelectedFileIdRef = useRef<string>(selectedFileId);
   useEffect(() => {
+    selectedFileIdRef.current = selectedFileId;
+  }, [selectedFileId]);
+
+  useEffect(() => {
     if (selectedFileId !== prevSelectedFileIdRef.current) {
       prevSelectedFileIdRef.current = selectedFileId;
       const file = files.find((f) => f.fileId === selectedFileId);
@@ -505,9 +540,13 @@ export function EntityExtractionPage({
   }, [selectedFileId]);
 
   // Sync other state when file selection or file data changes
+  const syncedViewFileIdRef = useRef<string | null>(null);
   useEffect(() => {
     const file = files.find((f) => f.fileId === selectedFileId);
     if (file) {
+      const didSwitchFile = syncedViewFileIdRef.current !== file.fileId;
+      syncedViewFileIdRef.current = file.fileId;
+
       setSelectedStudyType(file.studyType || "");
       setEntities(file.entities || []);
       setSummaryPrompt(file.summaryPrompt || "");
@@ -522,18 +561,25 @@ export function EntityExtractionPage({
       setExtractingEntities(new Set());
       setCompletedEntities(new Set());
       setCurrentEntityIndex(0);
+      if (didSwitchFile) {
+        setFocusedReferenceByEntity({});
+        setFocusedReferenceTriggerByEntity({});
+      }
     }
   }, [selectedFileId, files]);
 
   // CRITICAL: Update displayed entity results when user switches models
   useEffect(() => {
-    if (!selectedModel || entities.length === 0) return;
+    const sourceEntities = currentFile?.entities || [];
+    if (!selectedModel || sourceEntities.length === 0) return;
 
-    console.log(`🔄 Switching to model: ${selectedModel}`);
+    console.log(
+      `🔄 Syncing displayed entity results for file ${currentFile?.fileId || "unknown"} with model: ${selectedModel}`
+    );
 
     // Update entities to show results from the selected model
-    setEntities((prevEntities) =>
-      prevEntities.map((entity) => {
+    setEntities(
+      sourceEntities.map((entity: Entity) => {
         // If entity has multi-model results, swap to selected model's results
         if (
           entity.extractionsByModel &&
@@ -548,13 +594,36 @@ export function EntityExtractionPage({
             duration: modelResult.duration,
             promptTokens: modelResult.promptTokens,
             completionTokens: modelResult.completionTokens,
+            cost: modelResult.cost,
           };
         }
         // Otherwise keep existing data
         return entity;
       })
     );
-  }, [selectedModel]); // Run when model changes
+  }, [selectedModel, selectedFileId, currentFile?.entities]); // Also run when switching files/restoring
+
+  // Pre-fetch analysis payloads so bounding boxes appear immediately when
+  // switching between documents in the viewer.
+  useEffect(() => {
+    files.forEach((file) => {
+      const documentId = getFileDocumentId(file);
+      if (!documentId || prefetchedAnalysisIdsRef.current.has(documentId)) {
+        return;
+      }
+
+      prefetchedAnalysisIdsRef.current.add(documentId);
+      loadDocumentAnalysis(documentId, {
+        timeoutMs: 15000,
+      }).catch((err) => {
+        prefetchedAnalysisIdsRef.current.delete(documentId);
+        console.warn(
+          `[EntityExtractionPage] Background analysis prefetch failed for ${documentId}:`,
+          err
+        );
+      });
+    });
+  }, [files]);
 
   // Pre-fetch PDFs to avoid backend bottleneck during entity extraction
   // This loads PDFs through PDF.js and caches them, just like EntityPDFViewerBeta does
@@ -565,34 +634,12 @@ export function EntityExtractionPage({
       "files"
     );
 
-    // Import PDF.js dynamically
-    // @ts-ignore
-    const pdfjsLib = await import("pdfjs-dist");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
     // Fetch all PDFs using PDF.js (they'll be cached in pdfDocumentCache)
     const fetchPromises = pendingFiles.map(async (file) => {
       try {
-        // Check if already in cache (from EntityPDFViewerBeta)
-        const { pdfDocumentCache } = await import("./EntityPDFViewerBeta");
-        if (pdfDocumentCache.has(file.fileId)) {
-          console.log(
-            `[Pre-fetch] ✅ Already cached: ${file.file?.name || file.fileId}`
-          );
-          return;
-        }
-
-        // Load through PDF.js to match EntityPDFViewerBeta's caching
-        const loadingTask = pdfjsLib.getDocument({
-          url: `/api/files/${file.fileId}`,
-          disableAutoFetch: false,
-          disableStream: false,
+        await loadPdfDocument(file.fileId, {
+          timeoutMs: 45000,
         });
-
-        const pdfDoc = await loadingTask.promise;
-
-        // Cache the resolved document (same as EntityPDFViewerBeta)
-        pdfDocumentCache.set(file.fileId, pdfDoc);
 
         console.log(
           `[Pre-fetch] ✅ Cached PDF for ${file.file?.name || file.fileId}`
@@ -722,8 +769,7 @@ export function EntityExtractionPage({
   };
 
   const processFile = async (file: any) => {
-    const conversionId =
-      file.processingResult?.conversionId || documentData.conversionId;
+    const conversionId = getFileDocumentId(file);
     if (!conversionId) return;
 
     // Determine models to use: prefer file-specific selection, fallback to global selection
@@ -812,8 +858,7 @@ export function EntityExtractionPage({
       }, slowThresholdMs);
 
       let completedModels = 0;
-      const processorUsed =
-        file.processingResult?.processorUsed || documentData.processorUsed;
+      const processorUsed = getFileProcessorUsed(file);
 
       // ── Cloud models: batched concurrently (existing fast path) ──
       const cloudResults: Array<{
@@ -920,17 +965,19 @@ export function EntityExtractionPage({
               };
 
               // Show text immediately as each entity finishes — don't wait for all to complete
-              setEntities((prevEntities) =>
-                prevEntities.map((e) =>
-                  e.name === entity.name
-                    ? {
-                        ...e,
-                        extracted: singleResult.extracted,
-                        answer: singleResult.answer || singleResult.extracted,
-                      }
-                    : e
-                )
-              );
+              if (selectedFileIdRef.current === file.fileId) {
+                setEntities((prevEntities) =>
+                  prevEntities.map((e) =>
+                    e.name === entity.name
+                      ? {
+                          ...e,
+                          extracted: singleResult.extracted,
+                          answer: singleResult.answer || singleResult.extracted,
+                        }
+                      : e
+                  )
+                );
+              }
 
               console.log(
                 `  ✅ Macbook entity "${entity.name}" done (${eIdx + 1}/${entitiesToExtract.length})`
@@ -945,11 +992,13 @@ export function EntityExtractionPage({
                 extracted: errText,
               };
               // Show error text immediately too
-              setEntities((prevEntities) =>
-                prevEntities.map((e) =>
-                  e.name === entity.name ? { ...e, extracted: errText } : e
-                )
-              );
+              if (selectedFileIdRef.current === file.fileId) {
+                setEntities((prevEntities) =>
+                  prevEntities.map((e) =>
+                    e.name === entity.name ? { ...e, extracted: errText } : e
+                  )
+                );
+              }
             }
           }
 
@@ -1282,29 +1331,68 @@ export function EntityExtractionPage({
 
   // Fetch figures for PDF viewer
   useEffect(() => {
-    const fetchFigures = async () => {
-      if (!currentFile.processingResult?.conversionId) return;
+    let isCancelled = false;
+    const retryTimeouts: ReturnType<typeof setTimeout>[] = [];
+    const conversionId = currentFileDocumentId;
+
+    setFigures([]);
+
+    const fetchFigures = async (retryCount = 0) => {
+      if (!conversionId) return;
 
       try {
         const response = await authenticatedFetch(
-          `/api/documents/${currentFile.processingResult.conversionId}/figures`,
+          `/api/documents/${conversionId}/figures`,
           {}
         );
 
-        if (response.ok) {
-          const data = await response.json();
-          setFigures(data.figures || []);
-          console.log(
-            `[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`
-          );
+        if (isCancelled) return;
+
+        if (!response.ok) {
+          if (response.status === 404 && retryCount < 4) {
+            const timeout = setTimeout(
+              () => {
+                if (!isCancelled) {
+                  fetchFigures(retryCount + 1);
+                }
+              },
+              (retryCount + 1) * 1000
+            );
+            retryTimeouts.push(timeout);
+          }
+          return;
         }
+
+        const data = await response.json();
+        if (isCancelled) return;
+        setFigures(data.figures || []);
+        console.log(
+          `[EntityExtractionPage] Fetched ${data.figures?.length || 0} figures for PDF viewer`
+        );
       } catch (err) {
+        if (retryCount < 4) {
+          const timeout = setTimeout(
+            () => {
+              if (!isCancelled) {
+                fetchFigures(retryCount + 1);
+              }
+            },
+            (retryCount + 1) * 1000
+          );
+          retryTimeouts.push(timeout);
+          return;
+        }
         console.error("Error fetching figures:", err);
       }
     };
 
     fetchFigures();
-  }, [currentFile.processingResult?.conversionId]);
+
+    return () => {
+      isCancelled = true;
+      retryTimeouts.forEach((timeout) => clearTimeout(timeout));
+    };
+  }, [currentFileDocumentId]);
 
   // Debug: Log figures when they change
   useEffect(() => {
@@ -1548,6 +1636,10 @@ export function EntityExtractionPage({
     setFocusedReferenceByEntity((prev) => ({
       ...prev,
       [entityIdx]: refIdx,
+    }));
+    setFocusedReferenceTriggerByEntity((prev) => ({
+      ...prev,
+      [entityIdx]: (prev[entityIdx] ?? 0) + 1,
     }));
   };
 
@@ -1854,8 +1946,7 @@ export function EntityExtractionPage({
           entity,
           conversionId,
           selectedModelIds,
-          currentFile.processingResult?.processorUsed ||
-            documentData.processorUsed,
+          currentFileProcessorUsed,
           signal,
           sessionIdRef.current || undefined
         );
@@ -1949,8 +2040,7 @@ export function EntityExtractionPage({
     abortControllerRef.current = new AbortController();
 
     try {
-      const conversionId =
-        currentFile.processingResult?.conversionId || documentData.conversionId;
+      const conversionId = currentFileDocumentId;
       if (!conversionId) {
         throw new Error(
           "No conversion ID available. Please run document processing first."
@@ -2061,8 +2151,7 @@ export function EntityExtractionPage({
   const handleRerunFailedEntities = async () => {
     if (isExtracting || isBatchRunning || isRerunningFailed) return;
 
-    const conversionId =
-      currentFile.processingResult?.conversionId || documentData.conversionId;
+    const conversionId = currentFileDocumentId;
     if (!conversionId) {
       alert("No conversion ID available. Please process a document first.");
       return;
@@ -2083,8 +2172,7 @@ export function EntityExtractionPage({
 
     if (failedEntities.length === 0) return;
 
-    const processorUsed =
-      currentFile.processingResult?.processorUsed || documentData.processorUsed;
+    const processorUsed = currentFileProcessorUsed;
 
     // Ensure we have a session
     if (!sessionIdRef.current) {
@@ -2550,8 +2638,7 @@ export function EntityExtractionPage({
 
     try {
       // Ensure we have a conversion id (markdown stored) or fallback to existing extractedText
-      const conversionId =
-        currentFile.processingResult?.conversionId || documentData.conversionId;
+      const conversionId = currentFileDocumentId;
       if (!conversionId) {
         throw new Error(
           "No conversion ID available. Please run document processing first so the markdown is available."
@@ -2625,7 +2712,11 @@ export function EntityExtractionPage({
 
             // Save result to session if we have one
             if (activeSessionId) {
-              saveExtractionResult(activeSessionId, updatedEntity);
+              saveExtractionResult(
+                activeSessionId,
+                updatedEntity,
+                currentFile.fileId
+              );
             }
           } catch (err: any) {
             if (err.name === "AbortError") throw err;
@@ -2654,71 +2745,67 @@ export function EntityExtractionPage({
       // Small delay to ensure UI updates before the API call
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      const fileId = selectedFileId;
+      if (selectedFileIdRef.current === currentFile.fileId) {
+        setEntities(updatedEntities);
+      }
 
-      // First update entities state
-      setEntities(updatedEntities);
-
-      // Update files with entities immediately (before paragraph generation)
-      const updatedFilesWithEntities = files.map((f) =>
-        f.fileId === fileId
-          ? {
-              ...f,
-              studyType: selectedStudyType,
-              selectedModel: selectedModel,
-              entities: updatedEntities,
-              summaryPrompt: summaryPrompt,
-            }
-          : f
+      // Update the current file's entities immediately (before paragraph generation)
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.fileId === currentFile.fileId
+            ? { ...f, entities: updatedEntities }
+            : f
+        )
       );
-      setFiles(updatedFilesWithEntities);
-      setDocumentData({
-        ...documentData,
-        uploadedFiles: updatedFilesWithEntities,
-      });
+      setDocumentData((prev) => ({
+        ...prev,
+        uploadedFiles: (prev.uploadedFiles || []).map((f) =>
+          f.fileId === currentFile.fileId
+            ? { ...f, entities: updatedEntities }
+            : f
+        ),
+      }));
     } catch (err: any) {
       if (err.name === "AbortError") {
         console.log("Summarization aborted");
         // Save partial results with all current state
-        const updatedFiles = files.map((f) =>
-          f.fileId === selectedFileId
-            ? {
-                ...f,
-                studyType: selectedStudyType,
-                selectedModel: selectedModel,
-                entities: updatedEntities,
-                summaryPrompt: summaryPrompt,
-              }
-            : f
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.fileId === currentFile.fileId
+              ? { ...f, entities: updatedEntities }
+              : f
+          )
         );
-        setFiles(updatedFiles);
 
-        setDocumentData({
-          ...documentData,
-          uploadedFiles: updatedFiles,
-        });
+        setDocumentData((prev) => ({
+          ...prev,
+          uploadedFiles: (prev.uploadedFiles || []).map((f) =>
+            f.fileId === currentFile.fileId
+              ? { ...f, entities: updatedEntities }
+              : f
+          ),
+        }));
       } else {
         console.error("Extraction error:", err);
         alert(`Extraction failed: ${err.message} `);
 
         // Save partial results even on error
-        const updatedFiles = files.map((f) =>
-          f.fileId === selectedFileId
-            ? {
-                ...f,
-                studyType: selectedStudyType,
-                selectedModel: selectedModel,
-                entities: updatedEntities,
-                summaryPrompt: summaryPrompt,
-              }
-            : f
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.fileId === currentFile.fileId
+              ? { ...f, entities: updatedEntities }
+              : f
+          )
         );
-        setFiles(updatedFiles);
 
-        setDocumentData({
-          ...documentData,
-          uploadedFiles: updatedFiles,
-        });
+        setDocumentData((prev) => ({
+          ...prev,
+          uploadedFiles: (prev.uploadedFiles || []).map((f) =>
+            f.fileId === currentFile.fileId
+              ? { ...f, entities: updatedEntities }
+              : f
+          ),
+        }));
       }
     } finally {
       setIsExtracting(false);
@@ -3596,20 +3683,19 @@ export function EntityExtractionPage({
                                 BETA
                               </span>
                             </div>
-                            {documentData.fileId &&
-                            documentData.conversionId ? (
-                              <div id={`pdf - viewer - ${index} `}>
+                            {currentFile?.fileId && currentFileDocumentId ? (
+                              <div id={`pdf-viewer-${index}`}>
                                 <EntityPDFViewerBeta
-                                  key={`${currentFile.fileId} -${index} `}
+                                  key={`${currentFile.fileId}-${index}`}
                                   fileId={currentFile.fileId}
-                                  conversionId={
-                                    currentFile.processingResult
-                                      ?.conversionId ||
-                                    documentData.conversionId
-                                  }
+                                  conversionId={currentFileDocumentId}
+                                  processorUsed={currentFileProcessorUsed}
                                   references={entity.references || []}
                                   focusedReferenceIndex={
                                     focusedReferenceByEntity[index] ?? null
+                                  }
+                                  focusedReferenceTrigger={
+                                    focusedReferenceTriggerByEntity[index] ?? 0
                                   }
                                   figures={figures}
                                 />
