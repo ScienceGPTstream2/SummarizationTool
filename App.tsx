@@ -1945,6 +1945,8 @@ export default function App() {
                         History
                       </Button>
                     )}
+
+                    <SessionMetrics />
                   </>
                 )}
 
@@ -2064,11 +2066,6 @@ export default function App() {
                     </div>
                   );
                 })}
-              </div>
-            )}
-            {isAdvancedWorkflow && (
-              <div className="mt-4">
-                <SessionMetrics />
               </div>
             )}
           </div>
