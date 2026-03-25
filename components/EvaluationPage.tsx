@@ -641,7 +641,9 @@ export function EvaluationPage({
   // The first write operation (eval run, ground-truth save, etc.) calls this
   // to create a personal clone in User B's history.
   // -------------------------------------------------------------------------
-  const ensureSessionRef = useRef<string | null>(documentData.sessionId || null);
+  const ensureSessionRef = useRef<string | null>(
+    documentData.sessionId || null
+  );
 
   // Keep ref in sync when documentData.sessionId changes (e.g. after restore)
   useEffect(() => {
@@ -731,7 +733,6 @@ export function EvaluationPage({
     }
     return null;
   };
-
 
   // Persist evaluation configuration to documentData and backend whenever it changes
   useEffect(() => {
