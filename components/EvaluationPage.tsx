@@ -635,6 +635,104 @@ export function EvaluationPage({
   // Ref for debounce timer
   const evalConfigSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // -------------------------------------------------------------------------
+  // Lazy session creation for shared sessions (copy-on-write)
+  // When User B views a shared session, documentData.sessionId is undefined.
+  // The first write operation (eval run, ground-truth save, etc.) calls this
+  // to create a personal clone in User B's history.
+  // -------------------------------------------------------------------------
+  const ensureSessionRef = useRef<string | null>(documentData.sessionId || null);
+
+  // Keep ref in sync when documentData.sessionId changes (e.g. after restore)
+  useEffect(() => {
+    ensureSessionRef.current = documentData.sessionId || null;
+  }, [documentData.sessionId]);
+
+  const ensureSession = async (): Promise<string | null> => {
+    // Already have a session
+    if (ensureSessionRef.current) return ensureSessionRef.current;
+    if (documentData.sessionId) {
+      ensureSessionRef.current = documentData.sessionId;
+      return documentData.sessionId;
+    }
+
+    try {
+      const { getCurrentUser, getValidToken: getToken } = await import(
+        "../utils/authUtils"
+      );
+      const user = await getCurrentUser();
+      const token = await getToken();
+      if (!user || !token) return null;
+
+      // Build a friendly name
+      const sessionName = documentData.sharedSourceName
+        ? `Copy of ${documentData.sharedSourceName}`
+        : `Evaluation Session`;
+
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          name: sessionName,
+          configuration: {
+            study_type: documentData.studyType || "",
+            selected_models: documentData.selectedModels || [],
+            entities: (documentData.entities || []).map((e) => ({
+              name: e.name,
+              prompt: e.prompt,
+            })),
+            temperature: documentData.temperature ?? 0.0,
+            model_temperatures: documentData.modelTemperatures || {},
+          },
+          documents: (documentData.uploadedFiles || [])
+            .filter((f) => f.fileId)
+            .map((f) => ({
+              file_hash: f.fileId,
+              filename: f.file?.name || "Document",
+              processor_used: f.processorUsed,
+              parse_cost: f.processingResult?.parse_cost,
+              page_count: f.processingResult?.page_count,
+              parse_duration_seconds: f.processingResult?.parseDuration,
+            })),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const newId = data.session_id;
+        ensureSessionRef.current = newId;
+
+        // Propagate to parent so all pages see the new sessionId
+        setDocumentData((prev) => ({
+          ...prev,
+          sessionId: newId,
+          sharedSourceName: undefined, // clone created, no longer shared-view
+        }));
+
+        console.log(
+          `[EvalPage] Lazy session clone created: ${newId} ("${sessionName}")`
+        );
+        toast.success("Session copy created", {
+          description: "Your changes will be saved to your own copy.",
+        });
+        return newId;
+      } else {
+        console.error(
+          "[EvalPage] Failed to create session clone:",
+          await response.text()
+        );
+      }
+    } catch (error) {
+      console.error("[EvalPage] Error creating session clone:", error);
+    }
+    return null;
+  };
+
+
   // Persist evaluation configuration to documentData and backend whenever it changes
   useEffect(() => {
     // Update documentData
@@ -1604,6 +1702,17 @@ export function EvaluationPage({
     );
     if (!entity) return;
 
+    // Ensure we have a session (lazy clone for shared sessions)
+    if (!documentData.sessionId) {
+      const newId = await ensureSession();
+      if (!newId) {
+        toast.error("No active session", {
+          description: "Cannot run evaluation without a session.",
+        });
+        return;
+      }
+    }
+
     // IMPORTANT: Save ground truths before running evaluation
     hasUserEditedGroundTruthRef.current = true;
     await saveGroundTruthsToSession();
@@ -1824,6 +1933,17 @@ export function EvaluationPage({
   };
 
   const executeRunEvaluation = async () => {
+    // Ensure we have a session (lazy clone for shared sessions)
+    if (!documentData.sessionId) {
+      const newId = await ensureSession();
+      if (!newId) {
+        toast.error("No active session", {
+          description: "Cannot run evaluation without a session.",
+        });
+        return;
+      }
+    }
+
     setIsEvaluating(true);
     setEvaluationProgress(0);
     setEvaluatingEntities(new Set());
@@ -2204,13 +2324,17 @@ export function EvaluationPage({
   const executeBatchEvaluation = async (options?: {
     pendingOnly?: boolean;
   }) => {
-    // Guard: session_id is required by the backend job queue
+    // Guard: session_id is required by the backend job queue.
+    // For shared sessions (no sessionId yet), lazily create a clone.
     if (!documentData.sessionId) {
-      toast.error("No active session", {
-        description:
-          "Cannot run evaluation without a session. Please start a new session or restore one from history.",
-      });
-      return;
+      const newId = await ensureSession();
+      if (!newId) {
+        toast.error("No active session", {
+          description:
+            "Cannot run evaluation without a session. Please start a new session or restore one from history.",
+        });
+        return;
+      }
     }
 
     setIsEvaluating(true);
