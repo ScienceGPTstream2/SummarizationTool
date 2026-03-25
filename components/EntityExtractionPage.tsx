@@ -890,6 +890,22 @@ export function EntityExtractionPage({
                   statusMessage: `Model ${completedModels}/${modelsToUse.length} complete`,
                 },
               }));
+              // Show extracted text and references immediately after each cloud model batch
+              // so bounding boxes appear without waiting for all models to finish
+              if (selectedFileIdRef.current === file.fileId) {
+                setEntities((prevEntities) =>
+                  prevEntities.map((e) => {
+                    const r = resultsByEntity[e.name];
+                    if (!r) return e;
+                    return {
+                      ...e,
+                      extracted: r.extracted ?? e.extracted,
+                      answer: r.answer ?? r.extracted ?? e.answer,
+                      references: r.references || e.references || [],
+                    };
+                  })
+                );
+              }
               return { modelId, resultsByEntity, success: true };
             } catch (err) {
               console.error(
@@ -964,7 +980,7 @@ export function EntityExtractionPage({
                 cost: singleResult.cost ?? undefined,
               };
 
-              // Show text immediately as each entity finishes — don't wait for all to complete
+              // Show text and references immediately as each entity finishes — don't wait for all to complete
               if (selectedFileIdRef.current === file.fileId) {
                 setEntities((prevEntities) =>
                   prevEntities.map((e) =>
@@ -973,6 +989,7 @@ export function EntityExtractionPage({
                           ...e,
                           extracted: singleResult.extracted,
                           answer: singleResult.answer || singleResult.extracted,
+                          references: singleResult.references || [],
                         }
                       : e
                   )
