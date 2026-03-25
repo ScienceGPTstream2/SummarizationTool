@@ -222,37 +222,32 @@ export function useSimplifiedPipeline() {
 
         const processorOverride = options?.processor || "auto";
 
-        // Process all files in parallel
-        const settled = await Promise.allSettled(
-          files.map((file, idx) =>
-            processOneFile(
-              file,
-              idx,
-              token,
-              bestModel,
-              processorOverride,
-              studyType,
-              templateEntities,
-              summaryPrompt
-            )
-          )
+        // Process all files in parallel — surface each result as soon as it finishes
+        const fileResults: FileResult[] = [];
+        await Promise.allSettled(
+          files.map(async (file, idx) => {
+            try {
+              const result = await processOneFile(
+                file,
+                idx,
+                token,
+                bestModel,
+                processorOverride,
+                studyType,
+                templateEntities,
+                summaryPrompt
+              );
+              fileResults.push(result);
+              // Show this file's summary and entities immediately — don't wait for all files
+              setResults((prev) => [...prev, result]);
+            } catch (err) {
+              const msg =
+                err instanceof Error ? err.message : "Unknown error";
+              updateFile(idx, { stage: "error", error: msg });
+            }
+          })
         );
 
-        const fileResults: FileResult[] = [];
-        for (let i = 0; i < settled.length; i++) {
-          const result = settled[i];
-          if (result.status === "fulfilled") {
-            fileResults.push(result.value);
-          } else {
-            const msg =
-              result.reason instanceof Error
-                ? result.reason.message
-                : "Unknown error";
-            updateFile(i, { stage: "error", error: msg });
-          }
-        }
-
-        setResults(fileResults);
         setState((prev) => ({
           ...prev,
           running: false,

@@ -1017,23 +1017,22 @@ function EntityPDFViewerBetaComponent({
       const normalizedPolygon = normalizePolygon(polygon);
       if (!normalizedPolygon) return null;
 
-      // Detect whether coordinates are inches or points. When analysis metadata
-      // is temporarily unavailable during a document swap, avoid assuming
-      // "inches" by default or the boxes can be pushed far off-canvas.
-      const pageWidth = pageInfo?.width || analysisResult?.pages?.[0]?.width;
-      const pageUnit = pageInfo?.unit || analysisResult?.pages?.[0]?.unit;
+      // Detect whether coordinates are inches or points.
+      // IMPORTANT: Reference polygons come from raw_analysis (inches for Azure DI),
+      // but the analysis endpoint always normalizes page metadata to points ("pt").
+      // We must NOT rely on pageUnit from the normalized analysis result to decide
+      // whether polygons are in inches — it is always "pt" after normalization, which
+      // would suppress the inch-to-point conversion and pin all boxes to the top-left.
+      // Instead, use the coordinate values themselves as the primary signal.
       const maxCoord = Math.max(...normalizedPolygon);
-      const coordsLookLikeInches = maxCoord < 20;
-      const coordsLookLikePoints = maxCoord > 72;
-      const coordsAreNormalized =
-        pageUnit === "pt" ||
-        Boolean(pageWidth && pageWidth > 200) ||
-        coordsLookLikePoints;
+      const coordsLookLikeInches = maxCoord < 20; // Azure DI inch polygons: 0-11
+      const coordsLookLikePoints = maxCoord > 72; // point polygons: typically 72+
 
       // Convert inches to points if needed (entity extraction uses raw_analysis)
       const needsInchConversion =
         processor === "azure_doc_intelligence" &&
-        (pageUnit === "in" || (!coordsAreNormalized && coordsLookLikeInches));
+        coordsLookLikeInches &&
+        !coordsLookLikePoints;
       const INCHES_TO_POINTS = 72;
       const conversionFactor = needsInchConversion ? INCHES_TO_POINTS : 1;
 

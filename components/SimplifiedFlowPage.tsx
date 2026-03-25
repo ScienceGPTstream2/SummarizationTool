@@ -96,9 +96,11 @@ export function SimplifiedFlowPage({
 
   const allTemplates = getAvailableStudyTypes();
 
-  // Fetch models eagerly (so we can always show the auto-selected model name)
+  // Fetch models eagerly on mount (so we can always show the auto-selected model name).
+  // Using [] so this always runs fresh on mount — avoids the stale-list bug where
+  // availableModels cached from a previous session lacked gpt-5.2 and fell back to auto.
+  // The cancelled flag handles React StrictMode double-invoke correctly.
   useEffect(() => {
-    if (availableModels.length > 0) return;
     let cancelled = false;
     setModelsLoading(true);
     fetchAllModels()
@@ -115,7 +117,7 @@ export function SimplifiedFlowPage({
     return () => {
       cancelled = true;
     };
-  }, [availableModels.length]);
+  }, []);
 
   // When user clicks a card, set the matching default template and default model
   useEffect(() => {
