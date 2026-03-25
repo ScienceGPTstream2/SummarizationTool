@@ -15,9 +15,15 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Beaker,
-  RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import {
   Table,
   TableBody,
@@ -71,7 +77,7 @@ const FILE_STAGE_ORDER: FileStage[] = [
 ];
 
 export function SimplifiedFlowPage({
-  onSwitchToAdvanced,
+  onSwitchToAdvanced: _onSwitchToAdvanced,
 }: SimplifiedFlowPageProps) {
   const [studyType, setStudyType] = useState<StudyType>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -86,7 +92,7 @@ export function SimplifiedFlowPage({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [autoSelectedModelName, setAutoSelectedModelName] =
     useState<string>("");
-  const [includeEntitiesInDoc, setIncludeEntitiesInDoc] = useState(false);
+  const [isDetailedMode, setIsDetailedMode] = useState(false);
 
   const allTemplates = getAvailableStudyTypes();
 
@@ -170,9 +176,7 @@ export function SimplifiedFlowPage({
     run,
     reset,
     downloadResults,
-    downloadSingleResult,
     downloadExecutiveResults,
-    downloadSingleExecutiveResult,
   } = useSimplifiedPipeline();
   const [expandedResultIndex, setExpandedResultIndex] = useState<number | null>(
     null
@@ -279,12 +283,6 @@ export function SimplifiedFlowPage({
     setOptionsOpen(false);
     setExpandedResultIndex(null);
   }, [reset]);
-
-  const handleRerun = useCallback(() => {
-    reset();
-    setExpandedResultIndex(null);
-    setTimeout(() => handleRun(), 0);
-  }, [reset, handleRun]);
 
   const canRun =
     studyType !== null &&
@@ -522,17 +520,21 @@ export function SimplifiedFlowPage({
                           <label className="text-sm font-medium text-muted-foreground">
                             Document Parser
                           </label>
-                          <select
+                          <Select
                             value={selectedParser}
-                            onChange={(e) => setSelectedParser(e.target.value)}
-                            className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            onValueChange={setSelectedParser}
                           >
-                            {PARSER_OPTIONS.map((p) => (
-                              <option key={p.value} value={p.value}>
-                                {p.label}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PARSER_OPTIONS.map((p) => (
+                                <SelectItem key={p.value} value={p.value}>
+                                  {p.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         {/* Model */}
@@ -540,28 +542,30 @@ export function SimplifiedFlowPage({
                           <label className="text-sm font-medium text-muted-foreground">
                             LLM Model
                           </label>
-                          <select
-                            value={selectedModelId}
-                            onChange={(e) => setSelectedModelId(e.target.value)}
-                            className="w-full h-11 rounded-md border border-border bg-background px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          <Select
+                            value={selectedModelId || "__auto__"}
+                            onValueChange={(v) =>
+                              setSelectedModelId(v === "__auto__" ? "" : v)
+                            }
                           >
-                            <option value="">
-                              {autoSelectedModelName
-                                ? `Auto — ${autoSelectedModelName}`
-                                : "Auto (best available)"}
-                            </option>
-                            {modelsLoading ? (
-                              <option disabled>Loading models...</option>
-                            ) : (
-                              availableModels.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.name}
-                                  {m.provider ? ` (${m.provider})` : ""}
-                                  {m.description ? ` — ${m.description}` : ""}
-                                </option>
-                              ))
-                            )}
-                          </select>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__auto__">
+                                {autoSelectedModelName
+                                  ? `Auto — ${autoSelectedModelName}`
+                                  : "Auto (best available)"}
+                              </SelectItem>
+                              {!modelsLoading &&
+                                availableModels.map((m) => (
+                                  <SelectItem key={m.id} value={m.id}>
+                                    {m.name}
+                                    {m.provider ? ` (${m.provider})` : ""}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         {/* Template */}
@@ -569,28 +573,27 @@ export function SimplifiedFlowPage({
                           <label className="text-sm font-medium text-muted-foreground">
                             Extraction Template
                           </label>
-                          <select
+                          <Select
                             value={selectedTemplateId}
-                            onChange={(e) =>
-                              handleTemplateChange(e.target.value)
-                            }
-                            className={`w-full h-11 rounded-md border px-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${
-                              studyType === "custom"
-                                ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-                                : "border-border bg-background"
-                            }`}
+                            onValueChange={handleTemplateChange}
                           >
-                            {!selectedTemplateId && (
-                              <option value="" disabled>
-                                Select a study type first
-                              </option>
-                            )}
-                            {allTemplates.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
+                            <SelectTrigger
+                              className={`w-full ${
+                                studyType === "custom"
+                                  ? "border-primary ring-1 ring-primary/30 bg-primary/5"
+                                  : ""
+                              }`}
+                            >
+                              <SelectValue placeholder="Select a study type first" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allTemplates.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -775,32 +778,6 @@ export function SimplifiedFlowPage({
                                 </div>
                               </div>
                             </div>
-
-                            {/* Per-file download */}
-                            <div className="flex justify-end gap-3 pt-1">
-                              <Button
-                                onClick={() =>
-                                  downloadSingleExecutiveResult(result)
-                                }
-                                className="text-sm"
-                              >
-                                <Download className="h-4 w-4 mr-1.5" />
-                                Download Report
-                              </Button>
-                              <Button
-                                variant="outline"
-                                onClick={() =>
-                                  downloadSingleResult(
-                                    result,
-                                    includeEntitiesInDoc
-                                  )
-                                }
-                                className="text-sm"
-                              >
-                                <Download className="h-4 w-4 mr-1.5" />
-                                Download Detailed Report
-                              </Button>
-                            </div>
                           </div>
                         </motion.div>
                       )}
@@ -810,9 +787,9 @@ export function SimplifiedFlowPage({
               })}
             </div>
 
-            {/* Download options */}
+            {/* Actions */}
             <motion.div
-              className="flex justify-center"
+              className="flex flex-col items-center gap-4"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{
@@ -820,69 +797,58 @@ export function SimplifiedFlowPage({
                 delay: 0.15 + results.length * 0.08,
               }}
             >
-              <label className="flex items-center gap-3 cursor-pointer">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={includeEntitiesInDoc}
-                    onChange={(e) => setIncludeEntitiesInDoc(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-10 h-6 rounded-full bg-border peer-checked:bg-primary transition-colors" />
-                  <div className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+              {/* Download row: format toggle + single download button */}
+              <div className="flex items-center gap-3">
+                {/* Segmented format toggle */}
+                <div className="flex rounded-full border border-border bg-muted p-0.5 text-sm">
+                  <button
+                    onClick={() => setIsDetailedMode(false)}
+                    className={`px-4 py-1.5 rounded-full transition-all font-medium ${
+                      !isDetailedMode
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Summary
+                  </button>
+                  <button
+                    onClick={() => setIsDetailedMode(true)}
+                    className={`px-4 py-1.5 rounded-full transition-all font-medium ${
+                      isDetailedMode
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Detailed
+                  </button>
                 </div>
-                <span className="text-sm text-muted-foreground">
-                  Include individual entities in Word report
-                </span>
-              </label>
-            </motion.div>
 
-            {/* Actions */}
-            <motion.div
-              className="flex justify-center gap-4 flex-wrap"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 + results.length * 0.08 }}
-            >
-              <Button
-                size="lg"
-                onClick={() => downloadExecutiveResults()}
-                className="px-10 py-3 text-lg h-auto"
-              >
-                <Download className="h-5 w-5 mr-2.5" />
-                {results.length === 1
-                  ? "Download Report"
-                  : `Download All ${results.length} Reports`}
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => downloadResults(includeEntitiesInDoc)}
-                className="px-10 py-3 text-lg h-auto"
-              >
-                <Download className="h-5 w-5 mr-2.5" />
-                {results.length === 1
-                  ? "Download Detailed Report"
-                  : `Download All ${results.length} Detailed Reports`}
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={handleRerun}
-                className="px-10 py-3 text-lg h-auto"
-              >
-                <RefreshCw className="h-5 w-5 mr-2.5" />
-                Re-run
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={handleStartOver}
-                className="px-10 py-3 text-lg h-auto"
-              >
-                <RotateCcw className="h-5 w-5 mr-2.5" />
-                Start Over
-              </Button>
+                <Button
+                  onClick={() =>
+                    isDetailedMode
+                      ? downloadResults(true)
+                      : downloadExecutiveResults()
+                  }
+                  className="rounded-md bg-black text-white hover:bg-neutral-800 px-5 py-[0.4375rem] text-sm font-medium h-auto"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {results.length === 1
+                    ? "Download Report"
+                    : `Download ${results.length} Reports`}
+                </Button>
+              </div>
+
+              {/* Secondary actions */}
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={handleStartOver}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <RotateCcw className="h-4 w-4 mr-1.5" />
+                  Start Over
+                </Button>
+              </div>
             </motion.div>
           </motion.div>
         ) : (
@@ -1010,15 +976,6 @@ export function SimplifiedFlowPage({
                   <Button
                     size="lg"
                     variant="outline"
-                    onClick={handleRerun}
-                    className="px-10 py-3 text-lg h-auto"
-                  >
-                    <RefreshCw className="h-5 w-5 mr-2.5" />
-                    Retry
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
                     onClick={handleStartOver}
                     className="px-10 py-3 text-lg h-auto"
                   >
@@ -1031,16 +988,6 @@ export function SimplifiedFlowPage({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Footer link */}
-      <div className="mt-12 text-center">
-        <button
-          onClick={onSwitchToAdvanced}
-          className="text-base text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
-        >
-          Switch to Advanced Mode
-        </button>
-      </div>
     </div>
   );
 }
