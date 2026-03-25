@@ -425,36 +425,6 @@ async function extractAllEntities(
     completionTokens?: number;
   }>
 > {
-  // Send all entities in a single batched request (matching EntityExtractionPage pattern)
-  const extractBody = {
-    conversion_id: fileHash,
-    entities: templateEntities.map((e) => ({
-      name: e.name,
-      prompt: e.prompt,
-    })),
-    model_type: bestModel.modelType,
-    model_id: bestModel.modelId,
-    deployment: bestModel.deployment,
-    api_version: bestModel.apiVersion,
-    processor_used: processorUsed,
-    temperature: 0.0,
-  };
-
-  const res = await fetch("/api/extract", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(extractBody),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Extraction failed: ${err}`);
-  }
-
-  const data = await res.json();
   const extracted: Array<{
     name: string;
     prompt: string;
@@ -465,22 +435,62 @@ async function extractAllEntities(
     completionTokens?: number;
   }> = [];
 
-  const entityResults = data.extracted_entities || [];
-  for (let ei = 0; ei < entityResults.length; ei++) {
+  // Extract entities one by one to show true progress
+  for (let ei = 0; ei < templateEntities.length; ei++) {
     if (abortRef.current) throw new Error("Cancelled");
-    const entityResult = entityResults[ei];
-    const meta = entityResult.meta || {};
-    extracted.push({
-      name: entityResult.name,
-      prompt:
-        templateEntities.find((t) => t.name === entityResult.name)?.prompt ||
-        "",
-      extracted: entityResult.extracted || "",
-      references: entityResult.references,
-      duration: meta.duration,
-      promptTokens: meta.prompt_tokens,
-      completionTokens: meta.completion_tokens,
+
+    const entityToExtract = templateEntities[ei];
+
+    const extractBody = {
+      conversion_id: fileHash,
+      entities: [
+        {
+          name: entityToExtract.name,
+          prompt: entityToExtract.prompt,
+        },
+      ],
+      model_type: bestModel.modelType,
+      model_id: bestModel.modelId,
+      deployment: bestModel.deployment,
+      api_version: bestModel.apiVersion,
+      processor_used: processorUsed,
+      temperature: 0.0,
+    };
+
+    const res = await fetch("/api/extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(extractBody),
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Extraction failed: ${err}`);
+    }
+
+    const data = await res.json();
+    const entityResults = data.extracted_entities || [];
+    
+    // We expect exactly one result
+    if (entityResults.length > 0) {
+      const entityResult = entityResults[0];
+      const meta = entityResult.meta || {};
+      
+      extracted.push({
+        name: entityResult.name,
+        prompt: entityToExtract.prompt,
+        extracted: entityResult.extracted || "",
+        references: entityResult.references,
+        duration: meta.duration,
+        promptTokens: meta.prompt_tokens,
+        completionTokens: meta.completion_tokens,
+      });
+    }
+
+    // Update progress state after this entity completes
     updateFile(fileIndex, { entityIndex: ei + 1 });
   }
 
