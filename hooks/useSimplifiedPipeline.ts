@@ -11,6 +11,7 @@ import {
   downloadFile,
   EntityExportOptions,
 } from "../components/ExportUtils";
+import { generateExecutiveSummary } from "../utils/executiveSummaryExport";
 import { DocumentData } from "../App";
 
 export type FileStage =
@@ -320,7 +321,42 @@ export function useSimplifiedPipeline() {
     []
   );
 
-  return { state, results, run, reset, downloadResults, downloadSingleResult };
+  const downloadExecutiveResults = useCallback(async () => {
+    for (const result of results) {
+      const blob = await generateExecutiveSummary(result.docData);
+      const baseName = result.fileName.replace(/\.pdf$/i, "");
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      downloadFile(
+        blob,
+        `${baseName}_Summary_${timestamp}.docx`,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      );
+      // Small delay between downloads to prevent browser blocking
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }, [results]);
+
+  const downloadSingleExecutiveResult = useCallback(async (result: FileResult) => {
+    const blob = await generateExecutiveSummary(result.docData);
+    const baseName = result.fileName.replace(/\.pdf$/i, "");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadFile(
+      blob,
+      `${baseName}_Summary_${timestamp}.docx`,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+  }, []);
+
+  return {
+    state,
+    results,
+    run,
+    reset,
+    downloadResults,
+    downloadSingleResult,
+    downloadExecutiveResults,
+    downloadSingleExecutiveResult,
+  };
 }
 
 // ── Helper functions ──
@@ -389,36 +425,6 @@ async function extractAllEntities(
     completionTokens?: number;
   }>
 > {
-  // Send all entities in a single batched request (matching EntityExtractionPage pattern)
-  const extractBody = {
-    conversion_id: fileHash,
-    entities: templateEntities.map((e) => ({
-      name: e.name,
-      prompt: e.prompt,
-    })),
-    model_type: bestModel.modelType,
-    model_id: bestModel.modelId,
-    deployment: bestModel.deployment,
-    api_version: bestModel.apiVersion,
-    processor_used: processorUsed,
-    temperature: 0.0,
-  };
-
-  const res = await fetch("/api/extract", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(extractBody),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Extraction failed: ${err}`);
-  }
-
-  const data = await res.json();
   const extracted: Array<{
     name: string;
     prompt: string;
@@ -429,23 +435,70 @@ async function extractAllEntities(
     completionTokens?: number;
   }> = [];
 
-  const entityResults = data.extracted_entities || [];
-  for (let ei = 0; ei < entityResults.length; ei++) {
+  let completedEntitiesCount = 0;
+
+  // Function to process a single entity and update progress
+  const processEntity = async (entityToExtract: { name: string; prompt: string }) => {
     if (abortRef.current) throw new Error("Cancelled");
-    const entityResult = entityResults[ei];
-    const meta = entityResult.meta || {};
-    extracted.push({
-      name: entityResult.name,
-      prompt:
-        templateEntities.find((t) => t.name === entityResult.name)?.prompt ||
-        "",
-      extracted: entityResult.extracted || "",
-      references: entityResult.references,
-      duration: meta.duration,
-      promptTokens: meta.prompt_tokens,
-      completionTokens: meta.completion_tokens,
+
+    const extractBody = {
+      conversion_id: fileHash,
+      entities: [
+        {
+          name: entityToExtract.name,
+          prompt: entityToExtract.prompt,
+        },
+      ],
+      model_type: bestModel.modelType,
+      model_id: bestModel.modelId,
+      deployment: bestModel.deployment,
+      api_version: bestModel.apiVersion,
+      processor_used: processorUsed,
+      temperature: 0.0,
+    };
+
+    const res = await fetch("/api/extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(extractBody),
     });
-    updateFile(fileIndex, { entityIndex: ei + 1 });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Extraction failed: ${err}`);
+    }
+
+    const data = await res.json();
+    const entityResults = data.extracted_entities || [];
+    
+    if (entityResults.length > 0) {
+      const entityResult = entityResults[0];
+      const meta = entityResult.meta || {};
+      
+      extracted.push({
+        name: entityResult.name,
+        prompt: entityToExtract.prompt,
+        extracted: entityResult.extracted || "",
+        references: entityResult.references,
+        duration: meta.duration,
+        promptTokens: meta.prompt_tokens,
+        completionTokens: meta.completion_tokens,
+      });
+    }
+
+    completedEntitiesCount++;
+    updateFile(fileIndex, { entityIndex: completedEntitiesCount });
+  };
+
+  // Process in batches (e.g. 5 concurrent requests) to prevent backend overloading while remaining fast
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < templateEntities.length; i += BATCH_SIZE) {
+    if (abortRef.current) throw new Error("Cancelled");
+    const batch = templateEntities.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map((e) => processEntity(e)));
   }
 
   return extracted;
