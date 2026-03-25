@@ -435,11 +435,11 @@ async function extractAllEntities(
     completionTokens?: number;
   }> = [];
 
-  // Extract entities one by one to show true progress
-  for (let ei = 0; ei < templateEntities.length; ei++) {
-    if (abortRef.current) throw new Error("Cancelled");
+  let completedEntitiesCount = 0;
 
-    const entityToExtract = templateEntities[ei];
+  // Function to process a single entity and update progress
+  const processEntity = async (entityToExtract: { name: string; prompt: string }) => {
+    if (abortRef.current) throw new Error("Cancelled");
 
     const extractBody = {
       conversion_id: fileHash,
@@ -474,7 +474,6 @@ async function extractAllEntities(
     const data = await res.json();
     const entityResults = data.extracted_entities || [];
     
-    // We expect exactly one result
     if (entityResults.length > 0) {
       const entityResult = entityResults[0];
       const meta = entityResult.meta || {};
@@ -490,8 +489,16 @@ async function extractAllEntities(
       });
     }
 
-    // Update progress state after this entity completes
-    updateFile(fileIndex, { entityIndex: ei + 1 });
+    completedEntitiesCount++;
+    updateFile(fileIndex, { entityIndex: completedEntitiesCount });
+  };
+
+  // Process in batches (e.g. 5 concurrent requests) to prevent backend overloading while remaining fast
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < templateEntities.length; i += BATCH_SIZE) {
+    if (abortRef.current) throw new Error("Cancelled");
+    const batch = templateEntities.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map((e) => processEntity(e)));
   }
 
   return extracted;
