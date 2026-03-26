@@ -1704,9 +1704,12 @@ export function EvaluationPage({
     if (!entity) return;
 
     // Ensure we have a session (lazy clone for shared sessions)
-    if (!documentData.sessionId) {
-      const newId = await ensureSession();
-      if (!newId) {
+    // Capture into a local variable — React state updates from ensureSession()
+    // are async so documentData.sessionId stays stale within this closure.
+    let activeSessionId = documentData.sessionId;
+    if (!activeSessionId) {
+      activeSessionId = (await ensureSession()) ?? undefined;
+      if (!activeSessionId) {
         toast.error("No active session", {
           description: "Cannot run evaluation without a session.",
         });
@@ -1807,7 +1810,7 @@ export function EvaluationPage({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          session_id: documentData.sessionId,
+          session_id: activeSessionId,
           tasks,
           providers: providerConfigs,
           metrics: selectedMetrics,
@@ -1935,9 +1938,12 @@ export function EvaluationPage({
 
   const executeRunEvaluation = async () => {
     // Ensure we have a session (lazy clone for shared sessions)
-    if (!documentData.sessionId) {
-      const newId = await ensureSession();
-      if (!newId) {
+    // Capture into a local variable — React state updates from ensureSession()
+    // are async so documentData.sessionId stays stale within this closure.
+    let activeSessionId = documentData.sessionId;
+    if (!activeSessionId) {
+      activeSessionId = (await ensureSession()) ?? undefined;
+      if (!activeSessionId) {
         toast.error("No active session", {
           description: "Cannot run evaluation without a session.",
         });
@@ -2015,7 +2021,7 @@ export function EvaluationPage({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          session_id: documentData.sessionId,
+          session_id: activeSessionId,
           tasks,
           providers: providerConfigs,
           metrics: selectedMetrics,
@@ -2327,9 +2333,13 @@ export function EvaluationPage({
   }) => {
     // Guard: session_id is required by the backend job queue.
     // For shared sessions (no sessionId yet), lazily create a clone.
-    if (!documentData.sessionId) {
-      const newId = await ensureSession();
-      if (!newId) {
+    // We capture into a local variable because React state updates from
+    // ensureSession() are async and documentData.sessionId stays stale
+    // within this closure.
+    let activeSessionId = documentData.sessionId;
+    if (!activeSessionId) {
+      activeSessionId = (await ensureSession()) ?? undefined;
+      if (!activeSessionId) {
         toast.error("No active session", {
           description:
             "Cannot run evaluation without a session. Please start a new session or restore one from history.",
@@ -2476,7 +2486,7 @@ export function EvaluationPage({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          session_id: documentData.sessionId,
+          session_id: activeSessionId,
           tasks: tasksForBackend,
           providers: providerConfigs,
           metrics: selectedMetrics,
