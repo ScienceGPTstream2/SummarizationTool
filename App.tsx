@@ -12,10 +12,10 @@ import { TemplateWorkspacePage } from "./components/TemplateWorkspace/TemplateWo
 import { GroupManagementPage } from "./components/GroupManagement/GroupManagementPage";
 import { SimplifiedFlowPage } from "./components/SimplifiedFlowPage";
 
-import { RainbowButton } from "./components/ui/rainbow-button";
+// import { RainbowButton } from "./components/ui/rainbow-button"; // hidden for demo
 import { Button } from "./components/ui/button";
 import {
-  Briefcase,
+  // Briefcase, // hidden for demo
   LogOut,
   Clock,
   FileText,
@@ -1902,6 +1902,7 @@ export default function App() {
                       </Button>
                     )}
 
+                    {/* Executive Mode button hidden for demo — logic preserved in ExecutiveModePage.tsx
                     {currentStep !== "executive" && (
                       <RainbowButton
                         size="sm"
@@ -1912,6 +1913,7 @@ export default function App() {
                         Executive Mode
                       </RainbowButton>
                     )}
+                    */}
 
                     {currentStep !== "templates" && (
                       <Button
