@@ -1,0 +1,12 @@
+export const jordanPermTestTemplate = {
+  studyType: "Jordan-Perm-Test",
+  displayName: "Jordan-Perm-Test",
+  entities: [
+    {
+      name: "Test",
+      prompt: "Which model are you",
+    },
+  ],
+  summaryPrompt:
+    "Take the extracted entities and put them into a single cohesive paragraph. Do not change any of the extracted entities.",
+};

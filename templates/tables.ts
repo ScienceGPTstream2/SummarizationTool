@@ -1,0 +1,13 @@
+export const tablesTemplate = {
+  studyType: "Tables for Epi",
+  displayName: "Tables",
+  entities: [
+    {
+      name: "Measure of Association - Tables",
+      prompt:
+        'Extract the reported measures of association into table format (Risk ratio, rate ratio, odds ratio, relative risk, hazard ratio, risk difference, rate difference, attributable fraction, mean difference, regression coefficient, slope, correlation, \u03b2) and any corresponding confidence intervals or standard deviations. Report both adjusted and non-adjusted measures of association. Include whether the study authors considered the results to be statistically significant.\n\nAlso this is a concise table so focus on extracting numerical values with minimal words to describe what the numbers mean\n\n\nFew-shot examples: \nInput: "Adjusted odds ratio for high-exposure group was 1.45 (95% CI: 1.10\u20131.90)." \n\nOutput: "OR 1.45 (95% CI: 1.10\u20131.90)" \n\nInput: "Relative risk for pesticide users versus non-users was 0.85 (95% CI: 0.60\u20131.20)." \n\nOutput: "RR 0.85 (95% CI: 0.60\u20131.20)" \n\nInput: \u201cThe \u03b2 value for amitrole exposure was 0.8 (95% CI: 0.6-1.0)\n\nOutput: "\u03b2=0.8 (95% CI: 0.6\u20131.0)" \n\nIf not reported, output "Not Reported."\n\nReport all values in a single table\n',
+    },
+  ],
+  summaryPrompt:
+    "Take the extracted entities and put them into a single cohesive table. Do not change any of the extracted entities.",
+};
