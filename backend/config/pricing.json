@@ -178,6 +178,12 @@
       "output_per_million": 0.0,
       "cost_per_page": 0.0,
       "cost_per_minute": 0.007838333333333333
+    },
+    "ollama:*": {
+      "provider": "ollama",
+      "input_per_million": 0.0,
+      "output_per_million": 0.0,
+      "note": "Self-hosted on Azure GPU — cost is compute, not per-token"
     }
   }
 }

@@ -1,0 +1,16 @@
+model,context_window,field_used,error
+nemotron-mini:4b-instruct-q4_K_M,4096,model_info.nemotron.context_length,
+nemotron-mini:4b-instruct-fp16,4096,model_info.nemotron.context_length,
+nemotron-mini:4b-instruct-q8_0,4096,model_info.nemotron.context_length,
+dolphin-llama3:8b,,,"HTTP 404: {""error"":""model 'dolphin-llama3:8b' not found""}"
+openbiollm-llama-3:8b-q8_0,,,"HTTP 404: {""error"":""model 'openbiollm-llama-3:8b-q8_0' not found""}"
+openbiollm-llama-3:8b-q6_k,8192,model_info.llama.context_length,
+Mistral-7B-Instruct-v0.3-Q4_K_M:latest,32768,model_info.llama.context_length,
+rnj-1:8b,32768,model_info.gemma3.context_length,
+phi4-reasoning:14b,32768,model_info.phi3.context_length,
+gpt-o3:20b,,,"HTTP 404: {""error"":""model 'gpt-o3:20b' not found""}"
+gemma2:27b,8192,model_info.gemma2.context_length,
+qwen2.5:32b,32768,model_info.qwen2.context_length,
+olmo-2:32b-think-q4_K_M,,,"HTTP 404: {""error"":""model 'olmo-2:32b-think-q4_K_M' not found""}"
+openbiollm-llama-3:70b_q4_k_m,8192,model_info.llama.context_length,
+mistral-large:123b,32768,model_info.llama.context_length,

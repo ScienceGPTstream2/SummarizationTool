@@ -11,7 +11,8 @@ export interface ModelConfig {
     | "meta"
     | "other"
     | "azure"
-    | "macbook";
+    | "macbook"
+    | "ollama";
   // Optional runtime fields for deployments (used for custom Azure models)
   deployment?: string;
   api_version?: string;
@@ -276,7 +277,9 @@ export class SettingsManager {
                   ? "meta"
                   : model.provider?.toLowerCase().includes("macbook")
                     ? "macbook"
-                    : "other",
+                    : model.provider?.toLowerCase().includes("ollama")
+                      ? "ollama"
+                      : "other",
           deployment: model.deployment,
           api_version: model.api_version,
           project_id: model.project_id,

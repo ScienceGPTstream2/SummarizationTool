@@ -786,10 +786,11 @@ export function EntityExtractionPage({
         },
       }));
     } else {
-      // Separate macbook models from cloud models
+      // Separate macbook/ollama models from cloud models (both need sequential processing)
       const macbookModels = modelsToUse.filter((mId: string) => {
         const mObj = availableModels.find((m) => m.id === mId);
-        return mObj?.provider?.toLowerCase().includes("macbook");
+        const prov = mObj?.provider?.toLowerCase() || "";
+        return prov.includes("macbook") || prov.includes("ollama");
       });
       const cloudModels = modelsToUse.filter(
         (mId: string) => !macbookModels.includes(mId)
@@ -1689,6 +1690,8 @@ export function EntityExtractionPage({
       modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
     } else if (provider.includes("macbook")) {
       modelType = "macbook";
+    } else if (provider.includes("ollama")) {
+      modelType = "ollama";
     }
 
     console.log(
@@ -1777,6 +1780,8 @@ export function EntityExtractionPage({
         modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
       } else if (provider.includes("macbook")) {
         modelType = "macbook";
+      } else if (provider.includes("ollama")) {
+        modelType = "ollama";
       }
 
       const modelConfig = {
@@ -2278,6 +2283,7 @@ export function EntityExtractionPage({
     if (p.includes("meta") || p.includes("llama"))
       return modelId?.startsWith("azure-") ? "azure-llama" : "llama";
     if (p.includes("macbook")) return "macbook";
+    if (p.includes("ollama")) return "ollama";
     return "azure";
   };
 

@@ -38,6 +38,7 @@ _EXTRACTION_PROVIDER_MAP = {
     "llama": "gcp",
     "azure-llama": "azure",
     "macbook": "macbook",
+    "ollama": "ollama",
 }
 
 # Timeout logging setup
@@ -278,15 +279,15 @@ async def extract_entities(
         # holding N-1 idle coroutines waiting in the queue and allows results to be
         # ready in order.
         # For cloud models: continue using asyncio.gather for maximum throughput.
-        if request.model_type == "macbook":
+        if request.model_type in ("macbook", "ollama"):
             print(
-                f"[EXTRACTION] Macbook model detected — processing {len(request.entities)} "
+                f"[EXTRACTION] {request.model_type.title()} model detected — processing {len(request.entities)} "
                 f"entities SEQUENTIALLY (serialized for GPU reliability)"
             )
             extracted_entities = []
             for i, entity in enumerate(request.entities):
                 print(
-                    f"[EXTRACTION] Macbook entity {i + 1}/{len(request.entities)}: '{entity.name}'"
+                    f"[EXTRACTION] {request.model_type.title()} entity {i + 1}/{len(request.entities)}: '{entity.name}'"
                 )
                 result = await run_extraction(entity)
                 extracted_entities.append(result)

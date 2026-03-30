@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from core.dependencies import get_current_user
 from schemas.server import ServerConfig
 from services.llm.macbook import MacbookLLMClient
+from services.llm.ollama import OllamaLLMClient
 
 
 class BatchMetricsRequest(BaseModel):
@@ -124,6 +125,16 @@ async def get_server_config():
             is_macbook_healthy = True  # optimistic; real fetch happens in /models
         except Exception:
             is_macbook_healthy = False
+
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL")
+    is_ollama_configured = bool(ollama_base_url)
+    is_ollama_healthy = False
+    if is_ollama_configured:
+        try:
+            is_ollama_healthy = True  # optimistic; real fetch happens in /models
+        except Exception:
+            is_ollama_healthy = False
+
     return ServerConfig(
         is_azure_openai_configured=is_azure_openai_configured,
         is_gemini_configured=is_gemini_configured,
@@ -131,6 +142,8 @@ async def get_server_config():
         is_llama_configured=is_llama_configured,
         is_macbook_configured=is_macbook_configured,
         is_macbook_healthy=is_macbook_healthy,
+        is_ollama_configured=is_ollama_configured,
+        is_ollama_healthy=is_ollama_healthy,
     )
 
 
@@ -482,6 +495,64 @@ async def get_available_models():
                     )
             else:
                 print("[MacbookLLM] No models returned; skipping Macbook models")
+
+    # Add Ollama models if configured (Azure-hosted Ollama instance)
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL")
+    if ollama_base_url:
+        # Keep a simple static cache in the router scope to avoid hammering tags
+        # across rapid successive calls.
+        global _OLLAMA_MODELS_CACHE  # type: ignore
+        global _OLLAMA_MODELS_CACHE_TS  # type: ignore
+
+        if "_OLLAMA_MODELS_CACHE" not in globals():
+            _OLLAMA_MODELS_CACHE = []
+            _OLLAMA_MODELS_CACHE_TS = 0.0
+
+        cache_ttl = 120  # seconds
+        now_ts = __import__("time").time()
+
+        use_cache = (
+            _OLLAMA_MODELS_CACHE and now_ts - _OLLAMA_MODELS_CACHE_TS < cache_ttl
+        )
+
+        if use_cache:
+            ollama_models = _OLLAMA_MODELS_CACHE
+        else:
+            ollama_client = OllamaLLMClient()
+            ollama_models = await ollama_client.fetch_available_models()
+            if ollama_models:
+                _OLLAMA_MODELS_CACHE = ollama_models
+                _OLLAMA_MODELS_CACHE_TS = now_ts
+
+        if ollama_models:
+            for model in ollama_models:
+                models.append(
+                    {
+                        "id": model["id"],
+                        "name": model["name"],
+                        "provider": "Ollama",
+                        "description": "Azure-hosted model",
+                        "supports_temperature": True,
+                        "default_temperature": 0.5,
+                    }
+                )
+        else:
+            # If no models returned and we have a cached version, keep them to avoid UI drop
+            if _OLLAMA_MODELS_CACHE:
+                print("[OllamaLLM] Using cached ollama models after fetch failure")
+                for model in _OLLAMA_MODELS_CACHE:
+                    models.append(
+                        {
+                            "id": model["id"],
+                            "name": model["name"],
+                            "provider": "Ollama",
+                            "description": "Azure-hosted model",
+                            "supports_temperature": True,
+                            "default_temperature": 0.5,
+                        }
+                    )
+            else:
+                print("[OllamaLLM] No models returned; skipping Ollama models")
 
     return JSONResponse(status_code=200, content=models)
 

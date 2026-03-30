@@ -1,0 +1,38 @@
+# Dockerfile.ollama
+# =================
+# Custom Ollama image with pre-pulled models for Azure Container Apps deployment.
+#
+# Build:
+#   az acr build --registry <your-acr> --image ollama-gpu:latest --file Dockerfile.ollama .
+#
+# Or locally:
+#   docker build -f Dockerfile.ollama -t ollama-gpu:latest .
+#
+# Models are baked into the image at build time to avoid slow downloads on
+# cold start. Add or remove `ollama pull` commands below to customize which
+# models are available.
+
+FROM ollama/ollama:latest
+
+# Pre-pull models at build time.
+# Ollama needs its server running to pull models, so we start it in the
+# background, pull, then stop it. The downloaded model blobs persist in
+# the image layer.
+RUN ollama serve & \
+    SERVER_PID=$! && \
+    sleep 5 && \
+    ollama pull llama3.1:8b-instruct-q8_0 && \
+    ollama pull qwen2.5:14b-instruct-q4_K_M && \
+    kill $SERVER_PID && \
+    wait $SERVER_PID 2>/dev/null || true
+
+# Expose the Ollama API port
+EXPOSE 11434
+
+# Configure Ollama to listen on all interfaces and keep models loaded
+# for 10 minutes after last request (saves VRAM reload time).
+ENV OLLAMA_HOST=0.0.0.0:11434
+ENV OLLAMA_KEEP_ALIVE=10m
+
+# Default command: start the Ollama server
+CMD ["serve"]

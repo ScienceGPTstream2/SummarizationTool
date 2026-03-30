@@ -20,6 +20,12 @@ def load_config():
                     print(
                         f"✅ Macbook LLM base URL loaded from secrets.toml: {macbook_base_url}"
                     )
+                ollama_base_url = cfg.get("ollama_base_url")
+                if ollama_base_url:
+                    os.environ.setdefault("OLLAMA_BASE_URL", ollama_base_url)
+                    print(
+                        f"✅ Ollama base URL loaded from secrets.toml: {ollama_base_url}"
+                    )
                 azure_cfg = cfg.get("azure_openai", {}) or {}
                 endpoint = azure_cfg.get("endpoint")
                 api_key = azure_cfg.get("api_key")

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from services.database import get_db_service
 
 router = APIRouter(prefix="/api/paragraph-evaluation", tags=["paragraph_evaluation"])

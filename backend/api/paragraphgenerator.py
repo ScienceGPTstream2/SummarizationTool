@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from services.llm.llm_service import LLMService
 from services.session.session_service import get_session_service
 from services.telemetry.cost_tracker import cost_tracker

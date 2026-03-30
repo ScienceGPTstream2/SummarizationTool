@@ -8,6 +8,7 @@ from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
 from .llama import LlamaLLMClient
 from .macbook import MacbookLLMClient
+from .ollama import OllamaLLMClient
 import toml
 
 # The load_secrets_to_env function is moved to backend/main.py to ensure early loading.
@@ -40,6 +41,7 @@ class LLMService:
         self.anthropic_client = AnthropicLLMClient()
         self.llama_client = LlamaLLMClient()
         self.macbook_client = MacbookLLMClient()
+        self.ollama_client = OllamaLLMClient()
 
         # Timeout logging setup
         self.timeout_log_dir = (
@@ -265,6 +267,26 @@ class LLMService:
                 )
                 self._record_session_metrics(session_id, "macbook", result)
                 return result
+            elif model_type == "ollama":
+                if self.ollama_client.disabled:
+                    return {"success": False, "error": "Ollama is not configured."}
+                # Ollama requests are serialized through a FIFO queue (one request
+                # at a time) to prevent GPU VRAM overload from concurrent model
+                # loads on the Azure-hosted Ollama instance.
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.ollama_client.extract_entities_with_ollama(
+                        markdown,
+                        extraction_prompt,
+                        model_id,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                    timeout_seconds=1900,
+                )
+                self._record_session_metrics(session_id, "ollama", result)
+                return result
             else:
                 return {
                     "success": False,
@@ -436,6 +458,24 @@ class LLMService:
                 timeout_seconds=1900,
             )
             self._record_session_metrics(session_id, "macbook", result)
+            return result
+        elif model_type == "ollama":
+            if self.ollama_client.disabled:
+                return {"success": False, "error": "Ollama is not configured."}
+            # Ollama requests are serialized through a FIFO queue; generous
+            # timeout to accommodate queue wait time (same rationale as macbook).
+            result = await self._call_with_timeout_logging(
+                "paragraph_ollama",
+                self.ollama_client.generate_paragraph_with_ollama(
+                    user_prompt,
+                    model_id,
+                    max_tokens,
+                    temperature,
+                    system_message,
+                ),
+                timeout_seconds=1900,
+            )
+            self._record_session_metrics(session_id, "ollama", result)
             return result
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}

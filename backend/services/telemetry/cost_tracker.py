@@ -49,7 +49,7 @@ class CostTracker:
         """Lazy-load the database service to avoid circular imports"""
         if self._db_service is None:
             try:
-                from services.database.supabase_db_service import get_db_service
+                from services.database import get_db_service
 
                 self._db_service = get_db_service()
             except Exception as e:
