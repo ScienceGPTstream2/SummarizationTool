@@ -1,12 +1,13 @@
 /**
  * Auth Callback Component
  *
- * Handles the OAuth callback from Supabase/GitHub.
- * This component is displayed while processing the authentication response.
+ * Handles the OAuth callback from Better Auth / Microsoft Entra.
+ * Better Auth sets session cookies server-side, so we just need to
+ * verify a session exists and redirect to the main app.
  */
 
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { getSession } from "../utils/authUtils";
 
 interface AuthCallbackProps {
   onSuccess: () => void;
@@ -21,25 +22,15 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
   useEffect(() => {
     const handleAuthCallback = async () => {
       try {
-        // Supabase automatically handles the code exchange when detectSessionInUrl is true
-        // We just need to check if we have a valid session
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
-
-        if (error) {
-          console.error("Auth callback error:", error);
-          setStatus("error");
-          onError(error.message);
-          return;
-        }
+        // Better Auth handles the OAuth code exchange server-side and
+        // sets a session cookie. We just check if a session exists.
+        const session = await getSession();
 
         if (session) {
-          console.log("Auth successful, user:", session.user.email);
+          console.log("Auth successful, session established");
           setStatus("success");
 
-          // Record login history (async, don't await blocking the UI)
+          // Record login history (async, don't block UI)
           import("../utils/authUtils").then(({ recordLoginEvent }) => {
             recordLoginEvent();
           });
@@ -49,25 +40,18 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
             onSuccess();
           }, 500);
         } else {
-          // No session and no error - might be during code exchange
-          // Wait a bit and check again
+          // No session yet — wait a moment and retry (cookie might not be set yet)
           setTimeout(async () => {
-            const {
-              data: { session: retrySession },
-              error: retryError,
-            } = await supabase.auth.getSession();
+            const retrySession = await getSession();
 
-            if (retryError) {
-              setStatus("error");
-              onError(retryError.message);
-            } else if (retrySession) {
+            if (retrySession) {
               setStatus("success");
               onSuccess();
             } else {
               setStatus("error");
               onError("Authentication failed. Please try again.");
             }
-          }, 1000);
+          }, 1500);
         }
       } catch (err) {
         console.error("Auth callback exception:", err);

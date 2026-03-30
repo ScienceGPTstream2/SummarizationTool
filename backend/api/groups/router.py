@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from services.groups.group_service import get_group_service
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
@@ -292,64 +292,48 @@ async def search_users(
     if not q or len(q) < 2:
         return []
 
-    service = get_group_service()
-    query_lower = q.lower().strip()
+    from sqlalchemy import select, or_
+    from models import User, UserGroup
+    from models.base import get_db_session
 
-    # Get existing group members to exclude them
-    existing_member_ids: set = set()
-    if group_id:
-        try:
-            members = (
-                service.db.client.table("user_groups")
-                .select("user_id")
-                .eq("group_id", group_id)
-                .execute()
-            )
-            existing_member_ids = {m["user_id"] for m in (members.data or [])}
-        except Exception:
-            pass
+    query_lower = q.strip()
 
-    results: List[UserSearchResult] = []
-
-    # 1. Try exact/partial UUID match first
+    db = get_db_session()
     try:
-        # If query looks like a UUID prefix, search for users starting with it
-        users_resp = service.db.client.auth.admin.list_users()
-        if users_resp:
-            for user in users_resp:
-                if user.id in existing_member_ids:
-                    continue
+        # Get existing group members to exclude them
+        existing_member_ids: set = set()
+        if group_id:
+            members = db.execute(
+                select(UserGroup.user_id).where(UserGroup.group_id == group_id)
+            ).scalars().all()
+            existing_member_ids = set(members)
 
-                meta = user.user_metadata or {}
-                display_name = (
-                    meta.get("full_name")
-                    or meta.get("name")
-                    or meta.get("preferred_username")
-                    or meta.get("user_name")
+        # Search users by name or email (case-insensitive)
+        users = db.execute(
+            select(User).where(
+                or_(
+                    User.name.ilike(f"%{query_lower}%"),
+                    User.email.ilike(f"%{query_lower}%"),
+                    User.id.ilike(f"%{query_lower}%"),
                 )
-                email = user.email or ""
-                avatar_url = meta.get("avatar_url")
+            ).limit(20)
+        ).scalars().all()
 
-                # Match against user_id, display_name, or email
-                if (
-                    query_lower in (user.id or "").lower()
-                    or query_lower in (display_name or "").lower()
-                    or query_lower in email.lower()
-                ):
-                    results.append(
-                        UserSearchResult(
-                            user_id=user.id,
-                            display_name=display_name,
-                            email=email,
-                            avatar_url=avatar_url,
-                        )
-                    )
-
-                if len(results) >= 10:
-                    break
-    except Exception as e:
-        # Log the error but continue with empty results if user search fails
-        print(f"Error searching users: {e}")
-        pass
+        results: List[UserSearchResult] = []
+        for user in users:
+            if user.id in existing_member_ids:
+                continue
+            results.append(
+                UserSearchResult(
+                    user_id=user.id,
+                    display_name=user.name or user.email,
+                    email=user.email,
+                    avatar_url=user.image,
+                )
+            )
+            if len(results) >= 10:
+                break
+    finally:
+        db.close()
 
     return results

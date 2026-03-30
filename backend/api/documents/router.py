@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from pathlib import Path
 from typing import Dict, Any, List
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from schemas.documents import ProcessFileRequest
 from services.document import get_organized_file_service
 from services.document.document_service import DocumentService
@@ -154,9 +154,7 @@ async def process_uploaded_file(
             # Tier 4: cross-session DB lookup (Docling legacy docs without stored duration)
             if not parse_cost:
                 try:
-                    from services.database.supabase_db_service import (
-                        get_db_service as _gds,
-                    )
+                    from services.database import get_db_service as _gds
 
                     _historical = _gds().get_parse_cost_by_file_hash(file_hash)
                     if _historical:
@@ -177,7 +175,7 @@ async def process_uploaded_file(
                     http_request.headers.get("X-User-Id") if http_request else None
                 )
                 if session_id:
-                    from services.database.supabase_db_service import get_db_service
+                    from services.database import get_db_service
 
                     db = get_db_service()
                     docs = db.get_documents_by_session(session_id)
@@ -353,7 +351,7 @@ async def process_uploaded_file(
         _original_filename = None
         try:
             if session_id:
-                from services.database.supabase_db_service import get_db_service
+                from services.database import get_db_service
 
                 db = get_db_service()
                 docs = db.get_documents_by_session(session_id)

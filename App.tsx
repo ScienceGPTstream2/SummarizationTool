@@ -35,12 +35,13 @@ import {
 } from "./components/ui/alert-dialog";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { settingsManager } from "./components/SettingsManager";
-import { supabase, Session, AuthChangeEvent } from "./lib/supabase";
 import {
   signOut,
   getCurrentUser,
   getValidToken,
+  getSession,
   installVisibilityRefreshListener,
+  Session,
 } from "./utils/authUtils";
 import { Toaster, toast } from "./components/ui/sonner";
 import { SessionMetrics } from "./components/SessionMetrics";
@@ -386,66 +387,24 @@ export default function App() {
   const sessionCreationInProgressRef = useRef(false);
   const restoringSessionRef = useRef(false);
 
-  // Initialize Supabase auth listener
+  // Initialize Better Auth session check
   useEffect(() => {
-    // Get initial session
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }: { data: { session: Session | null } }) => {
+    // Check if we have a valid session on mount
+    getSession()
+      .then((session: Session | null) => {
         setSession(session);
         setLoading(false);
 
         // If we have a session and we're on callback, redirect to main app
         if (session && isAuthCallback) {
-          // Clean up URL
           window.history.replaceState({}, document.title, "/");
           setCurrentStep("upload");
         }
+      })
+      .catch(() => {
+        setSession(null);
+        setLoading(false);
       });
-
-    // Listen for auth state changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event: AuthChangeEvent, session: Session | null) => {
-        if (session) {
-          // Always accept a valid session (initial load, refresh, sign-in)
-          setSession(session);
-
-          // If we just logged in, go to upload
-          if (
-            event === "SIGNED_IN" &&
-            (currentStepRef.current === "login" ||
-              currentStepRef.current === "auth_callback")
-          ) {
-            // Clean up URL if needed
-            if (
-              window.location.pathname === "/auth/callback" ||
-              window.location.hash.includes("access_token")
-            ) {
-              window.history.replaceState({}, document.title, "/");
-            }
-            setCurrentStep("upload");
-          }
-        } else if (event === "SIGNED_OUT") {
-          // Only clear session on EXPLICIT sign-out.
-          // This is the only event that should nuke the app state.
-          setSession(null);
-          setCurrentStep("login");
-        } else {
-          // Transient null session — e.g. token refresh after tab switch,
-          // background timer expiry, or network hiccup.
-          // Do NOT call setSession(null) here — that would trigger the
-          // `if (!session) return <LoginPage />` render guard and unmount
-          // the entire app, destroying all in-progress work.
-          console.warn(
-            `[Auth] Event "${event}" fired with null session — keeping existing session to avoid state loss`
-          );
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
   }, []);
 
   // ─── Fix: Proactive token refresh on tab visibility change ──────────

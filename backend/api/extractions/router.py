@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from schemas.extractions import ExtractRequest, Entity
 from services.document.document_service import DocumentService
 from services.llm.llm_service import LLMService

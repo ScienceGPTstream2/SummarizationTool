@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from services.evaluation.job_queue import (
     create_job,
     get_job,

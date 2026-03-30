@@ -107,23 +107,6 @@ class OrganizedDocumentProcessor:
         else:
             result = await self._process_with_docling(str(original_file), output_path)
 
-        # Update Supabase with processing info
-        if result["success"] and self.file_service.supabase.is_configured:
-            try:
-                global_file = await self.file_service.supabase.get_file_by_hash(
-                    file_hash
-                )
-                if global_file:
-                    await self.file_service.supabase.update_file_processing(
-                        file_id=global_file["id"],
-                        conversion_id=file_hash,  # Use hash as conversion ID
-                        processor_used=processor,
-                        markdown_path=str(output_path / "document.md"),
-                        metadata=result.get("metadata", {}),
-                    )
-            except Exception as e:
-                print(f"Warning: Failed to update processing info in Supabase: {e}")
-
         result["file_hash"] = file_hash
         result["cached"] = False
         result["output_path"] = str(output_path)

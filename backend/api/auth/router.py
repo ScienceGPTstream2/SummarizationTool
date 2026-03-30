@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from pathlib import Path
 
-from core.dependencies import get_current_user
-from services.database.supabase_db_service import get_db_service
+from core.auth import get_current_user
+from services.database import get_db_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

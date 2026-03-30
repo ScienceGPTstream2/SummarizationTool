@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import List
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from schemas.evaluations import (
     EvaluationRequest,
     BatchEvaluationRequest,

@@ -1,126 +1,132 @@
 /**
- * Authentication Utilities (Supabase)
+ * Authentication Utilities (Better Auth)
  *
- * Provides centralized authentication management using Supabase.
- * Key design decisions:
- *   - NEVER nuke app state on transient auth failures (no clearTokenAndReload
- *     inside authenticatedFetch). Background API calls hitting a 401 should NOT
- *     destroy the user's in-progress work.
- *   - Deduplicate concurrent refresh attempts so multiple components don't
- *     race each other.
- *   - Proactively refresh on tab-visibility change (Chrome throttles timers in
- *     backgrounded tabs, so Supabase's autoRefreshToken may not fire in time).
+ * Drop-in replacement for the old Supabase auth utilities.
+ * All public exports have the same names and signatures so that
+ * the 16+ consumer components/hooks don't need changes.
+ *
+ * Better Auth stores session state server-side (cookie-based).
+ * The auth sidecar runs on VITE_AUTH_URL (default http://localhost:3001).
  */
 
-import { supabase, Session } from "../lib/supabase";
+// ─── Types ──────────────────────────────────────────────────────────────────
+export interface Session {
+  token: string;
+  userId: string;
+  expiresAt: Date;
+}
 
-// ─── Refresh deduplication ──────────────────────────────────────────────────
-// If a refresh is already in flight, all callers share the same promise so we
-// don't fire 5+ concurrent refreshSession() calls from different components.
-let _refreshPromise: Promise<Session | null> | null = null;
+interface BetterAuthSession {
+  session: {
+    id: string;
+    token: string;
+    userId: string;
+    expiresAt: string;
+  };
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    image: string | null;
+  };
+}
 
-async function _doRefresh(): Promise<Session | null> {
-  try {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) {
-      console.warn("[Auth] Session refresh failed:", error.message);
+const AUTH_URL =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_AUTH_URL) ||
+  "http://localhost:3001";
+
+// ─── Internal helpers ───────────────────────────────────────────────────────
+
+let _cachedSession: BetterAuthSession | null = null;
+let _sessionFetchPromise: Promise<BetterAuthSession | null> | null = null;
+
+/**
+ * Fetch the current session from the Better Auth sidecar.
+ * Deduplicates concurrent calls.
+ */
+async function _fetchSession(): Promise<BetterAuthSession | null> {
+  if (_sessionFetchPromise) return _sessionFetchPromise;
+
+  _sessionFetchPromise = (async () => {
+    try {
+      const res = await fetch(`${AUTH_URL}/api/auth/get-session`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        _cachedSession = null;
+        return null;
+      }
+      const data = await res.json();
+      if (data?.session && data?.user) {
+        _cachedSession = data;
+        return data;
+      }
+      _cachedSession = null;
       return null;
+    } catch (err) {
+      console.warn("[Auth] Failed to fetch session:", err);
+      _cachedSession = null;
+      return null;
+    } finally {
+      _sessionFetchPromise = null;
     }
-    return data.session;
-  } finally {
-    // Clear the singleton so the next caller starts a fresh refresh
-    _refreshPromise = null;
-  }
+  })();
+
+  return _sessionFetchPromise;
 }
 
-function deduplicatedRefresh(): Promise<Session | null> {
-  if (!_refreshPromise) {
-    _refreshPromise = _doRefresh();
-  }
-  return _refreshPromise;
-}
-
-// ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Public API (same names as old Supabase version) ────────────────────────
 
 /**
  * Get the current session
  */
 export async function getSession(): Promise<Session | null> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session;
+  const data = await _fetchSession();
+  if (!data?.session) return null;
+  return {
+    token: data.session.token,
+    userId: data.session.userId,
+    expiresAt: new Date(data.session.expiresAt),
+  };
 }
 
 /**
  * Get valid access token from current session.
- *
- * 1. Tries the cached session first.
- * 2. If expired or missing, performs a deduplicated refresh.
- * 3. Returns null on failure — callers decide how to handle it
- *    (toast, retry, etc.) instead of blowing up the app.
+ * Returns the Better Auth session token for API calls.
  */
 export async function getValidToken(): Promise<string | null> {
-  let session = await getSession();
-
-  // Check if we have a token and it's not about to expire (30s buffer)
-  if (session?.access_token && session.expires_at) {
-    const nowSecs = Math.floor(Date.now() / 1000);
-    const bufferSecs = 30; // refresh 30s before actual expiry
-    if (nowSecs < session.expires_at - bufferSecs) {
-      return session.access_token;
-    }
-    // Token is expired or about to expire — fall through to refresh
-    console.log("[Auth] Token expiring soon, proactively refreshing...");
+  const data = await _fetchSession();
+  if (!data?.session?.token) {
+    console.log("[Auth] No valid session token available");
+    return null;
   }
 
-  // No valid token — attempt refresh (deduplicated)
-  if (!session?.access_token || !session) {
-    console.log("[Auth] No access token, attempting session refresh...");
+  // Check expiration with 30s buffer
+  const expiresAt = new Date(data.session.expiresAt).getTime();
+  const now = Date.now();
+  if (now > expiresAt - 30_000) {
+    console.log("[Auth] Token expiring soon, re-fetching session...");
+    _cachedSession = null;
+    const refreshed = await _fetchSession();
+    return refreshed?.session?.token ?? null;
   }
 
-  session = await deduplicatedRefresh();
-  return session?.access_token ?? null;
+  return data.session.token;
 }
 
 /**
- * Synchronous version - gets token from memory/storage if available.
+ * Synchronous version - gets token from cache if available.
  * Use this for initial render checks, but prefer async version for API calls.
- *
- * Includes a 60-second grace period so that a token that *just* expired
- * doesn't immediately flash the user to the login screen before the async
- * refresh has a chance to run.
  */
 export function getValidTokenSync(): string | null {
-  // Supabase stores session in localStorage with key format: sb-{project-ref}-auth-token
-  const keys = Object.keys(localStorage);
-  const supabaseKey = keys.find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
+  if (!_cachedSession?.session?.token) return null;
 
-  if (!supabaseKey) return null;
-
-  try {
-    const stored = localStorage.getItem(supabaseKey);
-    if (!stored) return null;
-
-    const parsed = JSON.parse(stored);
-    const accessToken = parsed?.access_token;
-    const expiresAt = parsed?.expires_at;
-
-    if (!accessToken) return null;
-
-    // Allow a 60-second grace window so the async refresh can complete
-    // before we declare the user "logged out" from a sync check.
-    const GRACE_SECONDS = 60;
-    if (expiresAt && Date.now() / 1000 > expiresAt + GRACE_SECONDS) {
-      return null;
-    }
-
-    return accessToken;
-  } catch {
+  const expiresAt = new Date(_cachedSession.session.expiresAt).getTime();
+  const GRACE_MS = 60_000; // 60s grace window
+  if (Date.now() > expiresAt + GRACE_MS) {
     return null;
   }
+  return _cachedSession.session.token;
 }
 
 /**
@@ -129,49 +135,51 @@ export function getValidTokenSync(): string | null {
 export async function isTokenExpired(): Promise<boolean> {
   const session = await getSession();
   if (!session) return true;
-
-  const expiresAt = session.expires_at;
-  if (!expiresAt) return true;
-
-  // expires_at is in seconds
-  return Date.now() / 1000 > expiresAt;
+  return Date.now() > session.expiresAt.getTime();
 }
 
 /**
  * Sign out the current user
  */
 export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
+  try {
+    await fetch(`${AUTH_URL}/api/auth/sign-out`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch (err) {
+    console.warn("[Auth] Sign out request failed:", err);
+  }
+  _cachedSession = null;
 }
 
 /**
- * @deprecated — Avoid using this. It signs the user out and reloads,
- * destroying all in-memory state. Prefer throwing an error and letting
- * the UI handle it gracefully (e.g. show a "session expired" toast).
- *
- * Only kept for backward compatibility in places where a hard reset is
- * truly the last resort (e.g. user explicitly clicks "Sign out").
+ * Sign in with Microsoft Entra (replaces signInWithGitHub)
+ */
+export async function signInWithMicrosoft(): Promise<{ error: Error | null }> {
+  try {
+    // Better Auth social sign-in: redirect the browser to the auth URL
+    const callbackUrl = `${window.location.origin}/auth/callback`;
+    window.location.href = `${AUTH_URL}/api/auth/sign-in/social?provider=microsoft&callbackURL=${encodeURIComponent(callbackUrl)}`;
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
+
+/**
+ * @deprecated Keep for backward compat — alias for signInWithMicrosoft
+ */
+export const signInWithGitHub = signInWithMicrosoft;
+
+/**
+ * @deprecated — Avoid using this. It signs the user out and reloads.
+ * Only kept for backward compatibility.
  */
 export function clearTokenAndReload(): void {
-  supabase.auth.signOut().then(() => {
+  signOut().then(() => {
     window.location.reload();
   });
-}
-
-/**
- * Sign in with GitHub OAuth
- */
-export async function signInWithGitHub(): Promise<{ error: Error | null }> {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: "github",
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      queryParams: {
-        prompt: "select_account",
-      },
-    },
-  });
-  return { error };
 }
 
 /**
@@ -179,11 +187,10 @@ export async function signInWithGitHub(): Promise<{ error: Error | null }> {
  *
  * IMPORTANT: This function will NEVER call clearTokenAndReload().
  * If authentication fails, it throws an error so the calling code can
- * decide how to handle it (show a toast, retry, etc.) without
- * destroying the user's in-progress work.
+ * decide how to handle it.
  *
  * On 401:
- *   1. Refreshes the token (deduplicated)
+ *   1. Refreshes the session (re-fetches from auth sidecar)
  *   2. Retries the request once with the fresh token
  *   3. If retry also 401s, throws — but does NOT sign out
  */
@@ -191,19 +198,16 @@ export async function authenticatedFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  // Get token from session
   let token = await getValidToken();
 
   if (!token) {
-    // No valid session — throw but do NOT nuke state.
-    // The UI will handle this (e.g. show a "please log in" banner).
     throw new Error("No valid session — please refresh or log in again");
   }
 
-  // Add authorization header
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", `Bearer ${token}`);
 
+  // Attach session ID header if applicable
   try {
     const { getSessionId, shouldAttachSessionHeader } = await import(
       "./session"
@@ -215,39 +219,27 @@ export async function authenticatedFetch(
     console.warn("Failed to attach session header:", error);
   }
 
-  // Make the request
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const response = await fetch(url, { ...options, headers });
 
-  // Handle 401 Unauthorized — try ONE refresh + retry before giving up
+  // Handle 401 — try ONE refresh + retry
   if (response.status === 401) {
-    console.warn(
-      `[Auth] 401 on ${url} — attempting token refresh and retry...`
-    );
+    console.warn(`[Auth] 401 on ${url} — re-fetching session and retrying...`);
 
-    // Force a fresh refresh (not from cache)
-    const refreshedSession = await deduplicatedRefresh();
-    const newToken = refreshedSession?.access_token;
+    _cachedSession = null;
+    const refreshed = await _fetchSession();
+    const newToken = refreshed?.session?.token;
 
     if (!newToken) {
-      // Refresh failed — session is truly gone, but still don't nuke state.
-      // The user's work is still in memory; they can copy it or try again.
-      console.error(
-        "[Auth] Token refresh failed after 401. Session may be expired."
-      );
+      console.error("[Auth] Session refresh failed after 401.");
       throw new Error(
         "Authentication failed — session expired. Please log in again."
       );
     }
 
-    // Retry original request with fresh token
     headers.set("Authorization", `Bearer ${newToken}`);
     const retryResponse = await fetch(url, { ...options, headers });
 
     if (retryResponse.status === 401) {
-      // Even after refresh, still 401 — something is really wrong
       console.error("[Auth] Retry with fresh token still returned 401.");
       throw new Error(
         "Authentication failed after token refresh. Please log in again."
@@ -265,17 +257,13 @@ export async function authenticatedFetch(
  */
 export async function recordLoginEvent(): Promise<void> {
   try {
-    if (import.meta.env.VITE_API_URL) {
-      const apiUrl = import.meta.env.VITE_API_URL;
-      await authenticatedFetch(`${apiUrl}/auth/history`, {
-        method: "POST",
-      });
+    const apiUrl =
+      typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL;
+    if (apiUrl) {
+      await authenticatedFetch(`${apiUrl}/auth/history`, { method: "POST" });
       console.log("Login event recorded successfully");
-    } else {
-      console.warn("VITE_API_URL not defined, skipping login recording");
     }
   } catch (error) {
-    // Silently fail - analytics should not block user flow
     console.error("Failed to record login event:", error);
   }
 }
@@ -300,11 +288,10 @@ export function isAuthenticatedSync(): boolean {
  */
 export async function getTokenTimeToExpiry(): Promise<number | null> {
   const session = await getSession();
-  if (!session?.expires_at) return null;
+  if (!session?.expiresAt) return null;
 
-  const now = Math.floor(Date.now() / 1000);
-  const timeLeft = session.expires_at - now;
-  return timeLeft > 0 ? timeLeft : 0;
+  const timeLeftMs = session.expiresAt.getTime() - Date.now();
+  return timeLeftMs > 0 ? Math.floor(timeLeftMs / 1000) : 0;
 }
 
 /**
@@ -316,33 +303,24 @@ export async function getCurrentUser(): Promise<{
   name: string | undefined;
   avatar: string | undefined;
 } | null> {
-  const session = await getSession();
-  if (!session?.user) return null;
-
-  const user = session.user;
-  const metadata = user.user_metadata || {};
+  const data = await _fetchSession();
+  if (!data?.user) return null;
 
   return {
-    id: user.id,
-    email: user.email,
-    name: metadata.full_name || metadata.name || metadata.user_name,
-    avatar: metadata.avatar_url,
+    id: data.user.id,
+    email: data.user.email,
+    name: data.user.name,
+    avatar: data.user.image || undefined,
   };
 }
 
 // ─── Proactive refresh on visibility change ─────────────────────────────────
-// Chrome (and other browsers) aggressively throttle timers in backgrounded
-// tabs. Supabase's `autoRefreshToken` relies on setTimeout, so it may not
-// fire in time when the user comes back after 5+ minutes. This listener
-// ensures we refresh immediately when the tab regains focus.
 
 let _visibilityListenerInstalled = false;
 
 /**
- * Install a one-time `visibilitychange` listener that proactively refreshes
- * the Supabase session when the tab becomes visible again.
- *
- * Safe to call multiple times — only installs once.
+ * Install a visibility listener that refreshes the session when the tab
+ * becomes visible. Safe to call multiple times — only installs once.
  */
 export function installVisibilityRefreshListener(): void {
   if (_visibilityListenerInstalled) return;
@@ -351,29 +329,15 @@ export function installVisibilityRefreshListener(): void {
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState !== "visible") return;
 
-    // Tab just became visible — check if token needs refresh
-    const session = await getSession();
-    if (!session) return; // Not logged in, nothing to do
-
-    const nowSecs = Math.floor(Date.now() / 1000);
-    const expiresAt = session.expires_at ?? 0;
-    const timeLeft = expiresAt - nowSecs;
-
-    // If token expired or expires within 5 minutes, proactively refresh
-    if (timeLeft < 300) {
-      console.log(
-        `[Auth] Tab visible, token ${timeLeft <= 0 ? "expired" : `expires in ${timeLeft}s`} — refreshing...`
-      );
-      const refreshed = await deduplicatedRefresh();
-      if (refreshed) {
-        console.log("[Auth] ✅ Proactive token refresh succeeded");
-      } else {
-        console.warn(
-          "[Auth] ⚠️ Proactive refresh failed — user may need to re-login"
-        );
-      }
+    // Tab just became visible — invalidate cache and re-fetch
+    _cachedSession = null;
+    const data = await _fetchSession();
+    if (data) {
+      console.log("[Auth] ✅ Session refreshed on tab visibility");
+    } else {
+      console.warn("[Auth] ⚠️ No session on tab visibility — user may need to re-login");
     }
   });
 
-  console.log("[Auth] Visibility-based token refresh listener installed");
+  console.log("[Auth] Visibility-based session refresh listener installed");
 }

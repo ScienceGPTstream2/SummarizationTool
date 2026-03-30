@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from schemas.server import ServerConfig
 from services.llm.macbook import MacbookLLMClient
 
@@ -616,7 +616,7 @@ async def get_document_metrics(http_request: Request):
         return JSONResponse(status_code=200, content={"documents": []})
 
     try:
-        from services.database.supabase_db_service import get_db_service
+        from services.database import get_db_service
 
         db = get_db_service()
         docs = db.get_documents_by_session(session_id)

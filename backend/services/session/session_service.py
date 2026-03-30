@@ -19,7 +19,7 @@ from schemas.sessions import (
     UpdateSessionRequest,
     SessionSummary,
 )
-from services.database import get_db_service, SupabaseDBService
+from services.database import get_db_service, SQLAlchemyDBService as SupabaseDBService
 from services.telemetry.cost_tracker import cost_tracker, infer_provider_from_model_id
 
 
@@ -701,65 +701,9 @@ class SessionService:
         self, requesting_user_id: str, session_id: str
     ) -> Optional[Session]:
         """Get a shared session for viewing. Verifies the requesting user has access via group membership."""
-        # Get the session (we need to bypass the user_id check since this is a shared session)
-        result = (
-            self.db.client.table("sessions")
-            .select("*")
-            .eq("id", session_id)
-            .not_.is_("shared_with_group_id", "null")
-            .execute()
-        )
-        if not result.data:
+        db_session = self.db.get_session_for_shared_view(requesting_user_id, session_id)
+        if db_session is None:
             return None
-
-        db_session = result.data[0]
-
-        # Verify the requesting user is in the shared group
-        group_id = db_session.get("shared_with_group_id")
-        if not group_id:
-            return None
-
-        user_groups = self.db.get_user_group_ids(requesting_user_id)
-        if group_id not in user_groups:
-            return None
-
-        # Load full session data (documents, extractions, evaluations)
-        docs_result = (
-            self.db.client.table("documents")
-            .select("*")
-            .eq("session_id", session_id)
-            .execute()
-        )
-        db_session["documents"] = docs_result.data or []
-
-        db_session["extraction_results"] = self.db._fetch_all(
-            "extraction_results",
-            lambda t: t.select("*")
-            .eq("session_id", session_id)
-            .order("entity_name")
-            .order("model_id"),
-        )
-
-        if db_session["extraction_results"]:
-            extraction_ids = [e["id"] for e in db_session["extraction_results"]]
-            all_evals: List[Dict[str, Any]] = []
-            batch_size = 50
-            for i in range(0, len(extraction_ids), batch_size):
-                batch = extraction_ids[i : i + batch_size]
-                eval_result = (
-                    self.db.client.table("evaluation_results")
-                    .select("*")
-                    .in_("extraction_result_id", batch)
-                    .order("extraction_result_id")
-                    .order("judge_model")
-                    .order("metric")
-                    .execute()
-                )
-                all_evals.extend(eval_result.data or [])
-            db_session["evaluation_results"] = all_evals
-        else:
-            db_session["evaluation_results"] = []
-
         return self._db_to_session(db_session)
 
     def _db_to_session(self, db_session: Dict[str, Any]) -> Session:

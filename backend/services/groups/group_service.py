@@ -2,20 +2,42 @@
 Group Service
 
 Provides business logic for managing user groups and memberships.
-Uses service role key to bypass RLS for backend operations.
 """
 
+import uuid as _uuid_module
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from services.database.supabase_db_service import get_db_service
+from sqlalchemy import select, delete, update
+from models import Group, UserGroup, User
+from models.base import get_db_session, db_session_scope
+
+
+def _to_uuid(value):
+    if value is None:
+        return None
+    if isinstance(value, _uuid_module.UUID):
+        return value
+    try:
+        return _uuid_module.UUID(str(value))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _row_to_dict(obj) -> Dict[str, Any]:
+    result = {}
+    for col in obj.__table__.columns:
+        val = getattr(obj, col.key)
+        if isinstance(val, _uuid_module.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        result[col.key] = val
+    return result
 
 
 class GroupService:
     """Service for managing groups and memberships"""
-
-    def __init__(self):
-        self.db = get_db_service()
 
     # ==========================================
     # Group CRUD Operations
@@ -27,149 +49,109 @@ class GroupService:
         name: str,
         description: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Create a new group with the user as owner.
+        """Create a new group with the user as owner."""
+        with db_session_scope() as db:
+            group = Group(
+                name=name,
+                description=description,
+                created_by=user_id,
+            )
+            db.add(group)
+            db.flush()
 
-        Args:
-            user_id: ID of the user creating the group
-            name: Group name
-            description: Optional group description
-
-        Returns:
-            Created group with membership
-        """
-        # Create the group
-        group_data = {
-            "name": name,
-            "description": description,
-            "created_by": user_id,
-        }
-        result = self.db.client.table("groups").insert(group_data).execute()
-
-        if not result.data:
-            raise ValueError("Failed to create group")
-
-        group = result.data[0]
-
-        # Add creator as owner
-        membership_data = {
-            "user_id": user_id,
-            "group_id": group["id"],
-            "role": "owner",
-        }
-        self.db.client.table("user_groups").insert(membership_data).execute()
-
-        return group
+            membership = UserGroup(
+                user_id=user_id,
+                group_id=group.id,
+                role="owner",
+            )
+            db.add(membership)
+            db.flush()
+            return _row_to_dict(group)
 
     def get_group(
         self, group_id: str, user_id: str, is_system_admin: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get a group by ID with members.
+        """Get a group by ID with members."""
+        db = get_db_session()
+        try:
+            gid = _to_uuid(group_id)
 
-        Args:
-            group_id: Group ID
-            user_id: Requesting user ID (for permission check)
-            is_system_admin: If True, bypass permission checks
+            if not is_system_admin:
+                membership = db.execute(
+                    select(UserGroup).where(
+                        UserGroup.group_id == gid,
+                        UserGroup.user_id == user_id,
+                    )
+                ).scalar_one_or_none()
+                if membership is None:
+                    return None
 
-        Returns:
-            Group with members or None if not found/not authorized
-        """
-        # System admins can access any group
-        if not is_system_admin:
-            # Check if user is a member
-            membership = (
-                self.db.client.table("user_groups")
-                .select("role")
-                .eq("group_id", group_id)
-                .eq("user_id", user_id)
-                .execute()
-            )
-
-            if not membership.data:
+            group = db.execute(
+                select(Group).where(Group.id == gid)
+            ).scalar_one_or_none()
+            if group is None:
                 return None
 
-        # Get group
-        result = self.db.client.table("groups").select("*").eq("id", group_id).execute()
+            group_dict = _row_to_dict(group)
 
-        if not result.data:
-            return None
+            if is_system_admin:
+                group_dict["user_role"] = "system_admin"
+            else:
+                m = db.execute(
+                    select(UserGroup).where(
+                        UserGroup.group_id == gid,
+                        UserGroup.user_id == user_id,
+                    )
+                ).scalar_one_or_none()
+                group_dict["user_role"] = m.role if m else None
 
-        group = result.data[0]
-
-        # Set role
-        if is_system_admin:
-            group["user_role"] = "system_admin"
-        else:
-            membership = (
-                self.db.client.table("user_groups")
-                .select("role")
-                .eq("group_id", group_id)
-                .eq("user_id", user_id)
-                .execute()
-            )
-            group["user_role"] = membership.data[0]["role"] if membership.data else None
-
-        # Get members
-        members_result = (
-            self.db.client.table("user_groups")
-            .select("user_id, role, joined_at")
-            .eq("group_id", group_id)
-            .execute()
-        )
-        group["members"] = self._enrich_members_with_profiles(members_result.data or [])
-
-        return group
+            members = db.execute(
+                select(UserGroup).where(UserGroup.group_id == gid)
+            ).scalars().all()
+            member_dicts = [_row_to_dict(m) for m in members]
+            group_dict["members"] = self._enrich_members_with_profiles(member_dicts, db)
+            return group_dict
+        finally:
+            db.close()
 
     def list_user_groups(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        List all groups a user belongs to.
+        """List all groups a user belongs to."""
+        db = get_db_session()
+        try:
+            memberships = db.execute(
+                select(UserGroup).where(UserGroup.user_id == user_id)
+            ).scalars().all()
 
-        Args:
-            user_id: User ID
+            if not memberships:
+                return []
 
-        Returns:
-            List of groups with user's role in each
-        """
-        # Get user's memberships
-        memberships = (
-            self.db.client.table("user_groups")
-            .select("group_id, role")
-            .eq("user_id", user_id)
-            .execute()
-        )
+            group_ids = [m.group_id for m in memberships]
+            role_map = {str(m.group_id): m.role for m in memberships}
 
-        if not memberships.data:
-            return []
+            groups = db.execute(
+                select(Group)
+                .where(Group.id.in_(group_ids))
+                .order_by(Group.name)
+            ).scalars().all()
 
-        group_ids = [m["group_id"] for m in memberships.data]
-        role_map = {m["group_id"]: m["role"] for m in memberships.data}
+            # Batch count members per group
+            from sqlalchemy import func
+            count_rows = db.execute(
+                select(UserGroup.group_id, func.count().label("cnt"))
+                .where(UserGroup.group_id.in_(group_ids))
+                .group_by(UserGroup.group_id)
+            ).all()
+            count_map = {str(r.group_id): r.cnt for r in count_rows}
 
-        # Get groups
-        result = (
-            self.db.client.table("groups")
-            .select("*")
-            .in_("id", group_ids)
-            .order("name")
-            .execute()
-        )
-
-        groups = result.data or []
-
-        # Add user's role to each group
-        for group in groups:
-            group["user_role"] = role_map.get(group["id"], "member")
-
-            # Get member count
-            members = (
-                self.db.client.table("user_groups")
-                .select("user_id")
-                .eq("group_id", group["id"])
-                .execute()
-            )
-            group["member_count"] = len(members.data) if members.data else 0
-
-        return groups
+            result = []
+            for g in groups:
+                d = _row_to_dict(g)
+                d["user_role"] = role_map.get(str(g.id), "member")
+                d["member_count"] = count_map.get(str(g.id), 0)
+                result.append(d)
+            return result
+        finally:
+            db.close()
 
     def update_group(
         self,
@@ -178,64 +160,38 @@ class GroupService:
         updates: Dict[str, Any],
         is_system_admin: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Update a group. Requires admin or owner role (or system admin).
-
-        Args:
-            group_id: Group ID
-            user_id: Requesting user ID
-            updates: Fields to update (name, description)
-            is_system_admin: If True, bypass permission checks
-
-        Returns:
-            Updated group or None if not authorized
-        """
-        # Check permission (system admins bypass)
+        """Update a group. Requires admin or owner role."""
         if not is_system_admin and not self._has_admin_role(group_id, user_id):
             return None
 
-        # Filter allowed fields
         allowed = {"name", "description"}
         data = {k: v for k, v in updates.items() if k in allowed and v is not None}
-
         if not data:
-            return self.get_group(group_id, user_id)
+            return self.get_group(group_id, user_id, is_system_admin)
 
-        result = (
-            self.db.client.table("groups").update(data).eq("id", group_id).execute()
-        )
-
-        return result.data[0] if result.data else None
+        with db_session_scope() as db:
+            group = db.execute(
+                select(Group).where(Group.id == _to_uuid(group_id))
+            ).scalar_one_or_none()
+            if group is None:
+                return None
+            for k, v in data.items():
+                setattr(group, k, v)
+            group.updated_at = datetime.utcnow()
+            db.flush()
+            return _row_to_dict(group)
 
     def delete_group(
         self, group_id: str, user_id: str, is_system_admin: bool = False
     ) -> bool:
-        """
-        Delete a group. Requires owner role (or system admin).
-
-        Args:
-            group_id: Group ID
-            user_id: Requesting user ID
-            is_system_admin: If True, bypass permission checks
-
-        Returns:
-            True if deleted, False if not authorized
-        """
+        """Delete a group. Requires owner role."""
         if not is_system_admin:
-            # Check if user is owner
-            membership = (
-                self.db.client.table("user_groups")
-                .select("role")
-                .eq("group_id", group_id)
-                .eq("user_id", user_id)
-                .execute()
-            )
-
-            if not membership.data or membership.data[0]["role"] != "owner":
+            role = self._get_role(group_id, user_id)
+            if role != "owner":
                 return False
 
-        # Delete group (cascades to memberships)
-        self.db.client.table("groups").delete().eq("id", group_id).execute()
+        with db_session_scope() as db:
+            db.execute(delete(Group).where(Group.id == _to_uuid(group_id)))
         return True
 
     # ==========================================
@@ -245,30 +201,21 @@ class GroupService:
     def get_group_members(
         self, group_id: str, user_id: str, is_system_admin: bool = False
     ) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get all members of a group.
-
-        Args:
-            group_id: Group ID
-            user_id: Requesting user ID
-            is_system_admin: If True, bypass permission checks
-
-        Returns:
-            List of members or None if not authorized
-        """
-        # Check if user is a member (system admins bypass)
+        """Get all members of a group."""
         if not is_system_admin and not self._is_member(group_id, user_id):
             return None
 
-        result = (
-            self.db.client.table("user_groups")
-            .select("user_id, role, joined_at")
-            .eq("group_id", group_id)
-            .order("role")
-            .execute()
-        )
-
-        return self._enrich_members_with_profiles(result.data or [])
+        db = get_db_session()
+        try:
+            members = db.execute(
+                select(UserGroup)
+                .where(UserGroup.group_id == _to_uuid(group_id))
+                .order_by(UserGroup.role)
+            ).scalars().all()
+            member_dicts = [_row_to_dict(m) for m in members]
+            return self._enrich_members_with_profiles(member_dicts, db)
+        finally:
+            db.close()
 
     def add_member(
         self,
@@ -278,52 +225,27 @@ class GroupService:
         requesting_user_id: str,
         is_system_admin: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Add a member to a group. Requires admin or owner role (or system admin).
-
-        Args:
-            group_id: Group ID
-            target_user_id: User to add
-            role: Role to assign (viewer, member, admin)
-            requesting_user_id: User performing the action
-            is_system_admin: If True, bypass permission checks
-
-        Returns:
-            Created membership or None if not authorized
-        """
-        # Check permission (system admins bypass)
-        if not is_system_admin and not self._has_admin_role(
-            group_id, requesting_user_id
-        ):
+        """Add a member to a group. Requires admin or owner role."""
+        if not is_system_admin and not self._has_admin_role(group_id, requesting_user_id):
             return None
 
-        # Cannot add someone as owner
         if role == "owner":
             role = "admin"
 
         # Check if already a member
-        existing = (
-            self.db.client.table("user_groups")
-            .select("*")
-            .eq("group_id", group_id)
-            .eq("user_id", target_user_id)
-            .execute()
-        )
+        existing_role = self._get_role(group_id, target_user_id)
+        if existing_role is not None:
+            return self.update_member_role(group_id, target_user_id, role, requesting_user_id, is_system_admin)
 
-        if existing.data:
-            # Update role instead
-            return self.update_member_role(
-                group_id, target_user_id, role, requesting_user_id
+        with db_session_scope() as db:
+            membership = UserGroup(
+                user_id=target_user_id,
+                group_id=_to_uuid(group_id),
+                role=role,
             )
-
-        data = {
-            "user_id": target_user_id,
-            "group_id": group_id,
-            "role": role,
-        }
-
-        result = self.db.client.table("user_groups").insert(data).execute()
-        return result.data[0] if result.data else None
+            db.add(membership)
+            db.flush()
+            return _row_to_dict(membership)
 
     def update_member_role(
         self,
@@ -333,62 +255,33 @@ class GroupService:
         requesting_user_id: str,
         is_system_admin: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Update a member's role. Requires admin or owner role (or system admin).
+        """Update a member's role."""
+        gid = _to_uuid(group_id)
 
-        Args:
-            group_id: Group ID
-            target_user_id: User to update
-            new_role: New role
-            requesting_user_id: User performing the action
-            is_system_admin: If True, bypass permission checks
+        # Cannot change to/from owner
+        target_role = self._get_role(group_id, target_user_id)
+        if target_role == "owner" or new_role == "owner":
+            return None
 
-        Returns:
-            Updated membership or None if not authorized
-        """
-        # System admins can do anything
-        if is_system_admin:
-            # Cannot change owner role or make someone owner
-            target_role = self._get_role(group_id, target_user_id)
-            if target_role == "owner" or new_role == "owner":
+        if not is_system_admin:
+            requester_role = self._get_role(group_id, requesting_user_id)
+            if requester_role not in ("admin", "owner"):
+                return None
+            if new_role == "admin" and requester_role != "owner":
                 return None
 
-            result = (
-                self.db.client.table("user_groups")
-                .update({"role": new_role})
-                .eq("group_id", group_id)
-                .eq("user_id", target_user_id)
-                .execute()
-            )
-            return result.data[0] if result.data else None
-
-        # Check permission
-        requester_role = self._get_role(group_id, requesting_user_id)
-        if requester_role not in ("admin", "owner"):
-            return None
-
-        # Only owners can promote to admin
-        if new_role == "admin" and requester_role != "owner":
-            return None
-
-        # Cannot change owner role
-        target_role = self._get_role(group_id, target_user_id)
-        if target_role == "owner":
-            return None
-
-        # Cannot make someone owner (transfer ownership is separate)
-        if new_role == "owner":
-            return None
-
-        result = (
-            self.db.client.table("user_groups")
-            .update({"role": new_role})
-            .eq("group_id", group_id)
-            .eq("user_id", target_user_id)
-            .execute()
-        )
-
-        return result.data[0] if result.data else None
+        with db_session_scope() as db:
+            m = db.execute(
+                select(UserGroup).where(
+                    UserGroup.group_id == gid,
+                    UserGroup.user_id == target_user_id,
+                )
+            ).scalar_one_or_none()
+            if m is None:
+                return None
+            m.role = new_role
+            db.flush()
+            return _row_to_dict(m)
 
     def remove_member(
         self,
@@ -397,51 +290,37 @@ class GroupService:
         requesting_user_id: str,
         is_system_admin: bool = False,
     ) -> bool:
-        """
-        Remove a member from a group.
+        """Remove a member from a group."""
+        gid = _to_uuid(group_id)
 
-        Args:
-            group_id: Group ID
-            target_user_id: User to remove
-            requesting_user_id: User performing the action
-            is_system_admin: If True, bypass permission checks (can still not remove owners)
-
-        Returns:
-            True if removed, False if not authorized
-        """
-        # Users can remove themselves
         if target_user_id == requesting_user_id:
-            # Cannot leave if you're the only owner
             if self._is_only_owner(group_id, target_user_id):
                 return False
-
-            self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
-                "user_id", target_user_id
-            ).execute()
+            with db_session_scope() as db:
+                db.execute(
+                    delete(UserGroup).where(
+                        UserGroup.group_id == gid,
+                        UserGroup.user_id == target_user_id,
+                    )
+                )
             return True
 
-        # System admins can remove anyone except owners
         if is_system_admin:
-            target_role = self._get_role(group_id, target_user_id)
-            if target_role == "owner":
+            if self._get_role(group_id, target_user_id) == "owner":
                 return False
-            self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
-                "user_id", target_user_id
-            ).execute()
-            return True
+        else:
+            if not self._has_admin_role(group_id, requesting_user_id):
+                return False
+            if self._get_role(group_id, target_user_id) == "owner":
+                return False
 
-        # Otherwise need admin role
-        if not self._has_admin_role(group_id, requesting_user_id):
-            return False
-
-        # Cannot remove owners
-        target_role = self._get_role(group_id, target_user_id)
-        if target_role == "owner":
-            return False
-
-        self.db.client.table("user_groups").delete().eq("group_id", group_id).eq(
-            "user_id", target_user_id
-        ).execute()
+        with db_session_scope() as db:
+            db.execute(
+                delete(UserGroup).where(
+                    UserGroup.group_id == gid,
+                    UserGroup.user_id == target_user_id,
+                )
+            )
         return True
 
     # ==========================================
@@ -449,69 +328,78 @@ class GroupService:
     # ==========================================
 
     def _is_member(self, group_id: str, user_id: str) -> bool:
-        """Check if user is any member of the group"""
-        result = (
-            self.db.client.table("user_groups")
-            .select("user_id")
-            .eq("group_id", group_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return bool(result.data)
+        db = get_db_session()
+        try:
+            m = db.execute(
+                select(UserGroup).where(
+                    UserGroup.group_id == _to_uuid(group_id),
+                    UserGroup.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+            return m is not None
+        finally:
+            db.close()
 
     def _get_role(self, group_id: str, user_id: str) -> Optional[str]:
-        """Get user's role in a group"""
-        result = (
-            self.db.client.table("user_groups")
-            .select("role")
-            .eq("group_id", group_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return result.data[0]["role"] if result.data else None
+        db = get_db_session()
+        try:
+            m = db.execute(
+                select(UserGroup).where(
+                    UserGroup.group_id == _to_uuid(group_id),
+                    UserGroup.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+            return m.role if m else None
+        finally:
+            db.close()
 
     def _has_admin_role(self, group_id: str, user_id: str) -> bool:
-        """Check if user has admin or owner role"""
-        role = self._get_role(group_id, user_id)
-        return role in ("admin", "owner")
+        return self._get_role(group_id, user_id) in ("admin", "owner")
 
     def _is_only_owner(self, group_id: str, user_id: str) -> bool:
-        """Check if user is the only owner of the group"""
-        owners = (
-            self.db.client.table("user_groups")
-            .select("user_id")
-            .eq("group_id", group_id)
-            .eq("role", "owner")
-            .execute()
-        )
-        return len(owners.data) == 1 and owners.data[0]["user_id"] == user_id
+        db = get_db_session()
+        try:
+            owners = db.execute(
+                select(UserGroup).where(
+                    UserGroup.group_id == _to_uuid(group_id),
+                    UserGroup.role == "owner",
+                )
+            ).scalars().all()
+            return len(owners) == 1 and owners[0].user_id == user_id
+        finally:
+            db.close()
 
     def _enrich_members_with_profiles(
-        self, members: List[Dict[str, Any]]
+        self, members: List[Dict[str, Any]], db=None
     ) -> List[Dict[str, Any]]:
-        """Enrich member records with user profile info (name, email) from Supabase auth."""
+        """Enrich member records with user profile info from the user table."""
         if not members:
             return members
 
-        for member in members:
-            try:
-                user_resp = self.db.client.auth.admin.get_user_by_id(member["user_id"])
-                if user_resp and user_resp.user:
-                    user = user_resp.user
-                    # Try to get a display name from user_metadata (OAuth providers set this)
-                    meta = user.user_metadata or {}
-                    member["display_name"] = (
-                        meta.get("full_name")
-                        or meta.get("name")
-                        or meta.get("preferred_username")
-                        or meta.get("user_name")
-                        or None
-                    )
-                    member["email"] = user.email
-                    member["avatar_url"] = meta.get("avatar_url")
-            except Exception:
-                # If lookup fails, leave the fields empty
-                pass
+        close_db = db is None
+        if db is None:
+            db = get_db_session()
+
+        try:
+            user_ids = [m["user_id"] for m in members]
+            users = db.execute(
+                select(User).where(User.id.in_(user_ids))
+            ).scalars().all()
+            user_map = {u.id: u for u in users}
+
+            for member in members:
+                u = user_map.get(member["user_id"])
+                if u:
+                    member["display_name"] = u.name or u.email
+                    member["email"] = u.email
+                    member["avatar_url"] = u.image
+                else:
+                    member.setdefault("display_name", None)
+                    member.setdefault("email", None)
+                    member.setdefault("avatar_url", None)
+        finally:
+            if close_db:
+                db.close()
 
         return members
 
