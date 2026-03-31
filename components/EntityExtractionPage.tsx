@@ -1686,12 +1686,12 @@ export function EntityExtractionPage({
       modelType = "anthropic";
     } else if (provider.includes("azure")) {
       modelType = "azure";
+    } else if (provider.includes("ollama")) {
+      modelType = "ollama";
     } else if (provider.includes("meta") || provider.includes("llama")) {
       modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
     } else if (provider.includes("macbook")) {
       modelType = "macbook";
-    } else if (provider.includes("ollama")) {
-      modelType = "ollama";
     }
 
     console.log(
@@ -1775,13 +1775,13 @@ export function EntityExtractionPage({
         modelType = "anthropic";
       } else if (provider.includes("azure")) {
         modelType = "azure";
+      } else if (provider.includes("ollama")) {
+        modelType = "ollama";
       } else if (provider.includes("meta") || provider.includes("llama")) {
         // Azure-hosted Llama has id "azure-{deployment}"; GCP Llama has id "meta/..."
         modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
       } else if (provider.includes("macbook")) {
         modelType = "macbook";
-      } else if (provider.includes("ollama")) {
-        modelType = "ollama";
       }
 
       const modelConfig = {
@@ -2280,10 +2280,10 @@ export function EntityExtractionPage({
     const p = providerStr.toLowerCase();
     if (p.includes("google") || p.includes("gemini")) return "gemini";
     if (p.includes("anthropic")) return "anthropic";
+    if (p.includes("ollama")) return "ollama";
     if (p.includes("meta") || p.includes("llama"))
       return modelId?.startsWith("azure-") ? "azure-llama" : "llama";
     if (p.includes("macbook")) return "macbook";
-    if (p.includes("ollama")) return "ollama";
     return "azure";
   };
 

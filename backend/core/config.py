@@ -21,6 +21,11 @@ def load_config():
                         f"✅ Macbook LLM base URL loaded from secrets.toml: {macbook_base_url}"
                     )
                 ollama_base_url = cfg.get("ollama_base_url")
+                if not ollama_base_url:
+                    # Also check [Ollama] section
+                    ollama_section = cfg.get("Ollama") or cfg.get("ollama") or {}
+                    if isinstance(ollama_section, dict):
+                        ollama_base_url = ollama_section.get("ollama_base_url") or ollama_section.get("base_url")
                 if ollama_base_url:
                     os.environ.setdefault("OLLAMA_BASE_URL", ollama_base_url)
                     print(

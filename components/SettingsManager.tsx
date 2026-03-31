@@ -12,7 +12,7 @@ export interface ModelConfig {
     | "other"
     | "azure"
     | "macbook"
-    | "ollama";
+    | "self-hosted";
   // Optional runtime fields for deployments (used for custom Azure models)
   deployment?: string;
   api_version?: string;
@@ -272,13 +272,13 @@ export class SettingsManager {
               ? "google"
               : model.provider?.toLowerCase().includes("anthropic")
                 ? "anthropic"
-                : model.provider?.toLowerCase().includes("meta") ||
-                    model.provider?.toLowerCase().includes("llama")
-                  ? "meta"
+                : model.provider?.toLowerCase().includes("ollama")
+                  ? "self-hosted"
                   : model.provider?.toLowerCase().includes("macbook")
                     ? "macbook"
-                    : model.provider?.toLowerCase().includes("ollama")
-                      ? "ollama"
+                    : model.provider?.toLowerCase().includes("meta") ||
+                        model.provider?.toLowerCase().includes("llama")
+                      ? "meta"
                       : "other",
           deployment: model.deployment,
           api_version: model.api_version,
