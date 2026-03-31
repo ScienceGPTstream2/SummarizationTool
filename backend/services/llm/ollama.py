@@ -212,8 +212,8 @@ class OllamaLLMClient:
 
         url = f"{self.base_url}/api/tags"
         try:
-            # Allow up to 600s to accommodate slow /tags responses
-            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=600))
+            # Short timeout for model discovery — fall back to static JSON on cold start
+            resp = await asyncio.to_thread(lambda: requests.get(url, timeout=8))
             if not resp.ok:
                 print(
                     f"[OllamaLLM] /api/tags failed: status={resp.status_code} body={resp.text}"

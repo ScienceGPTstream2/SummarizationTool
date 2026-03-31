@@ -754,8 +754,9 @@ export function BatchStudySelectionPage({
               {(() => {
                 const llamaModels = availableModels.filter(
                   (m) =>
-                    m.provider?.toLowerCase().includes("meta") ||
-                    m.provider?.toLowerCase().includes("llama")
+                    !m.provider?.toLowerCase().includes("ollama") &&
+                    (m.provider?.toLowerCase().includes("meta") ||
+                      m.provider?.toLowerCase().includes("llama"))
                 );
                 if (llamaModels.length === 0) return null;
 
@@ -804,6 +805,88 @@ export function BatchStudySelectionPage({
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           {llamaModels.map((model) => (
+                            <div
+                              key={model.id}
+                              className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                            >
+                              <Checkbox
+                                id={model.id}
+                                checked={selectedModels.includes(model.id)}
+                                onCheckedChange={() => toggleModel(model.id)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1 space-y-1 min-w-0">
+                                <Label
+                                  htmlFor={model.id}
+                                  className="text-sm font-medium leading-none cursor-pointer"
+                                >
+                                  {model.name}
+                                </Label>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {model.description || model.provider}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })()}
+
+              {/* Self-Hosted Ollama Models */}
+              {(() => {
+                const ollamaModels = availableModels.filter((m) =>
+                  m.provider?.toLowerCase().includes("ollama")
+                );
+                if (ollamaModels.length === 0) return null;
+
+                const ollamaIds = ollamaModels.map((m) => m.id);
+                const selection = getCategorySelection(ollamaIds);
+
+                return (
+                  <AccordionItem value="ollama">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">Self-Hosted (Ollama)</span>
+                          <Badge variant="outline" className="text-xs">
+                            {selection.selected}/{selection.total}
+                          </Badge>
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b">
+                          <span className="text-sm text-muted-foreground">
+                            {ollamaModels.length} model
+                            {ollamaModels.length !== 1 ? "s" : ""} available
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              toggleCategory(ollamaIds, !selection.allSelected)
+                            }
+                          >
+                            {selection.allSelected ? (
+                              <>
+                                <CheckSquare className="h-3 w-3 mr-1" />
+                                Deselect All
+                              </>
+                            ) : (
+                              <>
+                                <Square className="h-3 w-3 mr-1" />
+                                Select All
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {ollamaModels.map((model) => (
                             <div
                               key={model.id}
                               className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"

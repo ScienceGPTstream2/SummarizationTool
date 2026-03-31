@@ -276,8 +276,9 @@ export class SettingsManager {
                   ? "self-hosted"
                   : model.provider?.toLowerCase().includes("macbook")
                     ? "macbook"
-                    : model.provider?.toLowerCase().includes("meta") ||
-                        model.provider?.toLowerCase().includes("llama")
+                    : !model.provider?.toLowerCase().includes("ollama") &&
+                        (model.provider?.toLowerCase().includes("meta") ||
+                          model.provider?.toLowerCase().includes("llama"))
                       ? "meta"
                       : "other",
           deployment: model.deployment,
