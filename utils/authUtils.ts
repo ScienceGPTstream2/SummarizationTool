@@ -154,13 +154,13 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * Sign in with Microsoft Entra (replaces signInWithGitHub)
+ * Sign in with GitHub (Enterprise Cloud uses standard github.com OAuth)
  */
-export async function signInWithMicrosoft(): Promise<{ error: Error | null }> {
+export async function signInWithGitHub(): Promise<{ error: Error | null }> {
   try {
     // Better Auth social sign-in: redirect the browser to the auth URL
     const callbackUrl = `${window.location.origin}/auth/callback`;
-    window.location.href = `${AUTH_URL}/api/auth/sign-in/social?provider=microsoft&callbackURL=${encodeURIComponent(callbackUrl)}`;
+    window.location.href = `${AUTH_URL}/api/auth/sign-in/social?provider=github&callbackURL=${encodeURIComponent(callbackUrl)}`;
     return { error: null };
   } catch (err) {
     return { error: err instanceof Error ? err : new Error(String(err)) };
@@ -168,9 +168,9 @@ export async function signInWithMicrosoft(): Promise<{ error: Error | null }> {
 }
 
 /**
- * @deprecated Keep for backward compat — alias for signInWithMicrosoft
+ * @deprecated Keep for backward compat — alias for signInWithGitHub
  */
-export const signInWithGitHub = signInWithMicrosoft;
+export const signInWithMicrosoft = signInWithGitHub;
 
 /**
  * @deprecated — Avoid using this. It signs the user out and reloads.

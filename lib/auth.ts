@@ -1,6 +1,6 @@
 /**
  * Better Auth Client for Frontend
- * 
+ *
  * Replaces lib/supabase.ts for authentication.
  * Install better-auth in the root package: npm i better-auth
  */

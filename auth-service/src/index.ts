@@ -1,8 +1,8 @@
 /**
  * Better Auth Sidecar Service
- * 
+ *
  * Runs as a standalone Express server on port 3001.
- * Handles authentication (email/password + Microsoft Entra).
+ * Handles authentication (email/password + GitHub Enterprise Cloud).
  * The FastAPI backend validates sessions by querying the same DB.
  */
 
@@ -35,15 +35,13 @@ const auth = betterAuth({
     enabled: true,
   },
 
-  // Social providers — Microsoft Entra
-  // Uncomment when you have app registration credentials
+  // Social providers — GitHub (Enterprise Cloud uses standard github.com OAuth)
   socialProviders: {
-    ...(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET
+    ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
       ? {
-          microsoft: {
-            clientId: process.env.MICROSOFT_CLIENT_ID,
-            clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
-            tenantId: process.env.MICROSOFT_TENANT_ID || "common",
+          github: {
+            clientId: process.env.GITHUB_CLIENT_ID,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET,
           },
         }
       : {}),
@@ -93,6 +91,6 @@ app.listen(PORT, () => {
   console.log(`✅ Better Auth sidecar running on http://localhost:${PORT}`);
   console.log(`   Auth endpoints: http://localhost:${PORT}/api/auth/*`);
   console.log(
-    `   Microsoft Entra: ${process.env.MICROSOFT_CLIENT_ID ? "ENABLED" : "DISABLED (no credentials)"}`
+    `   GitHub OAuth: ${process.env.GITHUB_CLIENT_ID ? "ENABLED" : "DISABLED (no credentials)"}`
   );
 });

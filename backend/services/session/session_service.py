@@ -1,7 +1,8 @@
 """
 Session service for managing user extraction sessions
 
-This service now uses Supabase PostgreSQL for storage instead of JSON files.
+This service uses SQLAlchemy with Azure Postgres Flexible Server for storage.
+Authentication is handled by Better Auth via the core.auth module.
 """
 
 import os

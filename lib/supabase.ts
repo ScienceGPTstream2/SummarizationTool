@@ -1,33 +1,15 @@
 /**
- * Supabase Client Configuration
+ * @deprecated — This file is kept only for backward compatibility.
+ * Use lib/auth.ts and utils/authUtils.ts instead.
  *
- * Initializes the Supabase client for authentication and API calls.
- * Uses environment variables for configuration.
+ * The Supabase client has been replaced by Better Auth.
+ * Any imports from this file should be migrated to the new auth system.
  */
 
-import { createClient, Session, AuthChangeEvent } from "@supabase/supabase-js";
+// Re-export from the new auth module so existing imports don't break at compile time
+export { authClient as supabase } from "./auth";
 
-// Get configuration from environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-// Validate configuration
-if (!supabaseUrl) {
-  throw new Error("Missing VITE_SUPABASE_URL environment variable");
-}
-
-if (!supabaseAnonKey) {
-  throw new Error("Missing VITE_SUPABASE_ANON_KEY environment variable");
-}
-
-// Create the Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-  },
-});
-
-// Re-export Session type for convenience
-export type { Session, AuthChangeEvent };
+console.warn(
+  "[DEPRECATED] lib/supabase.ts is deprecated. " +
+  "Migrate imports to lib/auth.ts or utils/authUtils.ts"
+);

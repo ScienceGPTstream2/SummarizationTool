@@ -1,6 +1,6 @@
 /**
  * Better Auth Client Configuration
- * 
+ *
  * This file is imported by the frontend (React/Vite).
  * It replaces the Supabase auth client in lib/supabase.ts.
  */
