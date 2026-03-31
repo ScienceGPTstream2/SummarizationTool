@@ -1,0 +1,12 @@
+[
+  {
+    "id": "qwen2.5:14b-instruct-q4_K_M",
+    "name": "Qwen 2.5 14B (Q4_K_M)",
+    "description": "Self-hosted via Ollama (T4 GPU)"
+  },
+  {
+    "id": "llama3.1:8b-instruct-q8_0",
+    "name": "Llama 3.1 8B (Q8_0)",
+    "description": "Self-hosted via Ollama (T4 GPU)"
+  }
+]

@@ -531,28 +531,49 @@ async def get_available_models():
                         "id": model["id"],
                         "name": model["name"],
                         "provider": "Ollama",
-                        "description": "Azure-hosted model",
+                        "description": "Self-hosted via Ollama (T4 GPU)",
                         "supports_temperature": True,
                         "default_temperature": 0.5,
                     }
                 )
         else:
-            # If no models returned and we have a cached version, keep them to avoid UI drop
+            # Fallback: use static JSON config so models appear during cold starts
+            # (when Ollama Container App is scaled to zero and /api/tags times out)
             if _OLLAMA_MODELS_CACHE:
                 print("[OllamaLLM] Using cached ollama models after fetch failure")
-                for model in _OLLAMA_MODELS_CACHE:
-                    models.append(
-                        {
-                            "id": model["id"],
-                            "name": model["name"],
-                            "provider": "Ollama",
-                            "description": "Azure-hosted model",
-                            "supports_temperature": True,
-                            "default_temperature": 0.5,
-                        }
-                    )
+                fallback_models = [
+                    {"id": m["id"], "name": m["name"]}
+                    for m in _OLLAMA_MODELS_CACHE
+                ]
             else:
-                print("[OllamaLLM] No models returned; skipping Ollama models")
+                print(
+                    "[OllamaLLM] Cold start — using ollama_hosted_models.json fallback"
+                )
+                _config_path = (
+                    Path(__file__).resolve().parents[2]
+                    / "config"
+                    / "ollama_hosted_models.json"
+                )
+                fallback_models = []
+                if _config_path.exists():
+                    try:
+                        fallback_models = json.loads(_config_path.read_text())
+                    except Exception as e:
+                        print(f"[OllamaLLM] Failed to load fallback JSON: {e}")
+
+            for model in fallback_models:
+                models.append(
+                    {
+                        "id": model["id"],
+                        "name": model["name"],
+                        "provider": "Ollama",
+                        "description": model.get(
+                            "description", "Self-hosted via Ollama (T4 GPU)"
+                        ),
+                        "supports_temperature": True,
+                        "default_temperature": 0.5,
+                    }
+                )
 
     return JSONResponse(status_code=200, content=models)
 
