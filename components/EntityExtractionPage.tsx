@@ -890,14 +890,14 @@ export function EntityExtractionPage({
                 currentEntityIndex: eIdx + 1,
                 totalEntities: entitiesToExtract.length,
                 currentEntityName: `${entity.name} (${modelName})`,
-                statusMessage: `Macbook: entity ${eIdx + 1}/${entitiesToExtract.length} — serialized for GPU reliability`,
+                statusMessage: `${modelObj?.provider?.toLowerCase().includes("ollama") ? "Ollama" : "Macbook"}: entity ${eIdx + 1}/${entitiesToExtract.length} — serialized for GPU reliability`,
               },
             }));
 
             try {
               // Send a SINGLE entity per request — mirrors extractEntityFromApi
               const modelConfig = {
-                modelType: "macbook" as string,
+                modelType: getModelType(modelObj?.provider || "", modelObj?.id),
                 modelId: modelObj?.id,
                 deployment: modelObj?.deployment,
                 apiVersion: modelObj?.api_version,
@@ -2160,7 +2160,7 @@ export function EntityExtractionPage({
         modelResults.push(...cloudResults);
       }
 
-      // Macbook models: sequential, only entities that failed for this model
+      // Macbook/Ollama models: sequential, only entities that failed for this model
       for (const modelId of macbookModels) {
         const modelObj = availableModels.find((m) => m.id === modelId);
         const resultsByEntity: Record<string, any> = {};
@@ -2171,7 +2171,7 @@ export function EntityExtractionPage({
         for (const entity of entitiesForModel) {
           try {
             const modelConfig = {
-              modelType: "macbook" as string,
+              modelType: getModelType(modelObj?.provider || "", modelObj?.id),
               modelId: modelObj?.id,
               deployment: modelObj?.deployment,
               apiVersion: modelObj?.api_version,
