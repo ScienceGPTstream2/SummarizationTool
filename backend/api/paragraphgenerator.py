@@ -20,6 +20,7 @@ _PARAGRAPH_PROVIDER_MAP = {
     "anthropic": "gcp",
     "llama": "gcp",
     "macbook": "macbook",
+    "ollama": "ollama",
 }
 
 
@@ -114,14 +115,16 @@ async def generate_paragraph(
                 or request.model_id
                 or "unknown"
             )
+            _dur = meta.get("duration")
             paragraph_cost = None
-            if prompt_tokens is not None or completion_tokens is not None:
+            if prompt_tokens is not None or completion_tokens is not None or _dur is not None:
                 try:
                     paragraph_cost = cost_tracker.estimate_call_cost(
                         provider=_provider,
                         model=_model,
                         prompt_tokens=prompt_tokens or 0,
                         completion_tokens=completion_tokens or 0,
+                        duration=_dur,
                     )
                 except Exception as cost_err:
                     print(

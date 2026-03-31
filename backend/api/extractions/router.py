@@ -189,13 +189,15 @@ async def extract_entities(
                 )
                 _pt = _meta.get("prompt_tokens")
                 _ct = _meta.get("completion_tokens")
-                if _pt is not None or _ct is not None:
+                _dur = _meta.get("duration")
+                if _pt is not None or _ct is not None or _dur is not None:
                     try:
                         _cost = cost_tracker.estimate_call_cost(
                             provider=_provider,
                             model=_model,
                             prompt_tokens=_pt or 0,
                             completion_tokens=_ct or 0,
+                            duration=_dur,
                         )
                         _meta["cost"] = _cost
                     except Exception as _e:

@@ -138,6 +138,9 @@ class CostTracker:
         if not model:
             return ""
         model_lower = model.lower()
+        if provider == "ollama":
+            # All Ollama models share a single time-based pricing entry
+            return "ollama:*"
         if provider == "azure":
             if model_lower in {"azure_doc_intelligence", "docling"}:
                 return model_lower
@@ -333,6 +336,9 @@ def infer_provider_from_model_id(model_id: str) -> str:
     Matches the _EXTRACTION_PROVIDER_MAP logic in extractions/router.py.
     """
     m = (model_id or "").lower()
+    # Ollama model IDs use "model:tag" format (e.g. "qwen2.5:14b-instruct-q4_K_M")
+    if ":" in m and not m.startswith(("azure:", "vertex:")):
+        return "ollama"
     if any(m.startswith(p) for p in ("gpt-", "o1", "o3", "o4")):
         return "azure"
     if m.startswith("claude-"):

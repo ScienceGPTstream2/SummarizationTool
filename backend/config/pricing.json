@@ -183,7 +183,8 @@
       "provider": "ollama",
       "input_per_million": 0.0,
       "output_per_million": 0.0,
-      "note": "Self-hosted on Azure GPU — cost is compute, not per-token"
+      "cost_per_minute": 0.004316,
+      "note": "Self-hosted on Azure GPU — $0.35964 CAD/hr ≈ $0.2589 USD/hr ≈ $0.004316 USD/min. Cost computed from call duration."
     }
   }
 }
