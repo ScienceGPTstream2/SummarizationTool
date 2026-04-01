@@ -1,9 +1,8 @@
 """
 Storage Services Package
 
-Contains services for file and data storage operations.
+File storage is now handled via local filesystem.
+The old Supabase storage service has been removed.
 """
 
-from .supabase_storage_service import SupabaseStorageService, get_supabase_service
-
-__all__ = ["SupabaseStorageService", "get_supabase_service"]
+__all__ = []

@@ -20,7 +20,7 @@ from schemas.sessions import (
     UpdateSessionRequest,
     SessionSummary,
 )
-from services.database import get_db_service, SQLAlchemyDBService as SupabaseDBService
+from services.database import get_db_service, SQLAlchemyDBService
 from services.telemetry.cost_tracker import cost_tracker, infer_provider_from_model_id
 
 
@@ -28,7 +28,7 @@ class SessionService:
     """Service for managing user sessions with database storage"""
 
     def __init__(self):
-        self.db: SupabaseDBService = get_db_service()
+        self.db: SQLAlchemyDBService = get_db_service()
         # Cache for document lookups to avoid repeated queries
         self._doc_cache: Dict[str, List[Dict[str, Any]]] = {}
 

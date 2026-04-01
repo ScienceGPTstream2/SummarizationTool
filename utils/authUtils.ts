@@ -31,9 +31,11 @@ interface BetterAuthSession {
   };
 }
 
+// Auth requests go through the Vite proxy (/api/auth/* → localhost:3001)
+// so we use same-origin (empty string) by default.
 const AUTH_URL =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_AUTH_URL) ||
-  "http://localhost:3001";
+  "";
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
@@ -158,10 +160,33 @@ export async function signOut(): Promise<void> {
  */
 export async function signInWithGitHub(): Promise<{ error: Error | null }> {
   try {
-    // Better Auth social sign-in: redirect the browser to the auth URL
+    // Better Auth social sign-in: POST to the sign-in endpoint
     const callbackUrl = `${window.location.origin}/auth/callback`;
-    window.location.href = `${AUTH_URL}/api/auth/sign-in/social?provider=github&callbackURL=${encodeURIComponent(callbackUrl)}`;
-    return { error: null };
+    const res = await fetch(`${AUTH_URL}/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        provider: "github",
+        callbackURL: callbackUrl,
+      }),
+    });
+
+    const data = await res.json();
+
+    // Better Auth returns a redirect URL for OAuth providers
+    if (data?.url) {
+      window.location.href = data.url;
+      return { error: null };
+    }
+
+    // If there's a redirect in the response
+    if (data?.redirect) {
+      window.location.href = data.redirect;
+      return { error: null };
+    }
+
+    return { error: new Error(data?.message || "Failed to initiate GitHub sign-in") };
   } catch (err) {
     return { error: err instanceof Error ? err : new Error(String(err)) };
   }

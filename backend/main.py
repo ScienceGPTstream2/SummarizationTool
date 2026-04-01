@@ -173,9 +173,8 @@ app = create_app()
 if __name__ == "__main__":
     # uvicorn main:app --reload --port 8001 --host 0.0.0.0
     uvicorn.run(
-        app,
+        "main:app",
         host="0.0.0.0",
         port=8001,
         reload=True,
-        limit_max_request_size=25 * 1024 * 1024,  # 25MB limit
     )

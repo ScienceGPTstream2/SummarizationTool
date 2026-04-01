@@ -40,9 +40,25 @@ async def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="No auth token provided")
 
+    # Debug: log token prefix and DB URL
+    from models.base import DATABASE_URL as _db_url
+    logger.info(f"[AUTH] Token prefix: {token[:20]}... | DB: {_db_url[:60]}...")
+
     # Query session + user in one go
-    db: SASession = next(get_db_session())
+    db: SASession = get_db_session()
     try:
+        # First check if token exists at all
+        token_check = db.execute(
+            select(AuthSession).where(AuthSession.token == token)
+        ).first()
+        logger.info(f"[AUTH] Token lookup result: {token_check is not None}")
+        
+        if not token_check:
+            # Count total sessions for debugging
+            from sqlalchemy import func
+            total = db.execute(select(func.count()).select_from(AuthSession)).scalar()
+            logger.info(f"[AUTH] Total sessions in DB: {total}")
+        
         stmt = (
             select(AuthSession, User)
             .join(User, AuthSession.user_id == User.id)
@@ -81,16 +97,22 @@ async def get_current_user(request: Request) -> dict:
 
 
 def _extract_token(request: Request) -> Optional[str]:
-    """Extract session token from cookie or Authorization header."""
-    # 1. Try cookie (Better Auth default)
-    token = request.cookies.get("better-auth.session_token")
-    if token:
-        return token
+    """Extract session token from Authorization header (preferred) or cookie.
     
-    # 2. Try Authorization header
+    Better Auth v1.2+ hashes tokens before storing in DB.
+    - Cookie contains the RAW token
+    - Authorization header contains the HASHED token (from get-session API)
+    We must prefer the header because our DB lookup matches against the hash.
+    """
+    # 1. Try Authorization header first (contains the hashed/DB token)
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
+    
+    # 2. Fallback to cookie (only works if tokens are NOT hashed)
+    token = request.cookies.get("better-auth.session_token")
+    if token:
+        return token
     
     return None
 

@@ -6,15 +6,24 @@
  * The FastAPI backend validates sessions by querying the same DB.
  */
 
+// Node 18 polyfill: globalThis.crypto is only available from Node 20+
+import { webcrypto } from "node:crypto";
+if (!globalThis.crypto) {
+  (globalThis as any).crypto = webcrypto;
+}
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { betterAuth } from "better-auth";
+import { toNodeHandler } from "better-auth/node";
 import { Pool } from "pg";
 
 // ---------- Better Auth Configuration ----------
 
 const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3001",
+
   database: new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
@@ -54,16 +63,13 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
   })
 );
 
 // Mount Better Auth handler at /api/auth/*
-app.all("/api/auth/*", (req, res) => {
-  // Better Auth expects a standard Web Request
-  return auth.handler(req, res);
-});
+app.all("/api/auth/*", toNodeHandler(auth));
 
 // Health check
 app.get("/health", (_req, res) => {

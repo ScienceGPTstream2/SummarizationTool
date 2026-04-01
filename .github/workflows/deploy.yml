@@ -17,17 +17,23 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
-      - name: Restart Supabase stack
+      - name: Install & build auth service
         run: |
-          cd ~/SummarizationTool/supabase-docker
-          docker compose down
-          docker compose up -d
+          cd ~/SummarizationTool/auth-service
+          npm ci
+          npx tsc
 
       - name: Install backend deps
         run: |
           cd ~/SummarizationTool/backend
-          source ./venv/bin/activate
+          source ../venv/bin/activate
           pip install -r requirements.txt
+
+      - name: Run DB migrations
+        run: |
+          cd ~/SummarizationTool/backend
+          source ../venv/bin/activate
+          alembic upgrade head
 
       - name: Install frontend deps
         run: |
@@ -41,11 +47,13 @@ jobs:
 
       - name: Restart services
         run: |
+          sudo systemctl restart summarization-auth
           sudo systemctl restart summarization-backend
           sudo systemctl restart summarization-frontend
 
       - name: Health check
         run: |
           sleep 5
+          sudo systemctl is-active summarization-auth
           sudo systemctl is-active summarization-backend
           sudo systemctl is-active summarization-frontend

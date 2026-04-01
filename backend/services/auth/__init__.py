@@ -1,5 +1,3 @@
-"""Authentication services"""
+"""Authentication services — handled by Better Auth sidecar + core.auth module"""
 
-from .supabase_auth_service import SupabaseAuthService
-
-__all__ = ["SupabaseAuthService"]
+__all__ = []

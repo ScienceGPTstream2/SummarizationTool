@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
 
-from services.database import get_db_service, SupabaseDBService
+from services.database import get_db_service, SQLAlchemyDBService
 
 
 class OrganizedFileService:

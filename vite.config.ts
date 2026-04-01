@@ -24,10 +24,16 @@ export default defineConfig({
       ],
     },
     proxy: {
+      // Auth sidecar (Better Auth) — must be BEFORE /api to match first
+      "/api/auth": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+        secure: false,
+      },
+      // FastAPI backend
       "/api": {
         target: "http://localhost:8001",
         changeOrigin: true,
-
         secure: false,
       },
     },

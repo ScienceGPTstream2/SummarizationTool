@@ -40,6 +40,7 @@ import {
   getCurrentUser,
   getValidToken,
   getSession,
+  authenticatedFetch,
   installVisibilityRefreshListener,
   Session,
 } from "./utils/authUtils";
@@ -1624,8 +1625,8 @@ export default function App() {
     restoringSessionRef.current = true;
     try {
       setLoading(true);
-      const response = await fetch(
-        `/api/sessions/${sessionId}?user_id=${userInfo?.id}`
+      const response = await authenticatedFetch(
+        `/api/sessions/${sessionId}`
       );
       if (!response.ok) throw new Error("Failed to fetch session");
       const sessionData = await response.json();
@@ -1720,8 +1721,8 @@ export default function App() {
     restoringSessionRef.current = true;
     try {
       setLoading(true);
-      const response = await fetch(
-        `/api/sessions/shared/${sessionId}?user_id=${userInfo?.id}`
+      const response = await authenticatedFetch(
+        `/api/sessions/shared/${sessionId}`
       );
       if (!response.ok) throw new Error("Failed to fetch shared session");
       const sessionData = await response.json();

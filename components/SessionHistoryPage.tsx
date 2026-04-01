@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { authenticatedFetch } from "../utils/authUtils";
 
 import {
   Table,
@@ -149,7 +150,7 @@ export function SessionHistoryPage({
   const fetchSessions = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/sessions?user_id=${userId}`);
+      const response = await authenticatedFetch(`/api/sessions`);
       if (!response.ok) throw new Error("Failed to fetch sessions");
       const data = await response.json();
       setSessions(data.sessions);
@@ -164,8 +165,8 @@ export function SessionHistoryPage({
   const fetchSharedSessions = async () => {
     try {
       setSharedLoading(true);
-      const response = await fetch(
-        `/api/sessions/shared/list?user_id=${userId}`
+      const response = await authenticatedFetch(
+        `/api/sessions/shared/list`
       );
       if (!response.ok) throw new Error("Failed to fetch shared sessions");
       const data = await response.json();
@@ -214,10 +215,10 @@ export function SessionHistoryPage({
     const trimmedName = editingName.trim();
 
     try {
-      const response = await fetch(`/api/sessions/${editingSessionId}`, {
+      const response = await authenticatedFetch(`/api/sessions/${editingSessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, name: trimmedName }),
+        body: JSON.stringify({ name: trimmedName }),
       });
 
       if (!response.ok) throw new Error("Failed to rename session");
@@ -261,13 +262,12 @@ export function SessionHistoryPage({
 
     setShareLoading(true);
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `/api/sessions/${shareTargetSession.session_id}/share`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: userId,
             group_id: selectedGroupId,
           }),
         }
@@ -292,8 +292,8 @@ export function SessionHistoryPage({
 
   const handleUnshare = async (sessionId: string) => {
     try {
-      const response = await fetch(
-        `/api/sessions/${sessionId}/share?user_id=${userId}`,
+      const response = await authenticatedFetch(
+        `/api/sessions/${sessionId}/share`,
         { method: "DELETE" }
       );
       if (!response.ok) throw new Error("Failed to unshare");
@@ -318,8 +318,8 @@ export function SessionHistoryPage({
     if (!sessionToDelete) return;
 
     try {
-      const response = await fetch(
-        `/api/sessions/${sessionToDelete}?user_id=${userId}`,
+      const response = await authenticatedFetch(
+        `/api/sessions/${sessionToDelete}`,
         { method: "DELETE" }
       );
 

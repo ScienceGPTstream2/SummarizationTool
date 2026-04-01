@@ -2,13 +2,35 @@
 SQLAlchemy Base Configuration
 
 Engine, session factory, and Base declarative class.
-Reads DATABASE_URL from environment or secrets.toml.
+Reads DATABASE_URL from environment or .env file.
 """
 
 import os
+from pathlib import Path
 from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
+
+
+def _load_dotenv():
+    """Load backend/.env into os.environ (minimal, no dependencies)."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        os.environ.setdefault(key, value)
+
+_load_dotenv()
 
 
 class Base(DeclarativeBase):

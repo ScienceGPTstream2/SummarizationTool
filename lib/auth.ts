@@ -5,10 +5,10 @@
  * Install better-auth in the root package: npm i better-auth
  */
 
-import { createAuthClient } from "better-auth/react";
+import { createAuthClient } from "better-auth/client";
 
-// The auth service runs on port 3001 as a sidecar
-const AUTH_URL = import.meta.env.VITE_AUTH_URL || "http://localhost:3001";
+// Auth requests go through Vite proxy (/api/auth/* → localhost:3001)
+const AUTH_URL = import.meta.env.VITE_AUTH_URL || "";
 
 export const authClient = createAuthClient({
   baseURL: AUTH_URL,
