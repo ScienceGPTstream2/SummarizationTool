@@ -55,45 +55,7 @@
 
 ---
 
-## Task 1: Remove Legacy supabase-docker Directory
-
-**Files:**
-- Delete: `supabase-docker/` (39 tracked files)
-- Modify: `.gitignore` (remove supabase-docker references)
-
-- [ ] **Step 1: Remove supabase-docker directory**
-
-```bash
-rm -rf supabase-docker/
-```
-
-- [ ] **Step 2: Clean up .gitignore references**
-
-Remove these lines from `.gitignore`:
-```
-# But keep supabase-docker logs config
-!supabase-docker/volumes/logs/
-!supabase-docker/volumes/logs/vector.yml
-```
-
-- [ ] **Step 3: Remove old deploy.sh**
-
-The existing `deploy.sh` references supabase-docker and the old systemd-based deployment. Remove it — we'll replace it with container-based deployment.
-
-```bash
-rm deploy.sh
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add -A supabase-docker/ .gitignore deploy.sh
-git commit -m "chore: remove legacy supabase-docker directory and old deploy script"
-```
-
----
-
-## Task 2: Create Backend Dockerfile
+## Task 1: Create Backend Dockerfile
 
 **Files:**
 - Create: `backend/Dockerfile`
