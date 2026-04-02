@@ -21,8 +21,14 @@ import { Pool } from "pg";
 
 // ---------- Better Auth Configuration ----------
 
+const frontendURL = process.env.FRONTEND_URL || "http://localhost:3000";
+
 const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3001",
+
+  // Trust the frontend origin (browser sends Origin: http://localhost:3000
+  // but sidecar runs on :3001, so we must explicitly allow the frontend)
+  trustedOrigins: [frontendURL],
 
   database: new Pool({
     connectionString: process.env.DATABASE_URL,
