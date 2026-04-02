@@ -1,3 +1,0 @@
--- SUPERSEDED: This change is now handled by migration
--- supabase-docker/migrations/20260216152300_add_parse_cost_to_documents.sql
--- This file is kept for reference only and has no effect.
