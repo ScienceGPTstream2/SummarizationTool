@@ -72,8 +72,11 @@ def get_engine():
     if _engine is None:
         _engine = create_engine(
             DATABASE_URL,
-            pool_size=10,
-            max_overflow=20,
+            # 1 worker per replica × up to 5 replicas = 5-25 persistent connections.
+            # pool_size=5 keeps idle connections low; max_overflow=10 handles bursts.
+            # Total worst-case: 5 replicas × 15 = 75 connections (well within PG limits).
+            pool_size=5,
+            max_overflow=10,
             pool_pre_ping=True,  # Test connections before using them
             pool_recycle=300,    # Recycle connections every 5 minutes
             echo=False,          # Set True for SQL debugging

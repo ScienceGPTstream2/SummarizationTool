@@ -96,6 +96,7 @@ from api import (
     groups,
     templates,
 )
+from api.auth.proxy import router as auth_proxy_router
 
 
 @asynccontextmanager
@@ -152,6 +153,8 @@ def create_app() -> FastAPI:
         return response
 
     # Include API routers
+    # Auth proxy must be first: /api/auth/* must match before generic /auth/* routes.
+    app.include_router(auth_proxy_router)
     app.include_router(auth.router)
     app.include_router(files.router)
     app.include_router(documents.router)

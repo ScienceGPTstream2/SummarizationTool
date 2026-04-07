@@ -1,8 +1,10 @@
 """
 Storage Services Package
 
-File storage is now handled via local filesystem.
-The old Supabase storage service has been removed.
+Provides BlobStorageClient for Azure Blob Storage (production) with automatic
+fallback to local filesystem when AZURE_STORAGE_CONNECTION_STRING is not set.
 """
 
-__all__ = []
+from services.storage.blob_storage import BlobStorageClient
+
+__all__ = ["BlobStorageClient"]

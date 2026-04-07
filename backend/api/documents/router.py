@@ -88,23 +88,14 @@ async def process_uploaded_file(
                 f"[PROCESS] ✅ Using cached results for {file_hash} ({processor_name})"
             )
 
-            # Read cached metadata and content
-            import json
-            import aiofiles
-
-            metadata_path = output_dir / "metadata.json"
-            markdown_path = output_dir / "document.md"
-
-            cached_metadata = {}
+            # Read cached metadata and content via service (blob-safe)
+            cached_metadata = (
+                await file_service.get_processed_metadata(file_hash, processor_name) or {}
+            )
             markdown_content_length = 0
-
-            if metadata_path.exists():
-                async with aiofiles.open(metadata_path, "r") as f:
-                    cached_metadata = json.loads(await f.read())
-
-            if markdown_path.exists():
-                async with aiofiles.open(markdown_path, "r") as f:
-                    markdown_content_length = len(await f.read())
+            _cached_md = await file_service.get_processed_content(file_hash, processor_name)
+            if _cached_md:
+                markdown_content_length = len(_cached_md)
 
             # For cached docs: 4-tier fallback to get parse_cost.
             # Tier 1: parse_cost stored directly in metadata.json (written by recent fresh runs).
@@ -229,18 +220,12 @@ async def process_uploaded_file(
                         _raw = cached_metadata.get("conversion_time")
                         if isinstance(_raw, (int, float)):
                             _cached_dur = float(_raw)
-                    # Also try the upload metadata.json (file_path.parent)
-                    # which always has original_filename from the upload step
+                    # Also try the upload metadata (blob-safe via service)
                     _upload_meta_filename = None
                     try:
-                        import json as _json_up
-
-                        _upload_meta_path = file_path.parent / "metadata.json"
-                        if _upload_meta_path.exists():
-                            _upload_meta = _json_up.loads(_upload_meta_path.read_text())
-                            _upload_meta_filename = _upload_meta.get(
-                                "original_filename"
-                            )
+                        _upload_meta = await file_service.get_file_metadata(file_hash)
+                        if _upload_meta:
+                            _upload_meta_filename = _upload_meta.get("original_filename")
                     except Exception:
                         pass
 
@@ -276,7 +261,7 @@ async def process_uploaded_file(
                     "message": "Document already processed (cached)",
                     "conversion_id": file_hash,  # Always use file_hash, not legacy UUID
                     "file_hash": file_hash,
-                    "markdown_path": str(markdown_path),
+                    "markdown_path": str(output_dir / "document.md"),
                     "content_length": markdown_content_length,
                     "conversion_time": cached_metadata.get("conversion_time", "cached"),
                     "processor_used": processor_name,
@@ -385,45 +370,38 @@ async def process_uploaded_file(
         except Exception as e:
             print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
 
-        # Write parse_cost and parse_duration_seconds into metadata.json so cached access
-        # later can return the real value. parse_duration_seconds is stored as a float so
-        # that Docling cost (cost_per_minute × duration/60) can be recomputed deterministically
-        # even for files where parse_cost was not yet stored (legacy metadata.json files).
+        # Write parse_cost and parse_duration_seconds into processor metadata.json so cached
+        # access later can return the real value (blob-safe via service).
         try:
-            import json as _json
-
-            _meta_path = output_dir / "metadata.json"
-            if _meta_path.exists():
-                _meta_data = _json.loads(_meta_path.read_text())
-                _needs_write = False
-                if parse_cost:
-                    _meta_data["parse_cost"] = parse_cost
-                    _meta_data["parse_duration_seconds"] = actual_duration
+            _meta_data = (
+                await file_service.get_processed_metadata(file_hash, processor_name) or {}
+            )
+            _needs_write = False
+            if parse_cost:
+                _meta_data["parse_cost"] = parse_cost
+                _meta_data["parse_duration_seconds"] = actual_duration
+                _needs_write = True
+            if "original_filename" not in _meta_data:
+                _resolved_name = _original_filename or (
+                    file_path.name if file_path.name != "original.pdf" else None
+                )
+                if _resolved_name:
+                    _meta_data["original_filename"] = _resolved_name
                     _needs_write = True
-                # Always persist original_filename so cache hits can display
-                # the correct document name instead of "original.pdf".
-                if "original_filename" not in _meta_data:
-                    _resolved_name = _original_filename or (
-                        file_path.name if file_path.name != "original.pdf" else None
-                    )
-                    if _resolved_name:
-                        _meta_data["original_filename"] = _resolved_name
-                        _needs_write = True
-                if _needs_write:
-                    _meta_path.write_text(_json.dumps(_meta_data, indent=2))
+            if _needs_write:
+                await file_service.update_processed_metadata(
+                    file_hash, processor_name, _meta_data
+                )
         except Exception as _e:
             print(f"[COST_TRACKER] Failed to write metadata to metadata.json: {_e}")
 
         # Record call metric for session metrics widget.
-        # Fallback: read original_filename from the file's metadata.json.
+        # Fallback: read original_filename from the upload metadata (blob-safe).
         _metadata_filename = None
         try:
-            import json as _json
-
-            _meta_path = file_path.parent / "metadata.json"
-            if _meta_path.exists():
-                _meta = _json.loads(_meta_path.read_text())
-                _metadata_filename = _meta.get("original_filename")
+            _upload_meta = await file_service.get_file_metadata(file_hash)
+            if _upload_meta:
+                _metadata_filename = _upload_meta.get("original_filename")
         except Exception:
             pass
 
@@ -503,8 +481,6 @@ async def get_document_content(document_id: str, processor_used: str = None):
         processor_used: Optional processor that was used (improves efficiency)
     """
     try:
-        import aiofiles
-
         # Check organized file structure
         processors_to_check = (
             [processor_used]
@@ -515,13 +491,8 @@ async def get_document_content(document_id: str, processor_used: str = None):
         for proc in processors_to_check:
             if proc is None:
                 continue
-            output_dir = file_service.get_processing_output_path(document_id, proc)
-            markdown_path = output_dir / "document.md"
-
-            if markdown_path.exists():
-                async with aiofiles.open(markdown_path, "r", encoding="utf-8") as f:
-                    markdown_content = await f.read()
-
+            markdown_content = await file_service.get_processed_content(document_id, proc)
+            if markdown_content is not None:
                 return JSONResponse(
                     status_code=200,
                     content={
@@ -893,19 +864,17 @@ async def get_document_analysis(document_id: str):
     """
     try:
         import json
-        import aiofiles
 
-        # Check organized file structure
+        # Read raw_analysis.json via service (blob-safe)
         processors_to_check = ["azure_doc_intelligence", "docling"]
         analysis_result = None
 
         for proc in processors_to_check:
-            output_dir = file_service.get_processing_output_path(document_id, proc)
-            raw_analysis_path = output_dir / "raw_analysis.json"
-
-            if raw_analysis_path.exists():
-                async with aiofiles.open(raw_analysis_path, "r", encoding="utf-8") as f:
-                    analysis_result = json.loads(await f.read())
+            raw_bytes = await file_service.get_processing_file_bytes(
+                document_id, proc, "raw_analysis.json"
+            )
+            if raw_bytes:
+                analysis_result = json.loads(raw_bytes.decode("utf-8"))
                 break
 
         if analysis_result is None:
@@ -955,48 +924,31 @@ async def get_figure_image(document_id: str, figure_filename: str):
     Returns:
         The image file
     """
-    try:
-        base_path = Path(__file__).resolve().parents[2]
+    from fastapi.responses import Response as _Response
 
-        # Organized file structure only (file_hash based)
-        possible_paths = [
-            file_service.get_processing_output_path(
-                document_id, "azure_doc_intelligence"
-            )
-            / "figures"
-            / figure_filename,
-            file_service.get_processing_output_path(document_id, "docling")
-            / "figures"
-            / figure_filename,
-        ]
+    try:
+        # Validate filename to prevent path traversal
+        if not figure_filename or "/" in figure_filename or "\\" in figure_filename or ".." in figure_filename:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         print(f"[FIGURE] Attempting to serve figure: {document_id}/{figure_filename}")
 
-        figure_path = None
-        for path in possible_paths:
-            if path.exists():
-                figure_path = path
-                print(f"[FIGURE] ✅ Found at: {path}")
+        figure_bytes = None
+        for proc in ("azure_doc_intelligence", "docling"):
+            figure_bytes = await file_service.get_processing_file_bytes(
+                document_id, proc, f"figures/{figure_filename}"
+            )
+            if figure_bytes:
                 break
 
-        if not figure_path:
+        if not figure_bytes:
             print(f"[FIGURE] File not found")
             raise HTTPException(
                 status_code=404, detail=f"Figure image not found: {figure_filename}"
             )
 
-        # Security check: ensure the file is within the files directory
-        files_dir = base_path / "files"
-        if not figure_path.is_relative_to(files_dir):
-            print(f"[FIGURE] Security check failed")
-            raise HTTPException(status_code=403, detail="Access denied")
-
         print(f"[FIGURE] ✅ Serving figure: {figure_filename}")
-
-        # Return the image file
-        return FileResponse(
-            path=str(figure_path), media_type="image/png", filename=figure_filename
-        )
+        return _Response(content=figure_bytes, media_type="image/png")
 
     except HTTPException:
         raise
@@ -1058,40 +1010,34 @@ async def generate_figure_summary(
                 detail=f"Figure {figure_id} has no associated image",
             )
 
-        # Get the full image path using the organized file service
-        # Try new organized file structure first, then legacy paths
-        figure_filename = figure["image_path"]
-        if "/" in figure_filename:
-            # Extract just the filename if it's a path like "figures/1.1.png"
-            figure_filename = Path(figure_filename).name
+        # Fetch figure image bytes via service (blob-safe), then write to a temp file
+        # because the vision model requires a filesystem path.
+        figure_filename = Path(figure["image_path"]).name
 
-        possible_paths = [
-            # New organized file structure
-            file_service.get_processing_output_path(
-                document_id, "azure_doc_intelligence"
+        figure_bytes = None
+        for proc in ("azure_doc_intelligence", "docling"):
+            figure_bytes = await file_service.get_processing_file_bytes(
+                document_id, proc, f"figures/{figure_filename}"
             )
-            / "figures"
-            / figure_filename,
-            file_service.get_processing_output_path(document_id, "docling")
-            / "figures"
-            / figure_filename,
-        ]
-
-        image_path = None
-        for path in possible_paths:
-            if path.exists():
-                image_path = path
-                print(f"[FIGURE SUMMARY] ✅ Found image at: {path}")
+            if figure_bytes:
                 break
 
-        if not image_path:
-            print(
-                f"[FIGURE SUMMARY] Image not found. Tried paths: {[str(p) for p in possible_paths]}"
-            )
+        if not figure_bytes:
+            print(f"[FIGURE SUMMARY] Image not found for figure {figure_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"Figure image not found: {figure['image_path']}",
             )
+
+        import tempfile as _tempfile
+        import os as _os
+
+        _tmp_path = None
+        _tmp_fd, _tmp_path = _tempfile.mkstemp(suffix=".png")
+        _os.write(_tmp_fd, figure_bytes)
+        _os.close(_tmp_fd)
+        image_path = Path(_tmp_path)
+        print(f"[FIGURE SUMMARY] ✅ Image written to temp: {_tmp_path}")
 
         # Extract parameters from request
         model_type = request.get("model_type", "gemini")
@@ -1198,45 +1144,35 @@ async def generate_figure_summary(
             "potentially_truncated": is_likely_truncated,
         }
 
-        # Try to update the figure metadata file with the summary
+        # Persist the summary back into the processor metadata.json (blob-safe)
         try:
-            # Find the metadata file for this conversion using new organized file structure
-            metadata_paths = [
-                file_service.get_processing_output_path(
-                    document_id, "azure_doc_intelligence"
-                )
-                / "metadata.json",
-                file_service.get_processing_output_path(document_id, "docling")
-                / "metadata.json",
-            ]
+            import json as _json_sum
 
-            metadata_updated = False
-            for metadata_path in metadata_paths:
-                if metadata_path.exists():
-                    import json
-
-                    with open(metadata_path, "r") as f:
-                        metadata = json.load(f)
-
-                    # Update the specific figure with the summary
-                    if "figures" in metadata:
-                        for fig in metadata["figures"]:
-                            if fig.get("id") == figure_id:
-                                fig["scientific_summary"] = summary_data
-                                metadata_updated = True
-                                break
-
-                    if metadata_updated:
-                        with open(metadata_path, "w") as f:
-                            json.dump(metadata, f, indent=2)
-                        print(
-                            f"[SUMMARY] ✅ Stored summary for figure {figure_id} in {metadata_path}"
-                        )
-                        break
-
+            for proc in ("azure_doc_intelligence", "docling"):
+                _proc_meta = await file_service.get_processed_metadata(document_id, proc)
+                if _proc_meta and "figures" in _proc_meta:
+                    for fig in _proc_meta["figures"]:
+                        if fig.get("id") == figure_id:
+                            fig["scientific_summary"] = summary_data
+                            await file_service.update_processed_metadata(
+                                document_id, proc, _proc_meta
+                            )
+                            print(
+                                f"[SUMMARY] ✅ Stored summary for figure {figure_id} ({proc})"
+                            )
+                            break
+                    else:
+                        continue
+                    break
         except Exception as e:
-            print(f"[SUMMARY] Warning: Could not persist summary to metadata file: {e}")
+            print(f"[SUMMARY] Warning: Could not persist summary to metadata: {e}")
             # Continue anyway - the summary is still returned to the UI
+
+        # Clean up temp image file
+        try:
+            _os.unlink(_tmp_path)
+        except Exception:
+            pass
 
         return JSONResponse(
             status_code=200,
@@ -1253,8 +1189,19 @@ async def generate_figure_summary(
         )
 
     except HTTPException:
+        # Clean up temp file on error path too
+        try:
+            if _tmp_path:
+                _os.unlink(_tmp_path)
+        except Exception:
+            pass
         raise
     except Exception as e:
+        try:
+            if _tmp_path:
+                _os.unlink(_tmp_path)
+        except Exception:
+            pass
         raise HTTPException(
             status_code=500,
             detail=f"Error generating figure summary: {str(e)}",
@@ -1293,49 +1240,31 @@ async def get_table_html(document_id: str, table_filename: str):
     Returns:
         The table HTML file
     """
-    try:
-        base_path = Path(__file__).resolve().parents[2]
+    from fastapi.responses import Response as _Response
 
-        # Try organized file structure first (new), then output directories
-        # Organized file structure only (file_hash based)
-        possible_paths = [
-            file_service.get_processing_output_path(
-                document_id, "azure_doc_intelligence"
-            )
-            / "tables"
-            / table_filename,
-            file_service.get_processing_output_path(document_id, "docling")
-            / "tables"
-            / table_filename,
-        ]
+    try:
+        # Validate filename to prevent path traversal
+        if not table_filename or "/" in table_filename or "\\" in table_filename or ".." in table_filename:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")
 
-        table_path = None
-        for path in possible_paths:
-            if path.exists():
-                table_path = path
-                print(f"[TABLE] ✅ Found at: {path}")
+        table_bytes = None
+        for proc in ("azure_doc_intelligence", "docling"):
+            table_bytes = await file_service.get_processing_file_bytes(
+                document_id, proc, f"tables/{table_filename}"
+            )
+            if table_bytes:
                 break
 
-        if not table_path:
+        if not table_bytes:
             print(f"[TABLE] File not found")
             raise HTTPException(
                 status_code=404, detail=f"Table file not found: {table_filename}"
             )
 
-        # Security check: ensure the file is within the files directory
-        files_dir = base_path / "files"
-        if not table_path.is_relative_to(files_dir):
-            print(f"[TABLE] Security check failed")
-            raise HTTPException(status_code=403, detail="Access denied")
-
         print(f"[TABLE] ✅ Serving table: {table_filename}")
-
-        # Return the HTML file
-        return FileResponse(
-            path=str(table_path), media_type="text/html", filename=table_filename
-        )
+        return _Response(content=table_bytes, media_type="text/html")
 
     except HTTPException:
         raise

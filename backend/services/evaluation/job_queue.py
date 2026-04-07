@@ -231,10 +231,63 @@ class EvalJob:
 
 
 # ---------------------------------------------------------------------------
-# In-memory job registry
+# In-memory job registry (per-worker; authoritative for active jobs only)
 # ---------------------------------------------------------------------------
 _JOBS: Dict[str, EvalJob] = {}
 _eval_service = EvaluationService()
+
+
+# ---------------------------------------------------------------------------
+# DB persistence helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _JobStatusProxy:
+    """Read-only snapshot of a job loaded from DB (cross-worker lookup)."""
+
+    _data: Dict[str, Any]
+
+    def to_status_dict(self) -> Dict[str, Any]:
+        return self._data
+
+
+async def _create_job_in_db(job: "EvalJob") -> None:
+    """Insert the initial eval_jobs row (fire-and-forget)."""
+    try:
+        from services.database import get_db_service
+
+        await asyncio.to_thread(
+            get_db_service().create_eval_job_record,
+            job.job_id,
+            job.session_id,
+            job.user_id,
+            job.status,
+            job.created_at,
+        )
+    except Exception as exc:
+        print(f"[JobQueue] DB insert failed for {job.job_id[:8]}: {exc}")
+
+
+async def _sync_job_to_db(job: "EvalJob") -> None:
+    """Write current job state to DB (upsert)."""
+    status_dict = job.to_status_dict()
+    try:
+        from services.database import get_db_service
+
+        await asyncio.to_thread(
+            get_db_service().upsert_eval_job_status,
+            job.job_id,
+            job.status,
+            job.progress,
+            job.total,
+            status_dict["results"],
+            job.errors,
+            job.error,
+            job.completed_at,
+        )
+    except Exception as exc:
+        print(f"[JobQueue] DB sync failed for {job.job_id[:8]}: {exc}")
 
 # ---------------------------------------------------------------------------
 # Background job cleanup
@@ -500,6 +553,8 @@ async def _run_single_eval(
 async def _process_job(job: EvalJob) -> None:
     """Process all tasks in a job, respecting cancellation."""
     job.status = "running"
+    # Non-blocking DB update to "running" so other workers see the status change.
+    asyncio.create_task(_sync_job_to_db(job))
 
     # Build flat list of (task, provider) pairs — one per LLM call
     work_items = [(task, provider) for task in job.tasks for provider in job.providers]
@@ -529,6 +584,9 @@ async def _process_job(job: EvalJob) -> None:
 
     job.status = "cancelled" if job.cancelled else "completed"
     job.completed_at = datetime.now(timezone.utc)
+
+    # Persist final state to DB (awaited so results are durable before exit).
+    await _sync_job_to_db(job)
 
     # Mark session as completed in DB
     if not job.cancelled and job.session_id:
@@ -565,6 +623,9 @@ def submit_job(job: EvalJob) -> EvalJob:
     if _cleanup_task is None or _cleanup_task.done():
         _cleanup_task = asyncio.create_task(_cleanup_loop())
 
+    # Persist initial row to DB so other workers can find this job.
+    asyncio.create_task(_create_job_in_db(job))
+
     # asyncio.create_task schedules the coroutine on the running event loop
     # without blocking the caller. Multiple jobs run concurrently, all sharing
     # _LLM_SEMAPHORE.
@@ -572,33 +633,54 @@ def submit_job(job: EvalJob) -> EvalJob:
     return job
 
 
-def get_job(job_id: str) -> Optional[EvalJob]:
-    """Return the job, or None if not found."""
-    return _JOBS.get(job_id)
+def get_job(job_id: str) -> Optional[Any]:
+    """Return the job (or a DB-backed proxy), or None if not found anywhere."""
+    # Hot path: job is active on this worker.
+    if job_id in _JOBS:
+        return _JOBS[job_id]
+    # Cold path: job was started by a different worker — query DB.
+    try:
+        from services.database import get_db_service
+
+        data = get_db_service().get_eval_job_status(job_id)
+        if data is None:
+            return None
+        return _JobStatusProxy(data)
+    except Exception as exc:
+        print(f"[JobQueue] DB get_eval_job_status failed: {exc}")
+        return None
 
 
 def cancel_job(job_id: str) -> bool:
     """
     Request cancellation of a job.
 
-    Sets cancelled=True AND cancels all live asyncio tasks, which propagates
-    CancelledError through wait_for → evaluate_extraction → ainvoke, aborting
-    any in-flight HTTP requests to the LLM provider immediately.
+    If the job is active on this worker: sets cancelled=True AND cancels all
+    live asyncio tasks (propagates CancelledError through wait_for immediately).
+    If the job is on another worker: marks it cancelled in DB so the status
+    endpoint returns 'cancelled' on the next poll.
     """
     job = _JOBS.get(job_id)
-    if job is None:
+    if job is not None:
+        job.cancelled = True
+        cancelled_count = 0
+        for task in job._asyncio_tasks:
+            if not task.done():
+                task.cancel()
+                cancelled_count += 1
+        if cancelled_count:
+            print(
+                f"[JobQueue] Cancelled {cancelled_count} in-flight tasks for job {job_id[:8]}"
+            )
+        return True
+    # Cross-worker cancel: write to DB.
+    try:
+        from services.database import get_db_service
+
+        return get_db_service().mark_eval_job_cancelled(job_id)
+    except Exception as exc:
+        print(f"[JobQueue] DB mark_cancelled failed for {job_id[:8]}: {exc}")
         return False
-    job.cancelled = True
-    cancelled_count = 0
-    for task in job._asyncio_tasks:
-        if not task.done():
-            task.cancel()
-            cancelled_count += 1
-    if cancelled_count:
-        print(
-            f"[JobQueue] Cancelled {cancelled_count} in-flight tasks for job {job_id[:8]}"
-        )
-    return True
 
 
 def create_job(

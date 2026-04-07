@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.env
+core/secrets.toml
+venv/
+tests/
+uploads/
+output/
+files/
+*.egg-info/

@@ -101,15 +101,6 @@ This migration replaces **Supabase** (auth + DB) with:
 | Session table | Supabase `auth.sessions` | `session` (Better Auth) |
 | App sessions | `sessions` table | `app_sessions` table |
 
-## Files Eventually to Remove
+## Migration Status: Complete
 
-- `backend/services/database/supabase_db_service.py` → replaced by `sqlalchemy_db_service.py`
-- `backend/services/auth/supabase_auth_service.py` → replaced by `core/auth.py`
-- `supabase-docker/` → entire directory, once fully migrated
-
-## Rollback Plan
-
-The old Supabase Docker setup remains in `supabase-docker/`. To rollback:
-1. Revert the code changes (git)
-2. Restart Supabase Docker containers
-3. No data loss — Azure Postgres is independent
+All Supabase artifacts have been removed. The codebase runs entirely on Azure Postgres + SQLAlchemy + Better Auth. There is no rollback path.

@@ -111,6 +111,12 @@ class OrganizedDocumentProcessor:
         result["cached"] = False
         result["output_path"] = str(output_path)
 
+        # In blob mode, upload the local temp output dir to blob storage
+        if result["success"]:
+            await self.file_service.sync_processing_output_to_blob(
+                file_hash, processor, output_path
+            )
+
         return result
 
     async def _process_with_azure(

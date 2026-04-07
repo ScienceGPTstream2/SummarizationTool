@@ -1,59 +1,154 @@
-name: Deploy to A100 VM
+name: Build & Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
+# ---------------------------------------------------------------------------
+# Non-secret configuration — safe to commit.
+# Secrets (passwords, keys, connection strings) live in GitHub Actions secrets:
+#
+#   AZURE_CREDENTIALS              az ad sp create-for-rbac --sdk-auth output
+#   ACR_NAME                       Azure Container Registry name
+#   ACR_USERNAME                   ACR admin username
+#   ACR_PASSWORD                   ACR admin password
+#   AZURE_RESOURCE_GROUP           Resource group name
+#   CONTAINER_APP_NAME             Container App name
+#   DATABASE_URL                   Full Postgres connection string
+#   GITHUB_CLIENT_ID               GitHub OAuth App client ID
+#   GITHUB_CLIENT_SECRET           GitHub OAuth App client secret
+#   BETTER_AUTH_SECRET             Better Auth signing secret
+#   AZURE_STORAGE_CONNECTION_STRING  Blob storage connection string
+#   STATIC_WEB_APP_URL             SWA hostname (no https://)
+#   SWA_DEPLOY_TOKEN               Azure Static Web Apps deployment token
+# ---------------------------------------------------------------------------
+
 jobs:
-  deploy:
-    runs-on: self-hosted
-
+  # ── Build & push backend image ────────────────────────────────────────────
+  build-backend:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'backend/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
     steps:
-      - name: Pull latest repo
-        run: |
-          cd ~/SummarizationTool
-          git fetch origin main
-          git reset --hard origin/main
+      - uses: actions/checkout@v4
 
-      - name: Install & build auth service
-        run: |
-          cd ~/SummarizationTool/auth-service
-          npm ci
-          npx tsc
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Install backend deps
-        run: |
-          cd ~/SummarizationTool/backend
-          source ../venv/bin/activate
-          pip install -r requirements.txt
+      - name: Log in to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
 
-      - name: Run DB migrations
+      - name: Build & push backend
+        id: mark
         run: |
-          cd ~/SummarizationTool/backend
-          source ../venv/bin/activate
-          alembic upgrade head
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend"
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./backend
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
 
-      - name: Install frontend deps
-        run: |
-          cd ~/SummarizationTool
-          npm ci
+  # ── Build & push auth image ───────────────────────────────────────────────
+  build-auth:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'auth-service/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Build frontend
-        run: |
-          cd ~/SummarizationTool
-          npm run build
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Restart services
-        run: |
-          sudo systemctl restart summarization-auth
-          sudo systemctl restart summarization-backend
-          sudo systemctl restart summarization-frontend
+      - name: Log in to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
 
-      - name: Health check
+      - name: Build & push auth
+        id: mark
         run: |
-          sleep 5
-          sudo systemctl is-active summarization-auth
-          sudo systemctl is-active summarization-backend
-          sudo systemctl is-active summarization-frontend
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth"
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./auth-service
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
+
+  # ── Deploy Container App (images + secrets) ───────────────────────────────
+  deploy-backend:
+    needs: [build-backend, build-auth]
+    if: always() && (needs.build-backend.result == 'success' || needs.build-auth.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Sync all secrets to the Container App (idempotent — safe to run every deploy).
+      # This is the ONLY place real secret values appear; they come from
+      # GitHub Actions secrets and are never written to any file.
+      - name: Sync Container App secrets
+        run: |
+          az containerapp secret set \
+            --name "${{ secrets.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --secrets \
+              "database-url=${{ secrets.DATABASE_URL }}" \
+              "github-client-id=${{ secrets.GITHUB_CLIENT_ID }}" \
+              "github-client-secret=${{ secrets.GITHUB_CLIENT_SECRET }}" \
+              "better-auth-secret=${{ secrets.BETTER_AUTH_SECRET }}" \
+              "storage-connection-string=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}"
+
+      # Update backend image (only if backend was rebuilt)
+      - name: Update backend image
+        if: needs.build-backend.outputs.built == 'true'
+        run: |
+          az containerapp update \
+            --name "${{ secrets.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --container-name backend \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}"
+
+      # Update auth sidecar image (only if auth was rebuilt)
+      - name: Update auth image
+        if: needs.build-auth.outputs.built == 'true'
+        run: |
+          az containerapp update \
+            --name "${{ secrets.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --container-name auth-sidecar \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}"
+
+  # ── Deploy Frontend (Azure Static Web Apps) ───────────────────────────────
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'components/') ||
+      contains(github.event.head_commit.modified, 'contexts/') ||
+      contains(github.event.head_commit.modified, 'lib/') ||
+      contains(github.event.head_commit.modified, 'styles/') ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Auth requests go to the same SWA origin in production (proxied by FastAPI).
+          VITE_AUTH_URL: ""
+          VITE_API_BASE_URL: ""
+
+      - uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOY_TOKEN }}
+          action: upload
+          app_location: /
+          output_location: dist

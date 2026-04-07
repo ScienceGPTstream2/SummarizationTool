@@ -13,6 +13,7 @@ from models.evaluation import EvaluationResult
 from models.group import Group, UserGroup
 from models.template import PromptTemplate, TemplateVersion, TemplatePermission, TemplateFolder
 from models.preferences import UserPreferences, LoginHistory, UserPromptTemplate
+from models.eval_job import EvalJobRecord
 
 __all__ = [
     "Base",
@@ -38,4 +39,5 @@ __all__ = [
     "TemplateFolder",
     "UserPreferences",
     "LoginHistory",
+    "EvalJobRecord",
 ]

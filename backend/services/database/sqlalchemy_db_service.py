@@ -969,6 +969,111 @@ class SQLAlchemyDBService:
             print(f"[DB] Failed to reset session metrics: {e}")
             return False
 
+    # ======================================================================
+    # Eval Job Operations
+    # ======================================================================
+
+    def create_eval_job_record(
+        self,
+        job_id: str,
+        session_id: Optional[str],
+        user_id: Optional[str],
+        status: str,
+        created_at,
+    ) -> None:
+        """Insert a new eval_jobs row on job submission."""
+        from models.eval_job import EvalJobRecord
+        with db_session_scope() as db:
+            row = EvalJobRecord(
+                job_id=job_id,
+                session_id=session_id,
+                user_id=user_id,
+                status=status,
+                progress=0,
+                total=0,
+                results=[],
+                errors=[],
+                created_at=created_at,
+            )
+            db.add(row)
+
+    def upsert_eval_job_status(
+        self,
+        job_id: str,
+        status: str,
+        progress: int,
+        total: int,
+        results: List[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        error: Optional[str],
+        completed_at,
+    ) -> None:
+        """Upsert the current state of an eval job (used on completion)."""
+        from models.eval_job import EvalJobRecord
+        from sqlalchemy.dialects.postgresql import insert as pg_insert_local
+        stmt = (
+            pg_insert_local(EvalJobRecord)
+            .values(
+                job_id=job_id,
+                status=status,
+                progress=progress,
+                total=total,
+                results=results,
+                errors=errors,
+                error=error,
+                completed_at=completed_at,
+            )
+            .on_conflict_do_update(
+                index_elements=["job_id"],
+                set_={
+                    "status": status,
+                    "progress": progress,
+                    "total": total,
+                    "results": results,
+                    "errors": errors,
+                    "error": error,
+                    "completed_at": completed_at,
+                },
+            )
+        )
+        with db_session_scope() as db:
+            db.execute(stmt)
+
+    def get_eval_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Return a status dict for the given job_id, or None if not found."""
+        from models.eval_job import EvalJobRecord
+        db = get_db_session()
+        try:
+            row = db.execute(
+                select(EvalJobRecord).where(EvalJobRecord.job_id == job_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "job_id": row.job_id,
+                "status": row.status,
+                "progress": row.progress,
+                "total": row.total,
+                "results": row.results or [],
+                "errors": row.errors or [],
+                "error": row.error,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            }
+        finally:
+            db.close()
+
+    def mark_eval_job_cancelled(self, job_id: str) -> bool:
+        """Mark a job as cancelled in DB (cross-worker cancel). Returns True if row existed."""
+        from models.eval_job import EvalJobRecord
+        with db_session_scope() as db:
+            result = db.execute(
+                update(EvalJobRecord)
+                .where(EvalJobRecord.job_id == job_id)
+                .values(status="cancelled", completed_at=datetime.utcnow())
+            )
+            return result.rowcount > 0
+
 
 # ---------------------------------------------------------------------------
 # Singleton factory

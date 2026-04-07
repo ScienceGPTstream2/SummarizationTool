@@ -1,0 +1,20 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/api/*"]
+  },
+  "routes": [
+    {
+      "route": "/api/auth/*",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"]
+    }
+  ],
+  "forwardingGateway": {
+    "requiredHeaders": {},
+    "allowedForwardedHosts": []
+  }
+}

@@ -10,6 +10,7 @@ bcrypt
 PyJWT
 azure-ai-documentintelligence>=1.0.2
 azure-core==1.35.1
+azure-storage-blob>=12.28.0
 toml>=0.10.2
 PyMuPDF>=1.26.5
 deepeval>=3.6.9

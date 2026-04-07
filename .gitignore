@@ -74,3 +74,11 @@ backend/uploads/
 /backend/services/document/processors/docling/docling_service_sequential.py
 /backend/services/document/processors/docling/docling_service_multi_thread.py
 /backend/services/document/processors/docling/.vram_guard_state.json
+
+# Python test/coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local docker-compose overrides (never commit)
+docker-compose.override.yml
