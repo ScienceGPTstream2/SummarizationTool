@@ -1045,8 +1045,11 @@ export function EvaluationPage({
   };
 
   // Save ground truths to files_config
-  const saveGroundTruthsToSession = async () => {
-    const sessionId = documentData.sessionId;
+  const saveGroundTruthsToSession = async (sessionIdOverride?: string) => {
+    // Use the override (from executeRunEvaluation / executeBatchEvaluation)
+    // or fall back to ensureSessionRef (always up-to-date) then documentData.
+    const sessionId =
+      sessionIdOverride || ensureSessionRef.current || documentData.sessionId;
     const fileId = currentFile?.fileId;
 
     console.log(
@@ -1266,7 +1269,8 @@ export function EvaluationPage({
     humanScore?: number,
     documentId?: string
   ) => {
-    const sessionId = documentData.sessionId;
+    const sessionId =
+      ensureSessionRef.current || documentData.sessionId;
     if (!sessionId) return;
 
     try {
@@ -1958,7 +1962,7 @@ export function EvaluationPage({
 
     // IMPORTANT: Save ground truths before running evaluation
     hasUserEditedGroundTruthRef.current = true;
-    await saveGroundTruthsToSession();
+    await saveGroundTruthsToSession(activeSessionId);
 
     try {
       // Build tasks for the current file only (single-file mode)
@@ -2096,7 +2100,8 @@ export function EvaluationPage({
   };
 
   const saveBatchGroundTruths = async (fileId: string) => {
-    const sessionId = documentData.sessionId;
+    const sessionId =
+      ensureSessionRef.current || documentData.sessionId;
     if (!sessionId || !batchGroundTruthDirtyRef.current.has(fileId)) {
       console.log("[Batch Ground Truth] Skip save - no changes for:", fileId);
       return;
