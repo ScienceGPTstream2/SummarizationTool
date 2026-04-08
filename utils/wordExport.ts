@@ -13,9 +13,12 @@ import {
   ShadingType,
   PageOrientation,
   FileChild,
+  type IStylesOptions,
+  type IParagraphStyleOptions,
+  type ICharacterStyleOptions,
 } from "docx";
 import { saveAs } from "file-saver";
-import { MarkdownDocx } from "markdown-docx";
+import { MarkdownDocx, styles as markdownDocxStyles } from "markdown-docx";
 import { DocumentData } from "../App";
 
 // Professional color palette for the report
@@ -138,6 +141,65 @@ const TABLE_BORDERS = {
     size: 1,
     color: COLORS.borderColor,
   },
+};
+
+const createMarkdownDocxDocumentStyles = (): IStylesOptions => {
+  const paragraphStyles: IParagraphStyleOptions[] = [];
+  const characterStyles: ICharacterStyleOptions[] = [];
+  const markdownTheme = markdownDocxStyles.markdown;
+  const defaultStyles = { ...markdownDocxStyles.default };
+
+  for (const key of Object.keys(markdownTheme)) {
+    const style = markdownTheme[key as keyof typeof markdownTheme];
+    if (!style) continue;
+
+    const {
+      className,
+      run,
+      inline,
+      paragraph,
+      basedOn = "Normal",
+      next = "Normal",
+      quickFormat = true,
+    } = style;
+
+    if (inline) {
+      const characterStyle: ICharacterStyleOptions = {
+        id: className,
+        name: className,
+        basedOn,
+        next,
+        quickFormat,
+        run,
+      };
+      characterStyles.push(characterStyle);
+    } else {
+      const paragraphStyle: IParagraphStyleOptions = {
+        id: className,
+        name: className,
+        basedOn,
+        next,
+        quickFormat,
+        run,
+        paragraph,
+      };
+      paragraphStyles.push(paragraphStyle);
+    }
+
+    if (key in defaultStyles) {
+      const defaultStyleKey = key as keyof typeof defaultStyles;
+      defaultStyles[defaultStyleKey] = {
+        ...defaultStyles[defaultStyleKey],
+        ...style,
+      };
+    }
+  }
+
+  return {
+    default: defaultStyles,
+    paragraphStyles,
+    characterStyles,
+  };
 };
 
 const DEFAULT_METRIC_STEPS: Record<string, string[]> = {
@@ -1123,6 +1185,8 @@ export async function downloadEvaluationReport(
     creator: "Science GPT Summarization Tool",
     title: "LLM Evaluation Report",
     description: "Exported LLM Evaluation Results",
+    numbering: markdownDocxStyles.numbering,
+    styles: createMarkdownDocxDocumentStyles(),
     sections: [
       {
         properties: {

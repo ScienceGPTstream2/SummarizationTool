@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "./ui/card";
-import { Badge } from "./ui/badge";
 import { authenticatedFetch } from "../utils/authUtils";
 import { Button } from "./ui/button";
+import { BarChart3 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -263,13 +263,6 @@ export function SessionMetrics() {
     } finally {
       setClearRunning(false);
     }
-  };
-
-  const displayMetrics = metrics || {
-    total_cost: 0,
-    total_latency: 0,
-    total_calls: 0,
-    calls: [],
   };
 
   return (

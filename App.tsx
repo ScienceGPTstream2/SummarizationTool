@@ -10,6 +10,7 @@ import { ExecutiveModePage } from "./components/ExecutiveModePage";
 import { SessionHistoryPage } from "./components/SessionHistoryPage";
 import { TemplateWorkspacePage } from "./components/TemplateWorkspace/TemplateWorkspacePage";
 import { GroupManagementPage } from "./components/GroupManagement/GroupManagementPage";
+import { SimplifiedFlowPage } from "./components/SimplifiedFlowPage";
 
 import { RainbowButton } from "./components/ui/rainbow-button";
 import { Button } from "./components/ui/button";
@@ -22,6 +23,8 @@ import {
   Check,
   AlertTriangle,
   Loader2,
+  Zap,
+  Settings2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -50,6 +53,7 @@ import { SessionMetrics } from "./components/SessionMetrics";
 export type Step =
   | "login"
   | "auth_callback"
+  | "simplified"
   | "upload"
   | "processing"
   | "study_selection"
@@ -220,7 +224,7 @@ export default function App() {
     window.location.hash.includes("access_token");
 
   const [currentStep, setCurrentStep] = useState<Step>(
-    isAuthCallback ? "auth_callback" : "upload"
+    isAuthCallback ? "auth_callback" : "simplified"
   );
   // Ref that always holds the current step — used in the onAuthStateChange closure
   // (which has [] deps and captures the initial value) to avoid stale closure bugs.
@@ -232,7 +236,7 @@ export default function App() {
   // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
-    useState<Step>("upload");
+    useState<Step>("simplified");
 
   // Track which workflow step currently has an in-flight operation
   const [inFlightStep, setInFlightStep] = useState<Step | null>(null);
@@ -284,13 +288,15 @@ export default function App() {
       "executive",
     ];
     if (toolOnlySteps.includes(step)) {
-      // Only save the return destination when we're currently on a workflow step
       if (!toolOnlySteps.includes(currentStep)) {
         setPreviousWorkflowStep(currentStep);
       }
     }
     setCurrentStep(step);
   };
+
+  const isSimplifiedMode = currentStep === "simplified";
+  const isAdvancedWorkflow = WORKFLOW_STEPS.includes(currentStep);
 
   const [documentData, setDocumentData] = useState<DocumentData>({
     file: null,
@@ -399,7 +405,7 @@ export default function App() {
         // If we have a session and we're on callback, redirect to main app
         if (session && isAuthCallback) {
           window.history.replaceState({}, document.title, "/");
-          setCurrentStep("upload");
+          setCurrentStep("simplified");
         }
       })
       .catch(() => {
@@ -467,7 +473,7 @@ export default function App() {
         "evaluation",
       ];
       if (
-        currentStep === "upload" &&
+        (currentStep === "simplified" || currentStep === "upload") &&
         restoredSessionId &&
         workflowSteps.includes(restoredStep)
       ) {
@@ -529,7 +535,7 @@ export default function App() {
   const handleAuthSuccess = useCallback(() => {
     // Clean up URL
     window.history.replaceState({}, document.title, "/");
-    setCurrentStep("upload");
+    setCurrentStep("simplified");
   }, []);
 
   const handleAuthError = useCallback((error: string) => {
@@ -841,7 +847,9 @@ export default function App() {
         import("./utils/session").then(({ resetSessionId }) => {
           resetSessionId();
         });
-        setCurrentStep("upload");
+        setCurrentStep(
+          previousWorkflowStep === "simplified" ? "simplified" : "upload"
+        );
       } else {
         setCurrentStep(previousWorkflowStep);
       }
@@ -1802,6 +1810,12 @@ export default function App() {
         return <GroupManagementPage onBack={handleBack} />;
       case "executive":
         return <ExecutiveModePage onBack={handleBack} />;
+      case "simplified":
+        return (
+          <SimplifiedFlowPage
+            onSwitchToAdvanced={() => setCurrentStep("upload")}
+          />
+        );
       case "upload":
         return (
           <UploadPage
@@ -1896,51 +1910,77 @@ export default function App() {
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-medium text-foreground">
-                AI Toxicology Extraction and Summarization
+                Science-GPT Summarization Tool
               </h1>
               <div className="flex items-center gap-2">
-                {currentStep !== "executive" && (
-                  <RainbowButton
-                    size="sm"
-                    onClick={() => navigateTo("executive")}
-                    className="!rounded-md"
-                  >
-                    <Briefcase className="h-4 w-4 mr-2" />
-                    Executive Mode
-                  </RainbowButton>
-                )}
-
-                {currentStep !== "templates" && (
+                {isSimplifiedMode ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => navigateTo("templates")}
+                    onClick={() => setCurrentStep("upload")}
                   >
-                    <FileText className="h-4 w-4 mr-2" />
-                    Templates
+                    <Settings2 className="h-4 w-4 mr-2" />
+                    Advanced Mode
                   </Button>
-                )}
+                ) : (
+                  <>
+                    {!isSimplifiedMode && currentStep !== "executive" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentStep("simplified")}
+                      >
+                        <Zap className="h-4 w-4 mr-2" />
+                        Simplified
+                      </Button>
+                    )}
 
-                {currentStep !== "groups" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateTo("groups")}
-                  >
-                    <Users className="h-4 w-4 mr-2" />
-                    Groups
-                  </Button>
-                )}
+                    {currentStep !== "executive" && (
+                      <RainbowButton
+                        size="sm"
+                        onClick={() => navigateTo("executive")}
+                        className="!rounded-md"
+                      >
+                        <Briefcase className="h-4 w-4 mr-2" />
+                        Executive Mode
+                      </RainbowButton>
+                    )}
 
-                {currentStep !== "history" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateTo("history")}
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    History
-                  </Button>
+                    {currentStep !== "templates" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigateTo("templates")}
+                      >
+                        <FileText className="h-4 w-4 mr-2" />
+                        Templates
+                      </Button>
+                    )}
+
+                    {currentStep !== "groups" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigateTo("groups")}
+                      >
+                        <Users className="h-4 w-4 mr-2" />
+                        Groups
+                      </Button>
+                    )}
+
+                    {currentStep !== "history" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigateTo("history")}
+                      >
+                        <Clock className="h-4 w-4 mr-2" />
+                        History
+                      </Button>
+                    )}
+
+                    <SessionMetrics />
+                  </>
                 )}
 
                 <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border">
@@ -1967,7 +2007,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            {currentStep !== "executive" && (
+            {isAdvancedWorkflow && (
               <div className="flex items-center mt-4">
                 {WORKFLOW_STEPS.map((step, idx) => {
                   const isCurrent = currentStep === step;
@@ -2059,11 +2099,6 @@ export default function App() {
                     </div>
                   );
                 })}
-              </div>
-            )}
-            {currentStep !== "executive" && (
-              <div className="mt-4">
-                <SessionMetrics />
               </div>
             )}
           </div>

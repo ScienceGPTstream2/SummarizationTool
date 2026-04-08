@@ -75,6 +75,30 @@ const formatCost = (value: number | undefined | null): string => {
   return Number(value).toFixed(6);
 };
 
+// Excel cells have a 32767-char limit and OOXML forbids certain control characters.
+// Sanitize every value before it enters a row to prevent corrupt workbooks.
+const EXCEL_MAX_CELL_LENGTH = 32767;
+// eslint-disable-next-line no-control-regex
+const INVALID_XML_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
+
+const sanitizeCell = (value: unknown): string => {
+  if (value === null || value === undefined) return "";
+  let str = typeof value === "string" ? value : String(value);
+  str = str.replace(INVALID_XML_CHARS, "");
+  if (str.length > EXCEL_MAX_CELL_LENGTH) {
+    str = str.slice(0, EXCEL_MAX_CELL_LENGTH - 3) + "...";
+  }
+  return str;
+};
+
+const sanitizeRow = (row: Record<string, string>): Record<string, string> => {
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(row)) {
+    sanitized[key] = sanitizeCell(value);
+  }
+  return sanitized;
+};
+
 export async function downloadExcelReport(documentData: DocumentData) {
   const sessionMetrics: SessionMetrics | null = await (async () => {
     try {
@@ -126,7 +150,8 @@ export async function downloadExcelReport(documentData: DocumentData) {
       const entityName = (entity as { name?: string }).name || "";
       const promptTemplate = (entity as { prompt?: string }).prompt || "";
       const systemPrompt =
-        (entity as { systemPrompt?: string }).systemPrompt || "";
+        (entity as { systemPrompt?: string }).systemPrompt ||
+        "You are an expert toxicologist, your job is to take the study below and extract key information as explained in the prompt.";
       const groundTruth =
         (entity as { groundTruth?: string }).groundTruth || "";
 
@@ -235,11 +260,16 @@ export async function downloadExcelReport(documentData: DocumentData) {
       }
     }
 
-    // Paragraph Evaluation rows — one per model in summariesByModel
+    // Paragraph Generator rows — one per model in summariesByModel
     const paragraphEval = (fileItem as any).paragraphEvaluation;
     const summariesByModel = (fileItem as any).summariesByModel as
       | Record<string, string>
       | undefined;
+
+    const paragraphSysPrompt =
+      (fileItem as any).paragraphSystemPrompt ||
+      "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy.";
+    const paragraphUserPrompt = (fileItem as any).summaryPrompt || "";
 
     if (
       paragraphEval?.groundTruth &&
@@ -252,9 +282,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
           "Study Name": fileName,
           "LLM (Source)": getDisplayModelName(modelId),
           Ingestion: ingestionTool,
-          "System Prompt": "",
-          "Prompt Template": "",
-          Entity: "Paragraph Evaluation",
+          "System Prompt": paragraphSysPrompt,
+          "Prompt Template": paragraphUserPrompt,
+          Entity: "Paragraph Generator",
           "Actual Output": summaryText || "",
           "Ground Truth": paragraphEval.groundTruth || "",
           Judge: "Human",
@@ -285,9 +315,9 @@ export async function downloadExcelReport(documentData: DocumentData) {
           (fileItem as any).paragraphSummaryModel || ""
         ),
         Ingestion: ingestionTool,
-        "System Prompt": "",
-        "Prompt Template": "",
-        Entity: "Paragraph Evaluation",
+        "System Prompt": paragraphSysPrompt,
+        "Prompt Template": paragraphUserPrompt,
+        Entity: "Paragraph Generator",
         "Actual Output": (fileItem as any).finalSummary || "",
         "Ground Truth": paragraphEval.groundTruth || "",
         Judge: "Human",
@@ -459,7 +489,7 @@ export async function downloadExcelReport(documentData: DocumentData) {
 
   // Style Data Rows
   rows.forEach((row) => {
-    const addedRow = worksheet.addRow(row);
+    const addedRow = worksheet.addRow(sanitizeRow(row));
     addedRow.eachCell((cell) => {
       cell.font = { name: "Arial", size: 10 };
       cell.alignment = { vertical: "top", wrapText: false }; // Disable wrap text as requested

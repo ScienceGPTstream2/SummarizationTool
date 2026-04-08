@@ -345,6 +345,8 @@ export interface EntityExportOptions {
   summaryPrompt?: string;
   /** The paragraph system prompt */
   paragraphSystemPrompt?: string;
+  /** Whether to include individual entity extraction results in the report (default: true) */
+  includeEntities?: boolean;
 }
 
 /**
@@ -465,120 +467,124 @@ export const generateWordDocument = async (
   );
 
   // ══════ ENTITY EXTRACTION RESULTS ══════
-  sections.push(createSectionHeading("Entity Extraction Results"));
+  const includeEntities = options?.includeEntities !== false;
 
-  for (const entity of resolvedEntities) {
-    // 1. Entity Subheading
-    sections.push(createSubsectionHeading(`Entity: ${entity.name}`));
+  if (includeEntities) {
+    sections.push(createSectionHeading("Entity Extraction Results"));
 
-    // 2. Extraction Prompt
-    sections.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: "Extraction Prompt: ",
-            bold: true,
-            color: COLORS.bodyText,
-            font: "Calibri",
-            size: 18,
-          }),
-          new TextRun({
-            text: entity.prompt || "No prompt provided",
-            size: 16,
-            font: "Calibri",
-            color: COLORS.bodyText,
-          }),
-        ],
-        spacing: { after: 200 },
-      })
-    );
+    for (const entity of resolvedEntities) {
+      // 1. Entity Subheading
+      sections.push(createSubsectionHeading(`Entity: ${entity.name}`));
 
-    const extractedElements = (await markdownToDocxElements(
-      entity.extracted || "No result"
-    )) as (Paragraph | Table)[];
-
-    // Add metadata line if available
-    if (entity.duration) {
-      extractedElements.push(
+      // 2. Extraction Prompt
+      sections.push(
         new Paragraph({
           children: [
             new TextRun({
-              text: `Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens ?? 0} (in) / ${entity.completionTokens ?? 0} (out)`,
-              size: 14,
-              color: "808080",
+              text: "Extraction Prompt: ",
+              bold: true,
+              color: COLORS.bodyText,
               font: "Calibri",
-              italics: true,
+              size: 18,
+            }),
+            new TextRun({
+              text: entity.prompt || "No prompt provided",
+              size: 16,
+              font: "Calibri",
+              color: COLORS.bodyText,
             }),
           ],
-          alignment: AlignmentType.CENTER,
-          spacing: { before: 60 },
+          spacing: { after: 200 },
         })
       );
-    }
 
-    // Center the extracted elements by recursively traversing the entire object tree
-    const applyCenterAlignment = (obj: any, visited = new Set()) => {
-      if (!obj || typeof obj !== "object") return;
-      if (visited.has(obj)) return;
-      visited.add(obj);
+      const extractedElements = (await markdownToDocxElements(
+        entity.extracted || "No result"
+      )) as (Paragraph | Table)[];
 
-      try {
-        // If it's an array, iterate through it
-        if (Array.isArray(obj)) {
-          obj.forEach((item) => applyCenterAlignment(item, visited));
-          return;
-        }
-
-        // Apply alignment where possible
-        if (obj.options) {
-          obj.options.alignment = AlignmentType.CENTER;
-        }
-        if (obj.constructor && obj.constructor.name === "Paragraph") {
-          (obj as any).alignment = AlignmentType.CENTER;
-        }
-
-        // Recursively search all properties of the object for more arrays/objects
-        for (const key of Object.keys(obj)) {
-          // Skip known non-traversable or cyclic properties if any (though 'visited' handles cycles)
-          if (
-            key === "root" ||
-            key === "options" ||
-            key === "children" ||
-            key === "rows" ||
-            key === "cells"
-          ) {
-            applyCenterAlignment(obj[key], visited);
-          } else if (Array.isArray(obj[key])) {
-            applyCenterAlignment(obj[key], visited);
-          }
-        }
-      } catch (e) {
-        // Ignore mutability errors
+      // Add metadata line if available
+      if (entity.duration) {
+        extractedElements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `Time: ${entity.duration.toFixed(2)}s, Tokens: ${entity.promptTokens ?? 0} (in) / ${entity.completionTokens ?? 0} (out)`,
+                size: 14,
+                color: "808080",
+                font: "Calibri",
+                italics: true,
+              }),
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 60 },
+          })
+        );
       }
-    };
-    applyCenterAlignment(extractedElements);
 
-    const resultTable = new Table({
-      rows: [
-        new TableRow({
-          children: [createHeaderCell("Extracted Result", 100)],
-        }),
-        new TableRow({
-          children: [
-            new TableCell({
-              children: extractedElements,
-              verticalAlign: VerticalAlign.CENTER,
-            }),
-          ],
-        }),
-      ],
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      borders: TABLE_BORDERS,
-    });
+      // Center the extracted elements by recursively traversing the entire object tree
+      const applyCenterAlignment = (obj: any, visited = new Set()) => {
+        if (!obj || typeof obj !== "object") return;
+        if (visited.has(obj)) return;
+        visited.add(obj);
 
-    sections.push(resultTable);
-    sections.push(new Paragraph({ spacing: { after: 400 } })); // space between entities
-  }
+        try {
+          // If it's an array, iterate through it
+          if (Array.isArray(obj)) {
+            obj.forEach((item) => applyCenterAlignment(item, visited));
+            return;
+          }
+
+          // Apply alignment where possible
+          if (obj.options) {
+            obj.options.alignment = AlignmentType.CENTER;
+          }
+          if (obj.constructor && obj.constructor.name === "Paragraph") {
+            (obj as any).alignment = AlignmentType.CENTER;
+          }
+
+          // Recursively search all properties of the object for more arrays/objects
+          for (const key of Object.keys(obj)) {
+            // Skip known non-traversable or cyclic properties if any (though 'visited' handles cycles)
+            if (
+              key === "root" ||
+              key === "options" ||
+              key === "children" ||
+              key === "rows" ||
+              key === "cells"
+            ) {
+              applyCenterAlignment(obj[key], visited);
+            } else if (Array.isArray(obj[key])) {
+              applyCenterAlignment(obj[key], visited);
+            }
+          }
+        } catch (e) {
+          // Ignore mutability errors
+        }
+      };
+      applyCenterAlignment(extractedElements);
+
+      const resultTable = new Table({
+        rows: [
+          new TableRow({
+            children: [createHeaderCell("Extracted Result", 100)],
+          }),
+          new TableRow({
+            children: [
+              new TableCell({
+                children: extractedElements,
+                verticalAlign: VerticalAlign.CENTER,
+              }),
+            ],
+          }),
+        ],
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: TABLE_BORDERS,
+      });
+
+      sections.push(resultTable);
+      sections.push(new Paragraph({ spacing: { after: 400 } })); // space between entities
+    }
+  } // end includeEntities
 
   // ══════ SUMMARY PROMPT (if available) ══════
   const summaryPrompt =
