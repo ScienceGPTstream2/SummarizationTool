@@ -38,7 +38,7 @@ const auth = betterAuth({
   // Session configuration
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24,      // refresh every day
+    updateAge: 60 * 60 * 24, // refresh every day
     cookieCache: {
       enabled: true,
       maxAge: 5 * 60, // 5 min cache
@@ -86,14 +86,18 @@ app.all("/api/auth/*", (req, res) => {
         console.error("[BetterAuth] Handler error:", err?.message || err);
         if (!res.headersSent) {
           // Redirect to frontend login on OAuth errors instead of hanging
-          res.redirect(`${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`);
+          res.redirect(
+            `${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`
+          );
         }
       });
     }
   } catch (err: any) {
     console.error("[BetterAuth] Sync handler error:", err?.message || err);
     if (!res.headersSent) {
-      res.redirect(`${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`);
+      res.redirect(
+        `${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`
+      );
     }
   }
 });

@@ -17,6 +17,18 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+      - name: Ensure Postgres is running
+        run: |
+          pg_isready -h localhost || sudo systemctl start postgresql
+          pg_isready -h localhost
+
+      - name: Ensure systemd services exist
+        run: |
+          if [ ! -f /etc/systemd/system/summarization-auth.service ]; then
+            echo "First-time setup: creating systemd service files..."
+            sudo bash ~/SummarizationTool/scripts/setup-systemd.sh
+          fi
+
       - name: Install & build auth service
         run: |
           cd ~/SummarizationTool/auth-service
@@ -57,3 +69,7 @@ jobs:
           sudo systemctl is-active summarization-auth
           sudo systemctl is-active summarization-backend
           sudo systemctl is-active summarization-frontend
+          # Verify backend API responds
+          curl -sf --max-time 10 http://localhost:8001/docs > /dev/null && echo "Backend API: OK"
+          # Verify auth service responds
+          curl -sf --max-time 10 http://localhost:3001/health > /dev/null && echo "Auth service: OK"

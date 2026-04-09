@@ -165,9 +165,7 @@ export function SessionHistoryPage({
   const fetchSharedSessions = async () => {
     try {
       setSharedLoading(true);
-      const response = await authenticatedFetch(
-        `/api/sessions/shared/list`
-      );
+      const response = await authenticatedFetch(`/api/sessions/shared/list`);
       if (!response.ok) throw new Error("Failed to fetch shared sessions");
       const data = await response.json();
       setSharedSessions(data.sessions);
@@ -215,11 +213,14 @@ export function SessionHistoryPage({
     const trimmedName = editingName.trim();
 
     try {
-      const response = await authenticatedFetch(`/api/sessions/${editingSessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmedName }),
-      });
+      const response = await authenticatedFetch(
+        `/api/sessions/${editingSessionId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: trimmedName }),
+        }
+      );
 
       if (!response.ok) throw new Error("Failed to rename session");
 
