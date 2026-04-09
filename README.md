@@ -2,12 +2,6 @@
 
 Full-stack React + FastAPI application for AI-powered document summarization, entity extraction, and evaluation — with Better Auth for authentication and PostgreSQL for data persistence.
 
-📖 **Additional Documentation:**
-
-- [Local Dev Setup](docs/local-deploy.md) — Step-by-step guide for team members
-- [Backend README](backend/README.md) — Backend configuration and secrets
-- [GitHub Auth Setup](docs/setup-github-auth.md) — Setting up GitHub OAuth
-
 ---
 
 ## ✨ Features
