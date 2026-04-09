@@ -644,6 +644,7 @@ export function EvaluationPage({
   const ensureSessionRef = useRef<string | null>(
     documentData.sessionId || null
   );
+  const creatingSessionRef = useRef(false); // mutex to prevent duplicate clone creation
 
   // Keep ref in sync when documentData.sessionId changes (e.g. after restore)
   useEffect(() => {
@@ -657,6 +658,18 @@ export function EvaluationPage({
       ensureSessionRef.current = documentData.sessionId;
       return documentData.sessionId;
     }
+
+    // Prevent concurrent clone creation (rapid clicks)
+    if (creatingSessionRef.current) {
+      // Wait for the in-flight creation to finish, then return whatever it produced
+      for (let i = 0; i < 50; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (ensureSessionRef.current) return ensureSessionRef.current;
+        if (!creatingSessionRef.current) break;
+      }
+      return ensureSessionRef.current;
+    }
+    creatingSessionRef.current = true;
 
     try {
       const { getCurrentUser, getValidToken: getToken } = await import(
@@ -730,6 +743,8 @@ export function EvaluationPage({
       }
     } catch (error) {
       console.error("[EvalPage] Error creating session clone:", error);
+    } finally {
+      creatingSessionRef.current = false;
     }
     return null;
   };

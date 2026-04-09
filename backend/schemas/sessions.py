@@ -149,7 +149,7 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionRequest(BaseModel):
     """Request to update an existing session"""
 
-    user_id: str
+    user_id: Optional[str] = None
     name: Optional[str] = None
     status: Optional[Literal["in_progress", "completed"]] = None
     last_step: Optional[str] = None

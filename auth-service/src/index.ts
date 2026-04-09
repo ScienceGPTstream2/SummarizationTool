@@ -75,7 +75,28 @@ app.use(
 );
 
 // Mount Better Auth handler at /api/auth/*
-app.all("/api/auth/*", toNodeHandler(auth));
+// Wrap in try-catch to prevent state mismatch errors from crashing the service
+app.all("/api/auth/*", (req, res) => {
+  const handler = toNodeHandler(auth);
+  try {
+    const result = handler(req, res);
+    // Handle promise rejection (async errors like state mismatch)
+    if (result && typeof (result as any).catch === "function") {
+      (result as any).catch((err: any) => {
+        console.error("[BetterAuth] Handler error:", err?.message || err);
+        if (!res.headersSent) {
+          // Redirect to frontend login on OAuth errors instead of hanging
+          res.redirect(`${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`);
+        }
+      });
+    }
+  } catch (err: any) {
+    console.error("[BetterAuth] Sync handler error:", err?.message || err);
+    if (!res.headersSent) {
+      res.redirect(`${frontendURL}/?auth_error=${encodeURIComponent(err?.message || "auth_failed")}`);
+    }
+  }
+});
 
 // Health check
 app.get("/health", (_req, res) => {
