@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { authenticatedFetch } from "../utils/authUtils";
 import { Button } from "./ui/button";
-import { BarChart3 } from "lucide-react";
+import { Badge } from "./ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -391,20 +391,20 @@ export function SessionMetrics() {
           <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <Badge variant="secondary">Session Metrics</Badge>
-              {displayMetrics.total_cost > 0 && (
+              {(metrics?.total_cost ?? 0) > 0 && (
                 <span className="text-muted-foreground">
-                  Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
+                  Cost: <strong>${metrics!.total_cost.toFixed(4)}</strong>
                 </span>
               )}
-              {displayMetrics.total_latency > 0 && (
+              {(metrics?.total_latency ?? 0) > 0 && (
                 <span className="text-muted-foreground">
                   Latency:{" "}
-                  <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
+                  <strong>{metrics!.total_latency.toFixed(2)}s</strong>
                 </span>
               )}
-              {displayMetrics.total_calls > 0 && (
+              {(metrics?.total_calls ?? 0) > 0 && (
                 <span className="text-muted-foreground">
-                  Calls: <strong>{displayMetrics.total_calls}</strong>
+                  Calls: <strong>{metrics!.total_calls}</strong>
                 </span>
               )}
               <span className="text-xs text-muted-foreground whitespace-nowrap">
