@@ -398,8 +398,7 @@ export function SessionMetrics() {
               )}
               {(metrics?.total_latency ?? 0) > 0 && (
                 <span className="text-muted-foreground">
-                  Latency:{" "}
-                  <strong>{metrics!.total_latency.toFixed(2)}s</strong>
+                  Latency: <strong>{metrics!.total_latency.toFixed(2)}s</strong>
                 </span>
               )}
               {(metrics?.total_calls ?? 0) > 0 && (

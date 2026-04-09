@@ -34,8 +34,7 @@ interface BetterAuthSession {
 // Auth requests go through the Vite proxy (/api/auth/* → localhost:3001)
 // so we use same-origin (empty string) by default.
 const AUTH_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_AUTH_URL) ||
-  "";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_AUTH_URL) || "";
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
@@ -186,7 +185,9 @@ export async function signInWithGitHub(): Promise<{ error: Error | null }> {
       return { error: null };
     }
 
-    return { error: new Error(data?.message || "Failed to initiate GitHub sign-in") };
+    return {
+      error: new Error(data?.message || "Failed to initiate GitHub sign-in"),
+    };
   } catch (err) {
     return { error: err instanceof Error ? err : new Error(String(err)) };
   }
@@ -360,7 +361,9 @@ export function installVisibilityRefreshListener(): void {
     if (data) {
       console.log("[Auth] ✅ Session refreshed on tab visibility");
     } else {
-      console.warn("[Auth] ⚠️ No session on tab visibility — user may need to re-login");
+      console.warn(
+        "[Auth] ⚠️ No session on tab visibility — user may need to re-login"
+      );
     }
   });
 

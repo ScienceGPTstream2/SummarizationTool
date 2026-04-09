@@ -44,12 +44,12 @@ Full-stack React + FastAPI application for AI-powered document summarization, en
                      └────────────────────────────┘
 ```
 
-| Service              | Port | Description                                    |
-| -------------------- | ---- | ---------------------------------------------- |
-| Frontend (Vite/React)| 3000 | User interface                                 |
-| Backend (FastAPI)    | 8001 | API server for document processing & LLM calls |
-| Auth Sidecar (Node)  | 3001 | Better Auth — handles GitHub OAuth login       |
-| PostgreSQL           | 5432 | Shared database for all services               |
+| Service               | Port | Description                                    |
+| --------------------- | ---- | ---------------------------------------------- |
+| Frontend (Vite/React) | 3000 | User interface                                 |
+| Backend (FastAPI)     | 8001 | API server for document processing & LLM calls |
+| Auth Sidecar (Node)   | 3001 | Better Auth — handles GitHub OAuth login       |
+| PostgreSQL            | 5432 | Shared database for all services               |
 
 ---
 
@@ -80,6 +80,7 @@ docker run -d --name sciencegpt-db \
 ```
 
 Then set in both `backend/.env` and `auth-service/.env`:
+
 ```env
 DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
 ```
@@ -134,25 +135,28 @@ cd auth-service && npm install && npx tsc && cd ..
 
 You need **4 files** (all gitignored):
 
-| File | Purpose |
-| --- | --- |
-| `backend/.env` | `DATABASE_URL` for the backend |
-| `backend/core/secrets.toml` | Azure OpenAI keys, Doc Intelligence, Vertex AI |
-| `auth-service/.env` | `DATABASE_URL`, Better Auth secret, GitHub OAuth credentials |
-| `.env.local` | Frontend env vars (`VITE_API_BASE_URL`, `VITE_AUTH_URL`) |
+| File                        | Purpose                                                      |
+| --------------------------- | ------------------------------------------------------------ |
+| `backend/.env`              | `DATABASE_URL` for the backend                               |
+| `backend/core/secrets.toml` | Azure OpenAI keys, Doc Intelligence, Vertex AI               |
+| `auth-service/.env`         | `DATABASE_URL`, Better Auth secret, GitHub OAuth credentials |
+| `.env.local`                | Frontend env vars (`VITE_API_BASE_URL`, `VITE_AUTH_URL`)     |
 
 **Minimal `.env.local`:**
+
 ```env
 VITE_API_BASE_URL=http://localhost:8001
 VITE_AUTH_URL=http://localhost:3001
 ```
 
 **Minimal `backend/.env`:**
+
 ```env
 DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
 ```
 
 **Minimal `auth-service/.env`:**
+
 ```env
 DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
 BETTER_AUTH_SECRET=generate-a-random-secret-here
@@ -210,14 +214,14 @@ App will be available at **http://localhost:3000**
 
 ### Environment Files
 
-| File | Purpose | Git Status |
-| --- | --- | --- |
-| `.env.example` | Template for frontend env vars | ✅ Committed |
-| `.env.local` | Actual frontend env vars | ❌ Gitignored |
-| `backend/.env` | Backend `DATABASE_URL` | ❌ Gitignored |
-| `backend/core/secrets.toml` | Backend API keys & secrets | ❌ Gitignored |
-| `auth-service/.env` | Auth sidecar config | ❌ Gitignored |
-| `auth-service/.env.example` | Template for auth sidecar | ✅ Committed |
+| File                        | Purpose                        | Git Status    |
+| --------------------------- | ------------------------------ | ------------- |
+| `.env.example`              | Template for frontend env vars | ✅ Committed  |
+| `.env.local`                | Actual frontend env vars       | ❌ Gitignored |
+| `backend/.env`              | Backend `DATABASE_URL`         | ❌ Gitignored |
+| `backend/core/secrets.toml` | Backend API keys & secrets     | ❌ Gitignored |
+| `auth-service/.env`         | Auth sidecar config            | ❌ Gitignored |
+| `auth-service/.env.example` | Template for auth sidecar      | ✅ Committed  |
 
 ---
 
@@ -232,6 +236,7 @@ export AUTH_TOKEN_B="<token-for-user-b>"
 ```
 
 Test modules:
+
 - **Auth edge cases** — invalid tokens, missing headers, SQL injection
 - **Session edge cases** — empty sessions, incomplete extractions, PATCH edge cases
 - **Cross-user isolation** — ensures users can't access each other's data

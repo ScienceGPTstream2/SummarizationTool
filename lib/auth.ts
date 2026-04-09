@@ -15,12 +15,7 @@ export const authClient = createAuthClient({
 });
 
 // Convenience exports
-export const {
-  signIn,
-  signUp,
-  signOut,
-  useSession,
-} = authClient;
+export const { signIn, signUp, signOut, useSession } = authClient;
 
 /**
  * Get the current session token for API calls.
