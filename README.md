@@ -87,13 +87,13 @@ DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_to
 
 ### Option B: Azure PostgreSQL Flexible Server (Team Default)
 
-If you're on the team, use the shared Azure PG instance. Get the connection string from the team lead and set it in `backend/.env` and `auth-service/.env`:
+If you're able using the Azure PG instances is the preferred method by our team. Get the connection string from the Azure Dashboard and set it in `backend/.env` and `auth-service/.env`:
 
 ```env
 DATABASE_URL=postgresql://sciencegpt:<PASSWORD>@<YOUR_SERVER>.postgres.database.azure.com:5432/summarization_tool?sslmode=require
 ```
 
-> ⚠️ You must add your IP to the Azure firewall rules — see [docs/local-deploy.md](docs/local-deploy.md#step-3-azure-pg-firewall--add-your-vms-ip).
+> ⚠️ You must add your IP to the Azure firewall rules
 
 ### Option C: Any Other PostgreSQL
 
@@ -166,8 +166,6 @@ GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
 FRONTEND_URL=http://localhost:3000
 PORT=3001
 ```
-
-See [auth-service/.env.example](auth-service/.env.example) for all options.
 
 ### 3. Run Migrations
 
