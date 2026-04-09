@@ -10,7 +10,7 @@ import uuid as _uuid_module
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import select, update, delete, text, and_, or_
+from sqlalchemy import select, update, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models import (

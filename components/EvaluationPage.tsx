@@ -756,7 +756,8 @@ export function EvaluationPage({
 
     // Auto-save to backend with debounce
     evalConfigSaveTimerRef.current = setTimeout(async () => {
-      const sessionId = documentData.sessionId;
+      const sessionId =
+        ensureSessionRef.current || documentData.sessionId;
       if (!sessionId) {
         console.log("[Eval Config] No session ID, skipping save");
         return;
@@ -911,7 +912,8 @@ export function EvaluationPage({
     humanScore: number | null;
     groundTruth: string;
   }) => {
-    const sessionId = documentData.sessionId;
+    const sessionId =
+      ensureSessionRef.current || documentData.sessionId;
     if (!sessionId) {
       console.log("[Human Score] No session ID, skipping save");
       return;

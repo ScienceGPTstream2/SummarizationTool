@@ -8,7 +8,7 @@ import uuid as _uuid_module
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete
 from models import Group, UserGroup, User
 from models.base import get_db_session, db_session_scope
 

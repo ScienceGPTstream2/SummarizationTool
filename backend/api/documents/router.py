@@ -242,7 +242,9 @@ async def process_uploaded_file(
                                 "original_filename"
                             )
                     except Exception:
-                        pass
+                        # Best-effort metadata enrichment; ignore read/parse errors
+                        # and fall back to other filename sources.
+                        _upload_meta_filename = None
 
                     _cached_filename = (
                         _cached_doc_filename

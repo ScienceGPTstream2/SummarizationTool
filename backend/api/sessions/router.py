@@ -1,6 +1,6 @@
 """Session API endpoints for managing user extraction sessions"""
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 

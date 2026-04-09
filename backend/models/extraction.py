@@ -7,7 +7,7 @@ Stores entity extraction results from LLM processing.
 import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, String, Text, Float, Integer, DateTime, ForeignKey, Index, UniqueConstraint,
+    Column, Text, Float, Integer, DateTime, ForeignKey, Index, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from models.base import Base
