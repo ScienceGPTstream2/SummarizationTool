@@ -43,7 +43,7 @@ class TestNoAuthHeader(unittest.TestCase):
         ("POST", "/api/groups"),
         ("GET", "/api/templates"),
         ("GET", "/api/sessions/shared/list"),
-        ("GET", "/api/server/models"),
+        ("GET", "/api/models"),
     ]
 
     def test_all_protected_endpoints_reject_no_auth(self):
@@ -126,7 +126,7 @@ class TestValidTokenWorks(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_models_list(self):
-        resp = _authed().get(f"{BACKEND_URL}/api/server/models", timeout=TIMEOUT)
+        resp = _authed().get(f"{BACKEND_URL}/api/models", timeout=TIMEOUT)
         self.assertIn(resp.status_code, (200, 503))  # 503 if no LLM configured
 
 
