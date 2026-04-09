@@ -1,34 +1,55 @@
 # AI Document Summarization Tool 🚀
 
-Full-stack React + FastAPI application for AI-powered document summarization and entity extraction, with Supabase for authentication and data persistence.
+Full-stack React + FastAPI application for AI-powered document summarization, entity extraction, and evaluation — with Better Auth for authentication and PostgreSQL for data persistence.
 
-🔗 **Additional Documentation:**
+📖 **Additional Documentation:**
 
-- [Backend README](backend/README.md) - Backend setup, configuration, and secrets
-- [Supabase README](supabase-docker/README.md) - Database and authentication setup
+- [Local Dev Setup](docs/local-deploy.md) — Step-by-step guide for team members
+- [Backend README](backend/README.md) — Backend configuration and secrets
+- [GitHub Auth Setup](docs/setup-github-auth.md) — Setting up GitHub OAuth
 
 ---
 
 ## ✨ Features
 
-- 📄 Upload and process PDFs (and other document formats)
-- 🤖 Summarization using AI models (Azure OpenAI, Google Gemini, local Ollama)
-- 🕵️‍♂️ Entity extraction with customizable prompts
-- 🔐 User authentication via Supabase (GitHub OAuth)
-- 💾 Session persistence and history tracking
-- ⚙️ Settings management for API keys and model choices
-- 🌙 Dark/light theme toggle for comfortable reading
+- 📄 Upload and process PDFs (Azure Document Intelligence or open-source Docling)
+- 🤖 Entity extraction with customizable prompts (Azure OpenAI, Google Gemini, Ollama)
+- 📊 G-Eval evaluation framework (LLM-as-a-judge with correctness, completeness, relevance metrics)
+- 🔐 User authentication via Better Auth (GitHub OAuth)
+- 👥 Groups & session sharing between users
+- 📝 Template system with versioning, scoping (user/group/global), and forking
+- � Session persistence and history tracking
+- 📦 Batch processing for multi-document workflows
+- 🌙 Dark/light theme toggle
 
 ---
 
-## 🏗 Architecture Overview
+## 🏗 Architecture
 
-| Service                 | Port | Description                                     |
-| ----------------------- | ---- | ----------------------------------------------- |
-| Frontend (Vite/React)   | 3000 | User interface                                  |
-| Backend (FastAPI)       | 8001 | API server for document processing and LLM      |
-| Supabase (Kong Gateway) | 8000 | Authentication, database, and REST API          |
-| Supabase Studio         | 8000 | Database management UI (via `/project/default`) |
+```
+┌──────────────────────────────────────────────────────────┐
+│  Your Machine                                            │
+│                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │  Frontend    │  │  Backend     │  │  Auth        │   │
+│  │  Vite/React  │  │  FastAPI     │  │  Sidecar     │   │
+│  │  :3000       │  │  :8001       │  │  :3001       │   │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
+│         │                 │                 │            │
+└─────────┼─────────────────┼─────────────────┼────────────┘
+          │                 │                 │
+          │          ┌──────┴─────────────────┴───┐
+          │          │  PostgreSQL Database        │
+          └──────────┤  (Azure, Docker, or local)  │
+                     └────────────────────────────┘
+```
+
+| Service              | Port | Description                                    |
+| -------------------- | ---- | ---------------------------------------------- |
+| Frontend (Vite/React)| 3000 | User interface                                 |
+| Backend (FastAPI)    | 8001 | API server for document processing & LLM calls |
+| Auth Sidecar (Node)  | 3001 | Better Auth — handles GitHub OAuth login       |
+| PostgreSQL           | 5432 | Shared database for all services               |
 
 ---
 
@@ -36,104 +57,186 @@ Full-stack React + FastAPI application for AI-powered document summarization and
 
 - **Node.js & npm** (LTS recommended)
 - **Python 3.10+** & pip
-- **Docker & Docker Compose** (for Supabase)
-- A valid `secrets.toml` in `backend/core/` (see Backend README)
+- **PostgreSQL 14+** (see [Database Setup](#-database-setup) below)
+- A GitHub OAuth App (for authentication — see [docs/setup-github-auth.md](docs/setup-github-auth.md))
+
+---
+
+## 🗄 Database Setup
+
+The app uses PostgreSQL via SQLAlchemy. You have several options:
+
+### Option A: Local PostgreSQL via Docker (Easiest)
+
+No Azure account needed — one command gets you running:
+
+```bash
+docker run -d --name sciencegpt-db \
+  -e POSTGRES_USER=sciencegpt \
+  -e POSTGRES_PASSWORD=localdev123 \
+  -e POSTGRES_DB=summarization_tool \
+  -p 5432:5432 \
+  postgres:16
+```
+
+Then set in both `backend/.env` and `auth-service/.env`:
+```env
+DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
+```
+
+### Option B: Azure PostgreSQL Flexible Server (Team Default)
+
+If you're on the team, use the shared Azure PG instance. Get the connection string from the team lead and set it in `backend/.env` and `auth-service/.env`:
+
+```env
+DATABASE_URL=postgresql://sciencegpt:<PASSWORD>@<YOUR_SERVER>.postgres.database.azure.com:5432/summarization_tool?sslmode=require
+```
+
+> ⚠️ You must add your IP to the Azure firewall rules — see [docs/local-deploy.md](docs/local-deploy.md#step-3-azure-pg-firewall--add-your-vms-ip).
+
+### Option C: Any Other PostgreSQL
+
+Works with AWS RDS, Supabase hosted, Neon, Railway, or any PostgreSQL 14+ instance. Just provide a `DATABASE_URL`.
+
+### Run Migrations
+
+After setting up your database, create the schema:
+
+```bash
+cd backend
+source ../venv/bin/activate  # or your virtualenv
+alembic upgrade head
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone Repository
+### 1. Clone & Install
 
 ```bash
-git clone <repo-url> SummarizationTool
+git clone git@github.com:ScienceGPTstream2/SummarizationTool.git
 cd SummarizationTool
+
+# Python virtualenv
+python3 -m venv venv
+source venv/bin/activate
+pip install -r backend/requirements.txt
+
+# Frontend
+npm ci
+
+# Auth service
+cd auth-service && npm install && npx tsc && cd ..
 ```
 
-### 2. Start Supabase (Database & Auth)
+### 2. Configure Environment Files
 
-```bash
-cd supabase-docker
-cp .env.example .env  # If first time, configure secrets
-docker compose up -d
-cd ..
+You need **4 files** (all gitignored):
+
+| File | Purpose |
+| --- | --- |
+| `backend/.env` | `DATABASE_URL` for the backend |
+| `backend/core/secrets.toml` | Azure OpenAI keys, Doc Intelligence, Vertex AI |
+| `auth-service/.env` | `DATABASE_URL`, Better Auth secret, GitHub OAuth credentials |
+| `.env.local` | Frontend env vars (`VITE_API_BASE_URL`, `VITE_AUTH_URL`) |
+
+**Minimal `.env.local`:**
+```env
+VITE_API_BASE_URL=http://localhost:8001
+VITE_AUTH_URL=http://localhost:3001
 ```
 
-Supabase will be available at `http://localhost:8000`
-
-### 3. Install & Start Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8001
+**Minimal `backend/.env`:**
+```env
+DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
 ```
 
-### 4. Install & Start Frontend
+**Minimal `auth-service/.env`:**
+```env
+DATABASE_URL=postgresql://sciencegpt:localdev123@localhost:5432/summarization_tool
+BETTER_AUTH_SECRET=generate-a-random-secret-here
+BETTER_AUTH_URL=http://localhost:3001
+GITHUB_CLIENT_ID=your-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+FRONTEND_URL=http://localhost:3000
+PORT=3001
+```
+
+See [auth-service/.env.example](auth-service/.env.example) for all options.
+
+### 3. Run Migrations
 
 ```bash
-# Copy environment template
-cp .env.example .env.local
+cd backend && alembic upgrade head && cd ..
+```
 
-# Edit .env.local with your Supabase anon key (from supabase-docker/.env)
-# VITE_SUPABASE_ANON_KEY=your-anon-key-here
+### 4. Start All 3 Services
 
-npm install
+Open **3 terminals**:
+
+```bash
+# Terminal 1 — Auth Sidecar
+cd auth-service && node dist/index.js
+
+# Terminal 2 — Backend
+cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8001
+
+# Terminal 3 — Frontend
 npm run dev
 ```
 
-App will be available at `http://localhost:3000`
+App will be available at **http://localhost:3000**
 
 ---
 
 ## 📂 Project Structure
 
 ```
-├── backend/               # FastAPI server (see Backend README)
-│   └── core/secrets.toml  # Backend secrets (API keys, Supabase config)
-├── components/            # React UI components
-├── supabase-docker/       # Self-hosted Supabase (see Supabase README)
-│   └── .env               # Supabase secrets (JWT, passwords)
-├── styles/                # Global CSS
-├── templates/             # Summarization templates
-├── .env.example           # Frontend env template (copy to .env.local)
-├── .env.local             # Frontend env variables (gitignored)
-├── App.tsx                # Main application component
-├── main.tsx               # Front-end entry point
-└── README.md              # This file
+├── backend/                # FastAPI server
+│   ├── api/                # Route handlers (sessions, groups, templates, etc.)
+│   ├── models/             # SQLAlchemy models
+│   ├── services/           # Business logic (LLM, sessions, groups, templates)
+│   ├── core/               # Config, auth, secrets.toml
+│   ├── alembic/            # Database migrations
+│   └── tests/              # Integration test suite
+├── auth-service/           # Better Auth sidecar (Node.js/TypeScript)
+├── components/             # React UI components
+├── docs/                   # Setup guides and documentation
+├── templates/              # Extraction prompt templates
+├── .env.example            # Frontend env template
+└── README.md               # This file
 ```
 
 ### Environment Files
 
-| File                        | Purpose                        | Git Status    |
-| --------------------------- | ------------------------------ | ------------- |
-| `.env.example`              | Template for frontend env vars | ✅ Committed  |
-| `.env.local`                | Actual frontend env vars       | ❌ Gitignored |
-| `supabase-docker/.env`      | Supabase secrets               | ❌ Gitignored |
-| `backend/core/secrets.toml` | Backend API keys & secrets     | ❌ Gitignored |
+| File | Purpose | Git Status |
+| --- | --- | --- |
+| `.env.example` | Template for frontend env vars | ✅ Committed |
+| `.env.local` | Actual frontend env vars | ❌ Gitignored |
+| `backend/.env` | Backend `DATABASE_URL` | ❌ Gitignored |
+| `backend/core/secrets.toml` | Backend API keys & secrets | ❌ Gitignored |
+| `auth-service/.env` | Auth sidecar config | ❌ Gitignored |
+| `auth-service/.env.example` | Template for auth sidecar | ✅ Committed |
 
 ---
 
-## 🚀 Starting All Services
+## 🧪 Running Tests
 
-Run these in separate terminals (or use the systemd service for Supabase):
-
-```bash
-# Terminal 1: Supabase (if not using systemd auto-start)
-cd supabase-docker && docker compose up -d
-
-# Terminal 2: Backend (FastAPI)
-cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8001
-
-# Terminal 3: Frontend (React/Vite)
-npm run dev -- --host
-```
-
-For remote access, set the API URL:
+The project includes a comprehensive integration test suite:
 
 ```bash
-VITE_API_BASE_URL="http://<PUBLIC_IP>:8001" npm run dev -- --host
+export AUTH_TOKEN_A="<token-for-user-a>"
+export AUTH_TOKEN_B="<token-for-user-b>"
+./backend/tests/run_all_tests.sh
 ```
+
+Test modules:
+- **Auth edge cases** — invalid tokens, missing headers, SQL injection
+- **Session edge cases** — empty sessions, incomplete extractions, PATCH edge cases
+- **Cross-user isolation** — ensures users can't access each other's data
+- **Groups integration** — CRUD, membership, permissions
+- **Session sharing** — share→clone→evaluate flow
 
 ---
 
@@ -145,22 +248,17 @@ VITE_API_BASE_URL="http://<PUBLIC_IP>:8001" npm run dev -- --host
 npm run build
 ```
 
-Serve `dist/` on any static host (Netlify, Vercel, GitHub Pages, Nginx).
+Serve `dist/` on any static host (Netlify, Vercel, Nginx, etc.).
 
-### Auto-Start Supabase on VM Boot
-
-For VMs with scheduled shutdowns (e.g., Azure), set up auto-start:
+For remote access, set the API URL:
 
 ```bash
-cd supabase-docker
-sudo ./setup-autostart.sh
+VITE_API_BASE_URL="http://<PUBLIC_IP>:8001" npm run build
 ```
-
-See [Supabase README](supabase-docker/README.md) for details.
 
 ---
 
-## 🙏 Thank You :)
+## 🙏 Thank You
 
 Special thanks to:
 
