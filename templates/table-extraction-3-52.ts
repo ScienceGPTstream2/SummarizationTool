@@ -1,0 +1,13 @@
+export const tableExtraction352Template = {
+  studyType: "epi",
+  displayName: "Table extraction 3 5.2",
+  entities: [
+    {
+      name: "table extraction 3 5.2",
+      prompt:
+        'Extract every reported measures of association into a single table format (Risk ratio, rate ratio, odds ratio, relative risk, hazard ratio, risk difference, rate difference, attributable fraction, mean difference, regression coefficient, slope, correlation, \u03b2) and any corresponding confidence intervals or standard deviations. Extract results for all concentration/dose levels.\n\nReport both adjusted and non-adjusted measures of association. \n\nInclude whether the study authors considered the results to be statistically significant. Significant values should be bolded.\n\nIf adjoining cells are identical, merge the cells.\n\n\nAlso this is a concise table so focus on extracting numerical values with minimal words to describe what the numbers mean\n\n\nFew-shot examples: \nInput: "Adjusted odds ratio for high-exposure group was 1.45 (95% CI: 1.10\u20131.90)." \n\nOutput: "OR 1.45 (95% CI: 1.10\u20131.90)" \n\nInput: "Relative risk for pesticide users versus non-users was 0.85 (95% CI: 0.60\u20131.20)." \n\nOutput: "RR 0.85 (95% CI: 0.60\u20131.20)" \n\nInput: \u201cThe \u03b2 value for amitrole exposure was 0.8 (95% CI: 0.6-1.0)\n\nOutput: "\u03b2=0.8 (95% CI: 0.6\u20131.0)" \n\nInput: "For continuous users, low users (178.5\u2013234 mg/dL) had a difference of -0.4 (\u22127.3, 7.0), medium users (235\u2013369 mg/dL) had a difference 4.2 (\u22123.4, 12.5), and highest users (>369 dL) had a difference of 5.3 (\u22122.6, 13.8) for serum creatinine."\n\nOutput: "Low: -0.4 (\u22127.3, 7.0); medium: 4.2 (\u22123.4, 12.5); highest: 5.3 (\u22122.6, 13.8)"\n\nIf not reported, output "Not Reported."\n\nReport all values in a single table',
+    },
+  ],
+  summaryPrompt:
+    "Take the extracted entities and put them into a single cohesive paragraph. Do not change any of the extracted entities.",
+};
