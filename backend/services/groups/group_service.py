@@ -105,9 +105,11 @@ class GroupService:
                 ).scalar_one_or_none()
                 group_dict["user_role"] = m.role if m else None
 
-            members = db.execute(
-                select(UserGroup).where(UserGroup.group_id == gid)
-            ).scalars().all()
+            members = (
+                db.execute(select(UserGroup).where(UserGroup.group_id == gid))
+                .scalars()
+                .all()
+            )
             member_dicts = [_row_to_dict(m) for m in members]
             group_dict["members"] = self._enrich_members_with_profiles(member_dicts, db)
             return group_dict
@@ -118,9 +120,11 @@ class GroupService:
         """List all groups a user belongs to."""
         db = get_db_session()
         try:
-            memberships = db.execute(
-                select(UserGroup).where(UserGroup.user_id == user_id)
-            ).scalars().all()
+            memberships = (
+                db.execute(select(UserGroup).where(UserGroup.user_id == user_id))
+                .scalars()
+                .all()
+            )
 
             if not memberships:
                 return []
@@ -128,14 +132,17 @@ class GroupService:
             group_ids = [m.group_id for m in memberships]
             role_map = {str(m.group_id): m.role for m in memberships}
 
-            groups = db.execute(
-                select(Group)
-                .where(Group.id.in_(group_ids))
-                .order_by(Group.name)
-            ).scalars().all()
+            groups = (
+                db.execute(
+                    select(Group).where(Group.id.in_(group_ids)).order_by(Group.name)
+                )
+                .scalars()
+                .all()
+            )
 
             # Batch count members per group
             from sqlalchemy import func
+
             count_rows = db.execute(
                 select(UserGroup.group_id, func.count().label("cnt"))
                 .where(UserGroup.group_id.in_(group_ids))
@@ -207,11 +214,15 @@ class GroupService:
 
         db = get_db_session()
         try:
-            members = db.execute(
-                select(UserGroup)
-                .where(UserGroup.group_id == _to_uuid(group_id))
-                .order_by(UserGroup.role)
-            ).scalars().all()
+            members = (
+                db.execute(
+                    select(UserGroup)
+                    .where(UserGroup.group_id == _to_uuid(group_id))
+                    .order_by(UserGroup.role)
+                )
+                .scalars()
+                .all()
+            )
             member_dicts = [_row_to_dict(m) for m in members]
             return self._enrich_members_with_profiles(member_dicts, db)
         finally:
@@ -226,7 +237,9 @@ class GroupService:
         is_system_admin: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Add a member to a group. Requires admin or owner role."""
-        if not is_system_admin and not self._has_admin_role(group_id, requesting_user_id):
+        if not is_system_admin and not self._has_admin_role(
+            group_id, requesting_user_id
+        ):
             return None
 
         if role == "owner":
@@ -235,7 +248,9 @@ class GroupService:
         # Check if already a member
         existing_role = self._get_role(group_id, target_user_id)
         if existing_role is not None:
-            return self.update_member_role(group_id, target_user_id, role, requesting_user_id, is_system_admin)
+            return self.update_member_role(
+                group_id, target_user_id, role, requesting_user_id, is_system_admin
+            )
 
         with db_session_scope() as db:
             membership = UserGroup(
@@ -359,12 +374,16 @@ class GroupService:
     def _is_only_owner(self, group_id: str, user_id: str) -> bool:
         db = get_db_session()
         try:
-            owners = db.execute(
-                select(UserGroup).where(
-                    UserGroup.group_id == _to_uuid(group_id),
-                    UserGroup.role == "owner",
+            owners = (
+                db.execute(
+                    select(UserGroup).where(
+                        UserGroup.group_id == _to_uuid(group_id),
+                        UserGroup.role == "owner",
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return len(owners) == 1 and owners[0].user_id == user_id
         finally:
             db.close()
@@ -382,9 +401,9 @@ class GroupService:
 
         try:
             user_ids = [m["user_id"] for m in members]
-            users = db.execute(
-                select(User).where(User.id.in_(user_ids))
-            ).scalars().all()
+            users = (
+                db.execute(select(User).where(User.id.in_(user_ids))).scalars().all()
+            )
             user_map = {u.id: u for u in users}
 
             for member in members:

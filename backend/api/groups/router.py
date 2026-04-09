@@ -303,21 +303,31 @@ async def search_users(
         # Get existing group members to exclude them
         existing_member_ids: set = set()
         if group_id:
-            members = db.execute(
-                select(UserGroup.user_id).where(UserGroup.group_id == group_id)
-            ).scalars().all()
+            members = (
+                db.execute(
+                    select(UserGroup.user_id).where(UserGroup.group_id == group_id)
+                )
+                .scalars()
+                .all()
+            )
             existing_member_ids = set(members)
 
         # Search users by name or email (case-insensitive)
-        users = db.execute(
-            select(User).where(
-                or_(
-                    User.name.ilike(f"%{query_lower}%"),
-                    User.email.ilike(f"%{query_lower}%"),
-                    User.id.ilike(f"%{query_lower}%"),
+        users = (
+            db.execute(
+                select(User)
+                .where(
+                    or_(
+                        User.name.ilike(f"%{query_lower}%"),
+                        User.email.ilike(f"%{query_lower}%"),
+                        User.id.ilike(f"%{query_lower}%"),
+                    )
                 )
-            ).limit(20)
-        ).scalars().all()
+                .limit(20)
+            )
+            .scalars()
+            .all()
+        )
 
         results: List[UserSearchResult] = []
         for user in users:

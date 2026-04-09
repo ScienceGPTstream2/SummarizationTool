@@ -33,7 +33,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
-    
+
     This generates SQL scripts without connecting to the database.
     """
     url = config.get_main_option("sqlalchemy.url")
@@ -50,7 +50,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
-    
+
     Creates an engine and runs migrations against the live database.
     """
     connectable = engine_from_config(
