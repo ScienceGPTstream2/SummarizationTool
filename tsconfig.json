@@ -30,6 +30,7 @@
     "dist",
     "backend",
     "supabase-docker",
+    "auth-service",
     "templates/App.tsx",
     "components/ui/form.tsx"
   ],
