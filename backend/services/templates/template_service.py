@@ -567,7 +567,9 @@ class TemplateService:
         if template["scope"] == "group":
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             return role in ("member", "admin", "owner")
-        return False
+
+        # Global scope: only the original creator can edit
+        return template.get("created_by") == user_id
 
     def _is_owner(
         self,

@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "./ui/card";
-import { Badge } from "./ui/badge";
 import { authenticatedFetch } from "../utils/authUtils";
 import { Button } from "./ui/button";
+import { BarChart3 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -265,13 +265,6 @@ export function SessionMetrics() {
     }
   };
 
-  const displayMetrics = metrics || {
-    total_cost: 0,
-    total_latency: 0,
-    total_calls: 0,
-    calls: [],
-  };
-
   return (
     <>
       {/* Benchmark clear confirmation modal */}
@@ -395,30 +388,10 @@ export function SessionMetrics() {
         }}
       >
         <DialogTrigger asChild>
-          <Card className="px-4 py-2 bg-muted/30 border border-border cursor-pointer hover:bg-muted/50 transition-colors">
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <Badge variant="secondary">Session Metrics</Badge>
-              {displayMetrics.total_cost > 0 && (
-                <span className="text-muted-foreground">
-                  Cost: <strong>${displayMetrics.total_cost.toFixed(4)}</strong>
-                </span>
-              )}
-              {displayMetrics.total_latency > 0 && (
-                <span className="text-muted-foreground">
-                  Latency:{" "}
-                  <strong>{displayMetrics.total_latency.toFixed(2)}s</strong>
-                </span>
-              )}
-              {displayMetrics.total_calls > 0 && (
-                <span className="text-muted-foreground">
-                  Calls: <strong>{displayMetrics.total_calls}</strong>
-                </span>
-              )}
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                Click to view & refresh
-              </span>
-            </div>
-          </Card>
+          <Button variant="outline" size="sm">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Session Metrics
+          </Button>
         </DialogTrigger>
         <DialogContent className="w-[99vw] max-w-[96rem] min-w-[1080px] max-h-[90vh] overflow-hidden">
           <DialogHeader className="shrink-0">
