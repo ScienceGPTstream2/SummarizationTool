@@ -1,0 +1,113 @@
+# infra/container-app.yaml
+#
+# TEMPLATE — contains no real secrets. All ${VAR} placeholders are substituted
+# at deploy time via envsubst (see .github/workflows/deploy.yml and
+# infra/provision.sh for first-time setup).
+#
+# Initial provisioning (one-time):
+#   source infra/provision.sh
+#
+# Subsequent deploys are handled automatically by GitHub Actions (image updates
+# + idempotent secret sync via az containerapp secret set).
+
+properties:
+  managedEnvironmentId: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.App/managedEnvironments/${CONTAINER_APP_ENV_NAME}
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8001
+      transport: auto
+      allowInsecure: false
+    secrets:
+      - name: database-url
+        value: "${DATABASE_URL}"
+      - name: github-client-id
+        value: "${GITHUB_CLIENT_ID}"
+      - name: github-client-secret
+        value: "${GITHUB_CLIENT_SECRET}"
+      - name: better-auth-secret
+        value: "${BETTER_AUTH_SECRET}"
+      - name: storage-connection-string
+        value: "${AZURE_STORAGE_CONNECTION_STRING}"
+      - name: acr-password
+        value: "${ACR_PASSWORD}"
+    registries:
+      - server: ${ACR_NAME}.azurecr.io
+        username: ${ACR_USERNAME}
+        passwordSecretRef: acr-password
+  template:
+    containers:
+      # Main container: FastAPI backend
+      - name: backend
+        image: ${ACR_NAME}.azurecr.io/summarization-backend:latest
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: AUTH_SIDECAR_URL
+            value: http://localhost:3001
+          - name: CORS_ALLOWED_ORIGINS
+            value: https://${FRONTEND_URL}
+          # 1 worker per replica — see backend/Dockerfile comment for rationale.
+          # Scale via minReplicas/maxReplicas below, not by increasing this.
+          - name: WORKERS
+            value: "1"
+          - name: AZURE_STORAGE_CONNECTION_STRING
+            secretRef: storage-connection-string
+          - name: AZURE_STORAGE_CONTAINER_NAME
+            value: summarization-uploads
+        probes:
+          - type: liveness
+            httpGet:
+              path: /api/server/health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          - type: readiness
+            httpGet:
+              path: /api/server/health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+      # Sidecar container: Better Auth service
+      - name: auth-sidecar
+        image: ${ACR_NAME}.azurecr.io/summarization-auth:latest
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: database-url
+          # Must be the public App Service URL so GitHub OAuth callbacks and cookie
+          # domains resolve correctly (NOT the internal localhost:3001 address).
+          - name: BETTER_AUTH_URL
+            value: https://${FRONTEND_URL}
+          - name: BETTER_AUTH_SECRET
+            secretRef: better-auth-secret
+          - name: FRONTEND_URL
+            value: https://${FRONTEND_URL}
+          - name: GITHUB_CLIENT_ID
+            secretRef: github-client-id
+          - name: GITHUB_CLIENT_SECRET
+            secretRef: github-client-secret
+          - name: PORT
+            value: "3001"
+        probes:
+          - type: liveness
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 30
+
+    scale:
+      minReplicas: 1
+      maxReplicas: 5
+      rules:
+        - name: http-scaling
+          http:
+            metadata:
+              concurrentRequests: "50"

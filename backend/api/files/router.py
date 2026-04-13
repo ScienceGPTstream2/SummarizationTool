@@ -1,19 +1,17 @@
 """File management API endpoints with organized storage and deduplication"""
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Header, Request
+from fastapi import APIRouter, File, UploadFile, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse, Response
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel
-import hashlib
 
 from services.document import get_organized_file_service, get_organized_processor
-from services.auth.supabase_auth_service import SupabaseAuthService
+from core.auth import get_optional_user
 
 router = APIRouter(prefix="/api", tags=["files"])
 
 # Services
 file_service = get_organized_file_service()
-auth_service = SupabaseAuthService()
 
 
 # Response Models
@@ -36,25 +34,11 @@ class UserFileInfo(BaseModel):
     processed: dict = {}
 
 
-def get_user_id_from_token(authorization: Optional[str]) -> Optional[str]:
-    """Extract user ID from Authorization header."""
-    if not authorization:
-        return None
-
-    try:
-        token = authorization.replace("Bearer ", "")
-        if auth_service.is_configured:
-            return auth_service.get_user_id(token)
-    except:
-        pass
-    return None
-
-
 @router.post("/upload")
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
     """
     Upload and store a PDF file with deduplication.
@@ -107,7 +91,7 @@ async def upload_file(
             raise HTTPException(status_code=400, detail="File size exceeds 20MB limit")
 
         # Get user ID if authenticated
-        user_id = get_user_id_from_token(authorization)
+        user_id = current_user["id"] if current_user else None
 
         # Save with deduplication
         result = await file_service.save_uploaded_file(
@@ -149,11 +133,11 @@ async def upload_file(
 
 
 @router.get("/files/list")
-async def list_user_files(authorization: Optional[str] = Header(None)):
+async def list_user_files(current_user: Optional[dict] = Depends(get_optional_user)):
     """List all files associated with the authenticated user."""
-    user_id = get_user_id_from_token(authorization)
-    if not user_id:
+    if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = current_user["id"]
 
     try:
         files = await file_service.list_user_files(user_id)
@@ -180,7 +164,7 @@ async def list_user_files(authorization: Optional[str] = Header(None)):
 
 
 @router.get("/files/{file_id}")
-async def download_file(file_id: str, authorization: Optional[str] = Header(None)):
+async def download_file(file_id: str):
     """
     Download/serve the uploaded file content.
     Accepts either file_hash or legacy file_id format.
@@ -218,7 +202,7 @@ async def download_file(file_id: str, authorization: Optional[str] = Header(None
 
 
 @router.get("/files/{file_id}/info")
-async def get_file_info(file_id: str, authorization: Optional[str] = Header(None)):
+async def get_file_info(file_id: str):
     """
     Get information about an uploaded file.
     Accepts either file_hash or legacy file_id format.
@@ -260,7 +244,7 @@ async def get_file_info(file_id: str, authorization: Optional[str] = Header(None
 
 
 @router.delete("/files/{file_id}")
-async def delete_file(file_id: str, authorization: Optional[str] = Header(None)):
+async def delete_file(file_id: str):
     """
     Delete an uploaded file.
     Note: In the new system, this marks the file as deleted for the user

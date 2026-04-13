@@ -175,6 +175,11 @@ class SessionSummary(BaseModel):
     document_names: List[str] = Field(default_factory=list)
     extraction_count: int
     evaluation_count: int
+    # Sharing metadata (populated for shared session listings)
+    shared_by_name: Optional[str] = None
+    shared_group_name: Optional[str] = None
+    shared_at: Optional[datetime] = None
+    owner_user_id: Optional[str] = None
 
 
 class SessionListResponse(BaseModel):

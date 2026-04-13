@@ -1,9 +1,10 @@
 """
 Storage Services Package
 
-Contains services for file and data storage operations.
+Provides BlobStorageClient for Azure Blob Storage (production) with automatic
+fallback to local filesystem when AZURE_STORAGE_CONNECTION_STRING is not set.
 """
 
-from .supabase_storage_service import SupabaseStorageService, get_supabase_service
+from services.storage.blob_storage import BlobStorageClient
 
-__all__ = ["SupabaseStorageService", "get_supabase_service"]
+__all__ = ["BlobStorageClient"]

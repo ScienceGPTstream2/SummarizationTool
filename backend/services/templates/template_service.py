@@ -5,18 +5,50 @@ Provides business logic for managing prompt templates with versioning,
 scope-based permissions, and fork capabilities.
 """
 
+import uuid as _uuid_module
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from services.database.supabase_db_service import get_db_service
+from sqlalchemy import select, delete, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from models import (
+    PromptTemplate,
+    TemplateVersion,
+    TemplatePermission,
+    Group,
+)
+from models.base import get_db_session, db_session_scope
 from services.groups.group_service import get_group_service
+
+
+def _to_uuid(value):
+    if value is None:
+        return None
+    if isinstance(value, _uuid_module.UUID):
+        return value
+    try:
+        return _uuid_module.UUID(str(value))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _row_to_dict(obj) -> Dict[str, Any]:
+    result = {}
+    for col in obj.__table__.columns:
+        val = getattr(obj, col.key)
+        if isinstance(val, _uuid_module.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        result[col.key] = val
+    return result
 
 
 class TemplateService:
     """Service for managing prompt templates"""
 
     def __init__(self):
-        self.db = get_db_service()
         self.group_service = get_group_service()
 
     # ==========================================
@@ -39,112 +71,58 @@ class TemplateService:
         is_immutable: bool = False,
         folder_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Create a new template.
-
-        Args:
-            user_id: Creating user's ID
-            name: Template name
-            entities: List of {name, prompt} objects
-            scope: 'user', 'group', or 'global'
-            owner_group_id: Required for group-scoped templates
-            description: Optional description
-            study_type: Optional study type category
-            system_prompt: Optional system prompt
-            summary_prompt: Optional summary prompt
-            variables: Optional list of variable definitions
-            tags: Optional list of tags
-            is_immutable: Whether template is immutable
-
-        Returns:
-            Created template
-        """
-        # Validate scope
+        """Create a new template."""
         if scope not in ("user", "group", "global"):
             raise ValueError("Invalid scope. Must be: user, group, or global")
 
-        # Validate group scope
         if scope == "group":
             if not owner_group_id:
                 raise ValueError("owner_group_id required for group-scoped templates")
-            # Check user is a member who can create
             role = self.group_service._get_role(owner_group_id, user_id)
             if role not in ("member", "admin", "owner"):
                 raise ValueError("Not authorized to create templates for this group")
 
-        # Build template data
-        data = {
-            "name": name,
-            "description": description,
-            "study_type": study_type,
-            "scope": scope,
-            "system_prompt": system_prompt,
-            "entities": entities,
-            "summary_prompt": summary_prompt,
-            "variables": variables or [],
-            "tags": tags or [],
-            "is_immutable": is_immutable,
-            "version": 1,
-            "created_by": user_id,
-        }
+        with db_session_scope() as db:
+            tmpl = PromptTemplate(
+                name=name,
+                description=description,
+                study_type=study_type,
+                scope=scope,
+                system_prompt=system_prompt,
+                entities=entities,
+                summary_prompt=summary_prompt,
+                variables=variables or [],
+                tags=tags or [],
+                is_immutable=is_immutable,
+                version=1,
+                created_by=user_id,
+                owner_user_id=user_id if scope == "user" else None,
+                owner_group_id=_to_uuid(owner_group_id) if scope == "group" else None,
+                folder_id=_to_uuid(folder_id) if folder_id else None,
+            )
+            db.add(tmpl)
+            db.flush()
+            return _row_to_dict(tmpl)
 
-        # Set owner based on scope
-        if scope == "user":
-            data["owner_user_id"] = user_id
-            data["owner_group_id"] = None
-        elif scope == "group":
-            data["owner_user_id"] = None
-            data["owner_group_id"] = owner_group_id
-        else:  # global - only via service role
-            data["owner_user_id"] = None
-            data["owner_group_id"] = None
+    def get_template(self, template_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get a template by ID with permission check."""
+        db = get_db_session()
+        try:
+            tmpl = db.execute(
+                select(PromptTemplate).where(PromptTemplate.id == _to_uuid(template_id))
+            ).scalar_one_or_none()
+            if tmpl is None:
+                return None
 
-        if folder_id:
-            data["folder_id"] = folder_id
+            t = _row_to_dict(tmpl)
+            if not self._can_read(t, user_id, db=db):
+                return None
 
-        result = self.db.client.table("prompt_templates").insert(data).execute()
-
-        if not result.data:
-            raise ValueError("Failed to create template")
-
-        return result.data[0]
-
-    def get_template(
-        self,
-        template_id: str,
-        user_id: str,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get a template by ID with permission check.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-
-        Returns:
-            Template or None if not found/not authorized
-        """
-        result = (
-            self.db.client.table("prompt_templates")
-            .select("*")
-            .eq("id", template_id)
-            .execute()
-        )
-
-        if not result.data:
-            return None
-
-        template = result.data[0]
-
-        # Check access
-        if not self._can_read(template, user_id):
-            return None
-
-        # Add permission info
-        template["can_edit"] = self._can_edit(template, user_id)
-        template["is_owner"] = self._is_owner(template, user_id)
-
-        return template
+            t["can_edit"] = self._can_edit(t, user_id, db=db)
+            t["is_owner"] = self._is_owner(t, user_id)
+            return t
+        finally:
+            db.close()
 
     def list_templates(
         self,
@@ -156,78 +134,73 @@ class TemplateService:
         limit: int = 50,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
-        """
-        List templates accessible to a user with filtering.
-
-        Args:
-            user_id: Requesting user ID
-            scope: Filter by scope (user, group, global)
-            study_type: Filter by study type
-            tags: Filter by tags (any match)
-            search: Search in name and description
-            limit: Max results
-            offset: Pagination offset
-
-        Returns:
-            List of accessible templates
-        """
-        # Get user's groups
+        """List templates accessible to a user with filtering."""
         user_groups = self.group_service.list_user_groups(user_id)
         group_ids = [g["id"] for g in user_groups]
         group_name_map = {g["id"]: g["name"] for g in user_groups}
 
-        # Build query
-        query = self.db.client.table("prompt_templates").select("*")
+        db = get_db_session()
+        try:
+            q = select(PromptTemplate)
+            if scope:
+                q = q.where(PromptTemplate.scope == scope)
+            if study_type:
+                q = q.where(PromptTemplate.study_type == study_type)
+            if search:
+                q = q.where(
+                    or_(
+                        PromptTemplate.name.ilike(f"%{search}%"),
+                        PromptTemplate.description.ilike(f"%{search}%"),
+                    )
+                )
+            q = q.order_by(PromptTemplate.updated_at.desc()).offset(offset).limit(limit)
 
-        # Apply scope filter
-        if scope:
-            query = query.eq("scope", scope)
+            rows = db.execute(q).scalars().all()
+            templates = [_row_to_dict(r) for r in rows]
 
-        # Apply study type filter
-        if study_type:
-            query = query.eq("study_type", study_type)
-
-        # Apply search
-        if search:
-            query = query.or_(f"name.ilike.%{search}%,description.ilike.%{search}%")
-
-        # Order and paginate
-        query = query.order("updated_at", desc=True).range(offset, offset + limit - 1)
-
-        result = query.execute()
-        templates = result.data or []
-
-        # Filter by access permissions (post-query for complex logic)
-        accessible = []
-        for template in templates:
-            if self._can_read(template, user_id, group_ids):
-                template["can_edit"] = self._can_edit(template, user_id, group_ids)
-                template["is_owner"] = self._is_owner(template, user_id, group_ids)
-                # Enrich group-scoped templates with group name
-                if template["scope"] == "group" and template.get("owner_group_id"):
-                    gid = template["owner_group_id"]
-                    if gid in group_name_map:
-                        template["group_name"] = group_name_map[gid]
-                    else:
-                        # Fallback: look up the group name
-                        try:
-                            grp = self.group_service.get_group(gid)
-                            if grp:
-                                template["group_name"] = grp.get("name")
-                                group_name_map[gid] = grp.get("name", "")
-                        except Exception:
-                            template["group_name"] = None
-                accessible.append(template)
-
-        # Apply tags filter (post-query for array overlap)
-        if tags:
-            accessible = [
-                t
-                for t in accessible
-                if any(tag in (t.get("tags") or []) for tag in tags)
+            # Build group name lookup for any unseen group IDs
+            extra_group_ids = [
+                t["owner_group_id"]
+                for t in templates
+                if t["scope"] == "group"
+                and t.get("owner_group_id")
+                and t["owner_group_id"] not in group_name_map
             ]
+            if extra_group_ids:
+                extra_groups = (
+                    db.execute(
+                        select(Group).where(
+                            Group.id.in_([_to_uuid(g) for g in extra_group_ids])
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for g in extra_groups:
+                    group_name_map[str(g.id)] = g.name
 
-        return accessible
+            accessible = []
+            for t in templates:
+                if not self._can_read(t, user_id, user_group_ids=group_ids, db=db):
+                    continue
+                t["can_edit"] = self._can_edit(
+                    t, user_id, user_group_ids=group_ids, db=db
+                )
+                t["is_owner"] = self._is_owner(t, user_id, user_group_ids=group_ids)
+                if t["scope"] == "group" and t.get("owner_group_id"):
+                    t["group_name"] = group_name_map.get(t["owner_group_id"])
+                accessible.append(t)
+
+            if tags:
+                accessible = [
+                    t
+                    for t in accessible
+                    if any(tag in (t.get("tags") or []) for tag in tags)
+                ]
+
+            return accessible
+        finally:
+            db.close()
 
     def update_template(
         self,
@@ -236,26 +209,13 @@ class TemplateService:
         updates: Dict[str, Any],
         change_summary: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Update a template. Creates a version entry if content changed.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-            updates: Fields to update
-            change_summary: Description of changes
-
-        Returns:
-            Updated template or None if not authorized
-        """
+        """Update a template. Creates a version snapshot before updating."""
         template = self.get_template(template_id, user_id)
         if not template:
             return None
-
-        if not self._can_edit(template, user_id):
+        if not template.get("can_edit"):
             return None
 
-        # Filter allowed fields
         allowed = {
             "name",
             "description",
@@ -269,36 +229,45 @@ class TemplateService:
             "folder_id",
         }
         data = {k: v for k, v in updates.items() if k in allowed}
-
         if not data:
             return template
 
-        # The database trigger will handle versioning
-        result = (
-            self.db.client.table("prompt_templates")
-            .update(data)
-            .eq("id", template_id)
-            .execute()
-        )
+        with db_session_scope() as db:
+            tmpl = db.execute(
+                select(PromptTemplate).where(PromptTemplate.id == _to_uuid(template_id))
+            ).scalar_one_or_none()
+            if tmpl is None:
+                return None
 
-        return result.data[0] if result.data else None
+            # Snapshot current state as a new version before changing
+            snapshot = TemplateVersion(
+                template_id=tmpl.id,
+                version=tmpl.version,
+                system_prompt=tmpl.system_prompt,
+                entities=tmpl.entities,
+                summary_prompt=tmpl.summary_prompt,
+                variables=tmpl.variables,
+                changed_by=user_id,
+                change_summary=change_summary,
+            )
+            db.add(snapshot)
+
+            for k, v in data.items():
+                if k == "folder_id":
+                    setattr(tmpl, k, _to_uuid(v) if v else None)
+                else:
+                    setattr(tmpl, k, v)
+            tmpl.version = tmpl.version + 1
+            tmpl.updated_at = datetime.utcnow()
+            db.flush()
+            return _row_to_dict(tmpl)
 
     def delete_template(self, template_id: str, user_id: str) -> bool:
-        """
-        Delete a template. Requires ownership.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-
-        Returns:
-            True if deleted, False if not authorized
-        """
+        """Delete a template. Requires ownership."""
         template = self.get_template(template_id, user_id)
         if not template:
             return False
 
-        # Check delete permission (stricter than edit)
         if template["scope"] == "user":
             if template["owner_user_id"] != user_id:
                 return False
@@ -307,13 +276,13 @@ class TemplateService:
             if role not in ("admin", "owner"):
                 return False
         elif template["scope"] == "global":
-            # Global templates can be deleted by their creator
             if template.get("created_by") != user_id:
                 return False
 
-        self.db.client.table("prompt_templates").delete().eq(
-            "id", template_id
-        ).execute()
+        with db_session_scope() as db:
+            db.execute(
+                delete(PromptTemplate).where(PromptTemplate.id == _to_uuid(template_id))
+            )
         return True
 
     # ==========================================
@@ -321,103 +290,71 @@ class TemplateService:
     # ==========================================
 
     def get_version_history(
-        self,
-        template_id: str,
-        user_id: str,
+        self, template_id: str, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get version history for a template.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-
-        Returns:
-            List of versions or None if not authorized
-        """
+        """Get version history for a template."""
         template = self.get_template(template_id, user_id)
         if not template:
             return None
 
-        result = (
-            self.db.client.table("template_versions")
-            .select("*")
-            .eq("template_id", template_id)
-            .order("version", desc=True)
-            .execute()
-        )
-
-        return result.data or []
+        db = get_db_session()
+        try:
+            versions = (
+                db.execute(
+                    select(TemplateVersion)
+                    .where(TemplateVersion.template_id == _to_uuid(template_id))
+                    .order_by(TemplateVersion.version.desc())
+                )
+                .scalars()
+                .all()
+            )
+            return [_row_to_dict(v) for v in versions]
+        finally:
+            db.close()
 
     def revert_to_version(
-        self,
-        template_id: str,
-        version: int,
-        user_id: str,
+        self, template_id: str, version: int, user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        Revert a template to a previous version.
-
-        Args:
-            template_id: Template ID
-            version: Version number to revert to
-            user_id: Requesting user ID
-
-        Returns:
-            Updated template or None if not authorized
-        """
+        """Revert a template to a previous version."""
         template = self.get_template(template_id, user_id)
-        if not template:
+        if not template or not template.get("can_edit"):
             return None
 
-        if not self._can_edit(template, user_id):
+        db = get_db_session()
+        try:
+            old = db.execute(
+                select(TemplateVersion).where(
+                    TemplateVersion.template_id == _to_uuid(template_id),
+                    TemplateVersion.version == version,
+                )
+            ).scalar_one_or_none()
+        finally:
+            db.close()
+
+        if old is None:
             return None
 
-        # Get the version to revert to
-        result = (
-            self.db.client.table("template_versions")
-            .select("*")
-            .eq("template_id", template_id)
-            .eq("version", version)
-            .execute()
-        )
-
-        if not result.data:
-            return None
-
-        old_version = result.data[0]
-
-        # Update with old content
         updates = {
-            "system_prompt": old_version["system_prompt"],
-            "entities": old_version["entities"],
-            "summary_prompt": old_version["summary_prompt"],
-            "variables": old_version["variables"],
+            "system_prompt": old.system_prompt,
+            "entities": old.entities,
+            "summary_prompt": old.summary_prompt,
+            "variables": old.variables,
         }
-
-        return self.update_template(template_id, user_id, updates)
+        return self.update_template(
+            template_id,
+            user_id,
+            updates,
+            change_summary=f"Reverted to version {version}",
+        )
 
     # ==========================================
     # Fork Operations
     # ==========================================
 
     def fork_template(
-        self,
-        template_id: str,
-        user_id: str,
-        new_name: Optional[str] = None,
+        self, template_id: str, user_id: str, new_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        Create a personal copy of a template.
-
-        Args:
-            template_id: Template to fork
-            user_id: User creating the fork
-            new_name: Optional new name (defaults to "Copy of [original]")
-
-        Returns:
-            New template or None if source not accessible
-        """
+        """Create a personal copy of a template."""
         source = self.get_template(template_id, user_id)
         if not source:
             return None
@@ -447,28 +384,9 @@ class TemplateService:
         new_scope: str,
         owner_group_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Change the scope of a template (publish/unpublish).
-
-        Permission rules:
-        - user -> group: user must be member/admin/owner of target group
-        - user -> global: only the template creator
-        - group -> user: group admin/owner can unpublish back to personal
-        - group -> global: group admin/owner
-        - global -> user/group: only the original creator
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-            new_scope: Target scope ('user', 'group', 'global')
-            owner_group_id: Required when new_scope='group'
-
-        Returns:
-            Updated template or None if not authorized
-        """
+        """Change the scope of a template."""
         if new_scope not in ("user", "group", "global"):
             raise ValueError("Invalid scope. Must be: user, group, or global")
-
         if new_scope == "group" and not owner_group_id:
             raise ValueError("owner_group_id required when changing to group scope")
 
@@ -477,83 +395,59 @@ class TemplateService:
             return None
 
         old_scope = template["scope"]
-
         if old_scope == new_scope:
-            return template  # No change
+            return template
 
-        # Permission checks based on transition
         if old_scope == "user":
-            # Only the owner can change scope of their personal template
             if template["owner_user_id"] != user_id:
                 return None
             if new_scope == "group":
                 role = self.group_service._get_role(owner_group_id, user_id)
                 if role not in ("member", "admin", "owner"):
                     return None
-
         elif old_scope == "group":
-            # Group admin/owner can change scope
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             if role not in ("admin", "owner"):
                 return None
             if new_scope == "group" and owner_group_id != template["owner_group_id"]:
-                # Moving to a different group: check membership in target group
                 target_role = self.group_service._get_role(owner_group_id, user_id)
                 if target_role not in ("member", "admin", "owner"):
                     return None
-
         elif old_scope == "global":
-            # Only the original creator can change scope of global templates
             if template.get("created_by") != user_id:
                 return None
 
-        # Build update data based on new scope
-        update_data: Dict[str, Any] = {"scope": new_scope}
-        if new_scope == "user":
-            update_data["owner_user_id"] = user_id
-            update_data["owner_group_id"] = None
-        elif new_scope == "group":
-            update_data["owner_user_id"] = None
-            update_data["owner_group_id"] = owner_group_id
-        elif new_scope == "global":
-            update_data["owner_user_id"] = None
-            update_data["owner_group_id"] = None
-
-        result = (
-            self.db.client.table("prompt_templates")
-            .update(update_data)
-            .eq("id", template_id)
-            .execute()
-        )
-
-        return result.data[0] if result.data else None
+        with db_session_scope() as db:
+            tmpl = db.execute(
+                select(PromptTemplate).where(PromptTemplate.id == _to_uuid(template_id))
+            ).scalar_one_or_none()
+            if tmpl is None:
+                return None
+            tmpl.scope = new_scope
+            if new_scope == "user":
+                tmpl.owner_user_id = user_id
+                tmpl.owner_group_id = None
+            elif new_scope == "group":
+                tmpl.owner_user_id = None
+                tmpl.owner_group_id = _to_uuid(owner_group_id)
+            else:
+                tmpl.owner_user_id = None
+                tmpl.owner_group_id = None
+            tmpl.updated_at = datetime.utcnow()
+            db.flush()
+            return _row_to_dict(tmpl)
 
     # ==========================================
     # Permission Operations
     # ==========================================
 
     def set_immutable(
-        self,
-        template_id: str,
-        user_id: str,
-        is_immutable: bool,
+        self, template_id: str, user_id: str, is_immutable: bool
     ) -> Optional[Dict[str, Any]]:
-        """
-        Set template immutability. Requires ownership.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-            is_immutable: New immutability state
-
-        Returns:
-            Updated template or None if not authorized
-        """
+        """Set template immutability. Requires ownership."""
         template = self.get_template(template_id, user_id)
         if not template:
             return None
-
-        # Only owner can change immutability
         if template["scope"] == "user":
             if template["owner_user_id"] != user_id:
                 return None
@@ -564,14 +458,16 @@ class TemplateService:
         else:
             return None
 
-        result = (
-            self.db.client.table("prompt_templates")
-            .update({"is_immutable": is_immutable})
-            .eq("id", template_id)
-            .execute()
-        )
-
-        return result.data[0] if result.data else None
+        with db_session_scope() as db:
+            tmpl = db.execute(
+                select(PromptTemplate).where(PromptTemplate.id == _to_uuid(template_id))
+            ).scalar_one_or_none()
+            if tmpl is None:
+                return None
+            tmpl.is_immutable = is_immutable
+            tmpl.updated_at = datetime.utcnow()
+            db.flush()
+            return _row_to_dict(tmpl)
 
     def set_permission(
         self,
@@ -581,24 +477,10 @@ class TemplateService:
         can_write: bool,
         granting_user_id: str,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Set per-user permission override.
-
-        Args:
-            template_id: Template ID
-            target_user_id: User to grant/revoke permissions
-            can_read: Read permission
-            can_write: Write permission
-            granting_user_id: User performing the action
-
-        Returns:
-            Permission record or None if not authorized
-        """
+        """Set per-user permission override."""
         template = self.get_template(template_id, granting_user_id)
         if not template:
             return None
-
-        # Check if user can manage permissions
         if template["scope"] == "user":
             if template["owner_user_id"] != granting_user_id:
                 return None
@@ -611,42 +493,36 @@ class TemplateService:
         else:
             return None
 
-        data = {
-            "template_id": template_id,
-            "user_id": target_user_id,
-            "can_read": can_read,
-            "can_write": can_write,
-            "granted_by": granting_user_id,
-        }
-
-        result = (
-            self.db.client.table("template_permissions")
-            .upsert(data, on_conflict="template_id,user_id")
-            .execute()
-        )
-
-        return result.data[0] if result.data else None
+        with db_session_scope() as db:
+            stmt = (
+                pg_insert(TemplatePermission)
+                .values(
+                    template_id=_to_uuid(template_id),
+                    user_id=target_user_id,
+                    can_read=can_read,
+                    can_write=can_write,
+                    granted_by=granting_user_id,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_template_permission",
+                    set_={
+                        "can_read": can_read,
+                        "can_write": can_write,
+                        "granted_by": granting_user_id,
+                    },
+                )
+                .returning(TemplatePermission)
+            )
+            result = db.execute(stmt).scalar_one_or_none()
+            return _row_to_dict(result) if result else None
 
     def get_permissions(
-        self,
-        template_id: str,
-        user_id: str,
+        self, template_id: str, user_id: str
     ) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get all permission overrides for a template.
-
-        Args:
-            template_id: Template ID
-            user_id: Requesting user ID
-
-        Returns:
-            List of permissions or None if not authorized
-        """
+        """Get all permission overrides for a template."""
         template = self.get_template(template_id, user_id)
         if not template:
             return None
-
-        # Check if user can view permissions
         if template["scope"] == "user":
             if template["owner_user_id"] != user_id:
                 return None
@@ -655,37 +531,28 @@ class TemplateService:
             if role not in ("admin", "owner"):
                 return None
 
-        result = (
-            self.db.client.table("template_permissions")
-            .select("*")
-            .eq("template_id", template_id)
-            .execute()
-        )
-
-        return result.data or []
+        db = get_db_session()
+        try:
+            perms = (
+                db.execute(
+                    select(TemplatePermission).where(
+                        TemplatePermission.template_id == _to_uuid(template_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [_row_to_dict(p) for p in perms]
+        finally:
+            db.close()
 
     def remove_permission(
-        self,
-        template_id: str,
-        target_user_id: str,
-        removing_user_id: str,
+        self, template_id: str, target_user_id: str, removing_user_id: str
     ) -> bool:
-        """
-        Remove a permission override.
-
-        Args:
-            template_id: Template ID
-            target_user_id: User whose permission to remove
-            removing_user_id: User performing the action
-
-        Returns:
-            True if removed, False if not authorized
-        """
+        """Remove a permission override."""
         template = self.get_template(template_id, removing_user_id)
         if not template:
             return False
-
-        # Check if user can manage permissions
         if template["scope"] == "user":
             if template["owner_user_id"] != removing_user_id:
                 return False
@@ -698,9 +565,13 @@ class TemplateService:
         else:
             return False
 
-        self.db.client.table("template_permissions").delete().eq(
-            "template_id", template_id
-        ).eq("user_id", target_user_id).execute()
+        with db_session_scope() as db:
+            db.execute(
+                delete(TemplatePermission).where(
+                    TemplatePermission.template_id == _to_uuid(template_id),
+                    TemplatePermission.user_id == target_user_id,
+                )
+            )
         return True
 
     # ==========================================
@@ -712,18 +583,12 @@ class TemplateService:
         template: Dict[str, Any],
         user_id: str,
         user_group_ids: Optional[List[str]] = None,
+        db=None,
     ) -> bool:
-        """Check if user can read a template"""
-        # Global templates are readable by all
         if template["scope"] == "global":
             return True
-
-        # User scope: must be owner
-        if template["scope"] == "user":
-            if template["owner_user_id"] == user_id:
-                return True
-
-        # Group scope: must be member
+        if template["scope"] == "user" and template["owner_user_id"] == user_id:
+            return True
         if template["scope"] == "group":
             if user_group_ids is None:
                 user_groups = self.group_service.list_user_groups(user_id)
@@ -732,47 +597,25 @@ class TemplateService:
                 return True
 
         # Check per-user override
-        perm = (
-            self.db.client.table("template_permissions")
-            .select("can_read")
-            .eq("template_id", template["id"])
-            .eq("user_id", user_id)
-            .execute()
-        )
-        if perm.data and perm.data[0]["can_read"]:
-            return True
-
-        return False
+        perm = self._get_permission(template["id"], user_id, db)
+        return bool(perm and perm.can_read)
 
     def _can_edit(
         self,
         template: Dict[str, Any],
         user_id: str,
         user_group_ids: Optional[List[str]] = None,
+        db=None,
     ) -> bool:
-        """Check if user can edit a template"""
-        # Cannot edit immutable templates
         if template.get("is_immutable"):
             return False
 
-        # Check per-user override first (explicit deny)
-        perm = (
-            self.db.client.table("template_permissions")
-            .select("can_write")
-            .eq("template_id", template["id"])
-            .eq("user_id", user_id)
-            .execute()
-        )
-        if perm.data:
-            if not perm.data[0]["can_write"]:
-                return False
-            return True  # Explicit grant
+        perm = self._get_permission(template["id"], user_id, db)
+        if perm is not None:
+            return bool(perm.can_write)
 
-        # User scope: must be owner
         if template["scope"] == "user":
             return template["owner_user_id"] == user_id
-
-        # Group scope: must be member with write role
         if template["scope"] == "group":
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             return role in ("member", "admin", "owner")
@@ -786,16 +629,30 @@ class TemplateService:
         user_id: str,
         user_group_ids: Optional[List[str]] = None,
     ) -> bool:
-        """Check if user is the owner/admin of a template (can manage lock/delete)"""
         if template["scope"] == "user":
             return template["owner_user_id"] == user_id
         if template["scope"] == "group":
             role = self.group_service._get_role(template["owner_group_id"], user_id)
             return role in ("admin", "owner")
         if template["scope"] == "global":
-            # Global templates: the creator is the owner
             return template.get("created_by") == user_id
         return False
+
+    def _get_permission(self, template_id: str, user_id: str, db=None):
+        """Fetch TemplatePermission row or None."""
+        close_db = db is None
+        if db is None:
+            db = get_db_session()
+        try:
+            return db.execute(
+                select(TemplatePermission).where(
+                    TemplatePermission.template_id == _to_uuid(template_id),
+                    TemplatePermission.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+        finally:
+            if close_db:
+                db.close()
 
 
 # Singleton instance

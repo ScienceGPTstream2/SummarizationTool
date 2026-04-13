@@ -1,8 +1,5 @@
 # Logs
 logs
-# But keep supabase-docker logs config
-!supabase-docker/volumes/logs/
-!supabase-docker/volumes/logs/vector.yml
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -77,3 +74,11 @@ backend/uploads/
 /backend/services/document/processors/docling/docling_service_sequential.py
 /backend/services/document/processors/docling/docling_service_multi_thread.py
 /backend/services/document/processors/docling/.vram_guard_state.json
+
+# Python test/coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local docker-compose overrides (never commit)
+docker-compose.override.yml

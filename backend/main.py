@@ -96,6 +96,7 @@ from api import (
     groups,
     templates,
 )
+from api.auth.proxy import router as auth_proxy_router
 
 
 @asynccontextmanager
@@ -152,6 +153,8 @@ def create_app() -> FastAPI:
         return response
 
     # Include API routers
+    # Auth proxy must be first: /api/auth/* must match before generic /auth/* routes.
+    app.include_router(auth_proxy_router)
     app.include_router(auth.router)
     app.include_router(files.router)
     app.include_router(documents.router)
@@ -173,9 +176,8 @@ app = create_app()
 if __name__ == "__main__":
     # uvicorn main:app --reload --port 8001 --host 0.0.0.0
     uvicorn.run(
-        app,
+        "main:app",
         host="0.0.0.0",
         port=8001,
         reload=True,
-        limit_max_request_size=25 * 1024 * 1024,  # 25MB limit
     )

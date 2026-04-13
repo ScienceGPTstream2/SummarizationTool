@@ -5,17 +5,43 @@ Provides business logic for managing template folders.
 Folders are hierarchical and scope-aware (user / group / global).
 """
 
+import uuid as _uuid_module
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 
-from services.database.supabase_db_service import get_db_service
+from sqlalchemy import select, delete
+from models import TemplateFolder, PromptTemplate
+from models.base import get_db_session, db_session_scope
 from services.groups.group_service import get_group_service
+
+
+def _to_uuid(value):
+    if value is None:
+        return None
+    if isinstance(value, _uuid_module.UUID):
+        return value
+    try:
+        return _uuid_module.UUID(str(value))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _row_to_dict(obj) -> Dict[str, Any]:
+    result = {}
+    for col in obj.__table__.columns:
+        val = getattr(obj, col.key)
+        if isinstance(val, _uuid_module.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        result[col.key] = val
+    return result
 
 
 class FolderService:
     """Service for managing template folders."""
 
     def __init__(self):
-        self.db = get_db_service()
         self.group_service = get_group_service()
 
     # ------------------------------------------------------------------
@@ -37,7 +63,7 @@ class FolderService:
             return True
         if scope == "group" and owner_group_id:
             try:
-                role = self.group_service.get_user_role(owner_group_id, user_id)
+                role = self.group_service._get_role(owner_group_id, user_id)
                 return role in ("admin", "owner")
             except Exception:
                 return False
@@ -48,16 +74,16 @@ class FolderService:
 
     def _get_folder_owner(self, folder_id: str) -> Dict[str, Any]:
         """Fetch a folder row to inspect ownership."""
-        result = (
-            self.db.client.table("template_folders")
-            .select("*")
-            .eq("id", folder_id)
-            .single()
-            .execute()
-        )
-        if not result.data:
-            raise ValueError(f"Folder {folder_id} not found")
-        return result.data
+        db = get_db_session()
+        try:
+            folder = db.execute(
+                select(TemplateFolder).where(TemplateFolder.id == _to_uuid(folder_id))
+            ).scalar_one_or_none()
+            if folder is None:
+                raise ValueError(f"Folder {folder_id} not found")
+            return _row_to_dict(folder)
+        finally:
+            db.close()
 
     # ------------------------------------------------------------------
     # Public API
@@ -78,22 +104,29 @@ class FolderService:
                            filtered by parent_id.
         For 'global' scope: returns all global folders at the requested level.
         """
-        query = self.db.client.table("template_folders").select("*").eq("scope", scope)
+        db = get_db_session()
+        try:
+            query = select(TemplateFolder).where(TemplateFolder.scope == scope)
 
-        if scope == "user":
-            query = query.eq("owner_user_id", user_id)
-        elif scope == "group" and owner_group_id:
-            query = query.eq("owner_group_id", owner_group_id)
-        # For global, no extra filter needed
+            if scope == "user":
+                query = query.where(TemplateFolder.owner_user_id == user_id)
+            elif scope == "group" and owner_group_id:
+                query = query.where(
+                    TemplateFolder.owner_group_id == _to_uuid(owner_group_id)
+                )
+            # For global, no extra filter needed
 
-        # Filter by parent level
-        if parent_id is None:
-            query = query.is_("parent_id", "null")
-        else:
-            query = query.eq("parent_id", parent_id)
+            # Filter by parent level
+            if parent_id is None:
+                query = query.where(TemplateFolder.parent_id.is_(None))
+            else:
+                query = query.where(TemplateFolder.parent_id == _to_uuid(parent_id))
 
-        result = query.order("name").execute()
-        return result.data or []
+            query = query.order_by(TemplateFolder.name)
+            folders = db.execute(query).scalars().all()
+            return [_row_to_dict(f) for f in folders]
+        finally:
+            db.close()
 
     def create_folder(
         self,
@@ -126,26 +159,29 @@ class FolderService:
             if scope == "group" and parent.get("owner_group_id") != owner_group_id:
                 raise ValueError("Parent folder must belong to the same group")
 
-        data: Dict[str, Any] = {
-            "name": name.strip(),
-            "scope": scope,
-            "created_by": user_id,
-        }
-        if scope == "user":
-            data["owner_user_id"] = user_id
-        elif scope == "group":
-            if not owner_group_id:
-                raise ValueError("owner_group_id is required for group-scope folders")
-            data["owner_group_id"] = owner_group_id
-        # global: neither
+        with db_session_scope() as db:
+            kwargs: Dict[str, Any] = {
+                "name": name.strip(),
+                "scope": scope,
+                "created_by": user_id,
+            }
+            if scope == "user":
+                kwargs["owner_user_id"] = user_id
+            elif scope == "group":
+                if not owner_group_id:
+                    raise ValueError(
+                        "owner_group_id is required for group-scope folders"
+                    )
+                kwargs["owner_group_id"] = _to_uuid(owner_group_id)
+            # global: neither
 
-        if parent_id:
-            data["parent_id"] = parent_id
+            if parent_id:
+                kwargs["parent_id"] = _to_uuid(parent_id)
 
-        result = self.db.client.table("template_folders").insert(data).execute()
-        if not result.data:
-            raise RuntimeError("Failed to create folder")
-        return result.data[0]
+            folder = TemplateFolder(**kwargs)
+            db.add(folder)
+            db.flush()
+            return _row_to_dict(folder)
 
     def rename_folder(
         self,
@@ -168,15 +204,16 @@ class FolderService:
                     "You do not have permission to rename this folder"
                 )
 
-        result = (
-            self.db.client.table("template_folders")
-            .update({"name": new_name.strip()})
-            .eq("id", folder_id)
-            .execute()
-        )
-        if not result.data:
-            raise RuntimeError("Failed to rename folder")
-        return result.data[0]
+        with db_session_scope() as db:
+            f = db.execute(
+                select(TemplateFolder).where(TemplateFolder.id == _to_uuid(folder_id))
+            ).scalar_one_or_none()
+            if f is None:
+                raise RuntimeError("Failed to rename folder")
+            f.name = new_name.strip()
+            f.updated_at = datetime.utcnow()
+            db.flush()
+            return _row_to_dict(f)
 
     def delete_folder(
         self,
@@ -198,34 +235,44 @@ class FolderService:
                     "You do not have permission to delete this folder"
                 )
 
-        # Check if folder still has templates
-        templates_result = (
-            self.db.client.table("prompt_templates")
-            .select("id", count="exact")
-            .eq("folder_id", folder_id)
-            .execute()
-        )
-        if templates_result.count and templates_result.count > 0:
-            raise ValueError(
-                "Cannot delete a folder that still contains templates. Move or delete them first."
+        db = get_db_session()
+        try:
+            # Check if folder still has templates
+            template_count = (
+                db.execute(
+                    select(PromptTemplate).where(
+                        PromptTemplate.folder_id == _to_uuid(folder_id)
+                    )
+                )
+                .scalars()
+                .all()
             )
+            if template_count:
+                raise ValueError(
+                    "Cannot delete a folder that still contains templates. Move or delete them first."
+                )
 
-        # Check if folder still has subfolders
-        subfolders_result = (
-            self.db.client.table("template_folders")
-            .select("id", count="exact")
-            .eq("parent_id", folder_id)
-            .execute()
-        )
-        if subfolders_result.count and subfolders_result.count > 0:
-            raise ValueError("Cannot delete a folder that still contains subfolders.")
+            # Check if folder still has subfolders
+            subfolders = (
+                db.execute(
+                    select(TemplateFolder).where(
+                        TemplateFolder.parent_id == _to_uuid(folder_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if subfolders:
+                raise ValueError(
+                    "Cannot delete a folder that still contains subfolders."
+                )
+        finally:
+            db.close()
 
-        result = (
-            self.db.client.table("template_folders")
-            .delete()
-            .eq("id", folder_id)
-            .execute()
-        )
+        with db_session_scope() as db:
+            db.execute(
+                delete(TemplateFolder).where(TemplateFolder.id == _to_uuid(folder_id))
+            )
         return {"deleted": folder_id}
 
 

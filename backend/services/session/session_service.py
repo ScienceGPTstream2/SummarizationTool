@@ -1,7 +1,8 @@
 """
 Session service for managing user extraction sessions
 
-This service now uses Supabase PostgreSQL for storage instead of JSON files.
+This service uses SQLAlchemy with Azure Postgres Flexible Server for storage.
+Authentication is handled by Better Auth via the core.auth module.
 """
 
 import os
@@ -19,7 +20,7 @@ from schemas.sessions import (
     UpdateSessionRequest,
     SessionSummary,
 )
-from services.database import get_db_service, SupabaseDBService
+from services.database import get_db_service, SQLAlchemyDBService
 from services.telemetry.cost_tracker import cost_tracker, infer_provider_from_model_id
 
 
@@ -27,7 +28,7 @@ class SessionService:
     """Service for managing user sessions with database storage"""
 
     def __init__(self):
-        self.db: SupabaseDBService = get_db_service()
+        self.db: SQLAlchemyDBService = get_db_service()
         # Cache for document lookups to avoid repeated queries
         self._doc_cache: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -628,6 +629,95 @@ class SessionService:
             self._doc_cache.pop(session_id, None)
         else:
             self._doc_cache.clear()
+
+    # ==========================================
+    # Session Sharing
+    # ==========================================
+
+    def share_session(
+        self, user_id: str, session_id: str, group_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Share a session with a group. Only the session owner can share."""
+        # Verify the user is a member of the target group
+        user_groups = self.db.get_user_group_ids(user_id)
+        if group_id not in user_groups:
+            return None
+        return self.db.share_session(session_id, user_id, group_id)
+
+    def unshare_session(
+        self, user_id: str, session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Remove sharing from a session."""
+        return self.db.unshare_session(session_id, user_id)
+
+    def list_shared_sessions(self, user_id: str) -> List[SessionSummary]:
+        """List sessions shared with groups the user belongs to."""
+        group_ids = self.db.get_user_group_ids(user_id)
+        if not group_ids:
+            return []
+
+        db_sessions = self.db.list_shared_sessions(user_id, group_ids)
+
+        # Resolve group names and sharer names for display
+        group_name_cache: Dict[str, str] = {}
+        sharer_name_cache: Dict[str, str] = {}
+
+        summaries = []
+        for db_session in db_sessions:
+            # Resolve group name
+            gid = db_session.get("shared_with_group_id")
+            group_name = None
+            if gid:
+                if gid not in group_name_cache:
+                    group_name_cache[gid] = (
+                        self.db.get_group_name(gid) or "Unknown Group"
+                    )
+                group_name = group_name_cache[gid]
+
+            # Resolve sharer display name
+            sid = db_session.get("shared_by")
+            sharer_name = None
+            if sid:
+                if sid not in sharer_name_cache:
+                    sharer_name_cache[sid] = (
+                        self.db.get_user_display_name(sid) or "Unknown User"
+                    )
+                sharer_name = sharer_name_cache[sid]
+
+            summary = SessionSummary(
+                session_id=db_session["id"],
+                name=db_session["name"],
+                status=db_session["status"],
+                last_step=db_session.get("last_step", "upload"),
+                study_type=db_session.get("study_type"),
+                created_at=self._parse_timestamp(db_session["created_at"]),
+                updated_at=self._parse_timestamp(db_session["updated_at"]),
+                document_count=db_session.get("document_count", 0),
+                document_names=db_session.get("document_names", []),
+                extraction_count=db_session.get("extraction_count", 0),
+                evaluation_count=0,
+                # Extra fields for shared session display
+                shared_by_name=sharer_name,
+                shared_group_name=group_name,
+                shared_at=(
+                    self._parse_timestamp(db_session["shared_at"])
+                    if db_session.get("shared_at")
+                    else None
+                ),
+                owner_user_id=db_session.get("user_id"),
+            )
+            summaries.append(summary)
+
+        return summaries
+
+    def get_session_for_shared_view(
+        self, requesting_user_id: str, session_id: str
+    ) -> Optional[Session]:
+        """Get a shared session for viewing. Verifies the requesting user has access via group membership."""
+        db_session = self.db.get_session_for_shared_view(requesting_user_id, session_id)
+        if db_session is None:
+            return None
+        return self._db_to_session(db_session)
 
     def _db_to_session(self, db_session: Dict[str, Any]) -> Session:
         """Convert database session to Session model"""

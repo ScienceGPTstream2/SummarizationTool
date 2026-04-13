@@ -1,51 +1,241 @@
-name: Deploy to A100 VM
+name: Build & Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
+# ---------------------------------------------------------------------------
+# GitHub Actions Secrets required:
+#
+#   ACR_NAME                       Azure Container Registry name (summarizationtoolacr)
+#   ACR_USERNAME                   ACR admin username
+#   ACR_PASSWORD                   ACR admin password
+#   AZURE_RESOURCE_GROUP           Resource group name
+#   CONTAINER_APP_NAME             Container App name (summarization-backend)
+#   AZURE_SUBSCRIPTION_ID          Azure subscription ID
+#
+# Optional (enables auto-deploy — ask admin to create):
+#   AZURE_CREDENTIALS              az ad sp create-for-rbac --sdk-auth output
+#                                  OR use OIDC with:
+#   AZURE_CLIENT_ID                Managed identity client ID
+#   AZURE_TENANT_ID                Tenant ID
+#
+# Secrets like DATABASE_URL, GITHUB_CLIENT_ID, etc. are managed via
+# Azure Key Vault — no need to store them in GitHub.
+# ---------------------------------------------------------------------------
+
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
-  deploy:
-    runs-on: self-hosted
-
+  # ── Build & push backend image ────────────────────────────────────────────
+  build-backend:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'backend/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
     steps:
-      - name: Pull latest repo
-        run: |
-          cd ~/SummarizationTool
-          git fetch origin main
-          git reset --hard origin/main
+      - uses: actions/checkout@v4
 
-      - name: Restart Supabase stack
-        run: |
-          cd ~/SummarizationTool/supabase-docker
-          docker compose down
-          docker compose up -d
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_NAME }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Install backend deps
+      - name: Build & push backend
+        id: mark
         run: |
-          cd ~/SummarizationTool/backend
-          source ./venv/bin/activate
-          pip install -r requirements.txt
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend"
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./backend
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
 
-      - name: Install frontend deps
-        run: |
-          cd ~/SummarizationTool
-          npm ci
+  # ── Build & push auth image ───────────────────────────────────────────────
+  build-auth:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'auth-service/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Build frontend
-        run: |
-          cd ~/SummarizationTool
-          npm run build
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_NAME }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Restart services
+      - name: Build & push auth
+        id: mark
         run: |
-          sudo systemctl restart summarization-backend
-          sudo systemctl restart summarization-frontend
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth"
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./auth-service
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
 
-      - name: Health check
+  # ── Build & push frontend image ───────────────────────────────────────────
+  build-frontend:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'frontend/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_NAME }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build & push frontend
+        id: mark
         run: |
-          sleep 5
-          sudo systemctl is-active summarization-backend
-          sudo systemctl is-active summarization-frontend
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend"
+          docker build \
+            -f frontend/Dockerfile \
+            -t "${IMAGE}:${{ github.sha }}" \
+            -t "${IMAGE}:latest" \
+            ./frontend
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
+
+  # ── Deploy Container App ─────────────────────────────────────────────────
+  deploy-backend:
+    needs: [build-backend, build-auth]
+    if: always() && (needs.build-backend.result == 'success' || needs.build-auth.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # Try AZURE_CREDENTIALS (service principal) first
+      - name: Azure Login (Service Principal)
+        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        continue-on-error: true
+        id: sp_login
+
+      # Fallback: Try OIDC (managed identity)
+      - name: Azure Login (OIDC)
+        if: steps.sp_login.outcome != 'success'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        continue-on-error: true
+        id: oidc_login
+
+      # Deploy if either login succeeded
+      - name: Update backend image
+        if: |
+          (steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success') &&
+          needs.build-backend.outputs.built == 'true'
+        run: |
+          az containerapp update \
+            --name "${{ secrets.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --container-name backend \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}"
+
+      - name: Update auth image
+        if: |
+          (steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success') &&
+          needs.build-auth.outputs.built == 'true'
+        run: |
+          az containerapp update \
+            --name "${{ secrets.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --container-name auth-sidecar \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}"
+
+      # If no Azure login available, print manual deploy instructions
+      - name: Manual deploy instructions
+        if: steps.sp_login.outcome != 'success' && steps.oidc_login.outcome != 'success'
+        run: |
+          echo "## ⚠️ Auto-deploy skipped (no Azure credentials)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Images were built and pushed to ACR. Deploy manually from **Cloud Shell**:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name backend --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name auth-sidecar --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔓 To enable auto-deploy, ask an admin to run:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo '# Scoped to Container App ONLY — cannot touch VNet, DB, or other resources' >> $GITHUB_STEP_SUMMARY
+          echo 'az role assignment create --role "Contributor" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.App/containerApps/summarization-backend"' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '# Scoped to ACR ONLY — can push images but nothing else' >> $GITHUB_STEP_SUMMARY
+          echo 'az role assignment create --role "AcrPush" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.ContainerRegistry/registries/summarizationtoolacr"' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Uses passwordless Workload Identity Federation (OIDC) — no client secrets." >> $GITHUB_STEP_SUMMARY
+          echo "Then add these GitHub secrets: \`AZURE_CLIENT_ID\` = \`e10a9305-348e-4f45-b85f-5595b8469ff7\`, \`AZURE_TENANT_ID\` = \`8c1a4d93-d828-4d0e-9303-fd3bd611c822\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Deploy Frontend (Azure App Service — Docker) ───────────────────────────
+  deploy-frontend:
+    needs: [build-frontend]
+    if: needs.build-frontend.outputs.built == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (Service Principal)
+        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        continue-on-error: true
+        id: sp_login
+
+      - name: Azure Login (OIDC)
+        if: steps.sp_login.outcome != 'success'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        continue-on-error: true
+        id: oidc_login
+
+      - name: Update App Service container image
+        if: steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success'
+        run: |
+          az webapp config container set \
+            --name "${{ secrets.FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --docker-custom-image-name \
+              "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ github.sha }}" \
+            --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
+            --docker-registry-server-user "${{ secrets.ACR_USERNAME }}" \
+            --docker-registry-server-password "${{ secrets.ACR_PASSWORD }}"
+
+      - name: Sync App Service settings
+        if: steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success'
+        run: |
+          az webapp config appsettings set \
+            --name "${{ secrets.FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --settings \
+              BACKEND_URL="https://${{ secrets.CONTAINER_APP_HOSTNAME }}" \
+              WEBSITES_PORT=80
+
+      - name: Manual deploy instructions
+        if: steps.sp_login.outcome != 'success' && steps.oidc_login.outcome != 'success'
+        run: |
+          echo "## ⚠️ Frontend auto-deploy skipped" >> $GITHUB_STEP_SUMMARY
+          echo "Image pushed to ACR. Deploy manually or add AZURE_CREDENTIALS / OIDC secrets." >> $GITHUB_STEP_SUMMARY

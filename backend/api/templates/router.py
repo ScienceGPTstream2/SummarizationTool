@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Any
 
-from core.dependencies import get_current_user
+from core.auth import get_current_user
 from services.templates.template_service import get_template_service
 from services.templates.folder_service import get_folder_service
 
