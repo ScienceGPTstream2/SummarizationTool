@@ -66,6 +66,18 @@ services:
       azurite:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      BACKEND_URL: http://backend:8001
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   pgdata:
   azuritedata:
