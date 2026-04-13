@@ -18,7 +18,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     /* Path mapping */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
     }
@@ -28,8 +27,6 @@
     "vite.config.ts",
     "node_modules",
     "dist",
-    "backend",
-    "supabase-docker",
     "templates/App.tsx",
     "components/ui/form.tsx"
   ],
