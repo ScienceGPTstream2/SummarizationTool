@@ -81,7 +81,7 @@ properties:
         env:
           - name: DATABASE_URL
             secretRef: database-url
-          # Must be the public SWA URL so GitHub OAuth callbacks and cookie
+          # Must be the public App Service URL so GitHub OAuth callbacks and cookie
           # domains resolve correctly (NOT the internal localhost:3001 address).
           - name: BETTER_AUTH_URL
             value: https://${FRONTEND_URL}
