@@ -13,6 +13,7 @@ on:
 #   ACR_PASSWORD                   ACR admin password
 #   AZURE_RESOURCE_GROUP           Resource group name
 #   CONTAINER_APP_NAME             Container App name (summarization-backend)
+#   AZURE_SUBSCRIPTION_ID          Azure subscription ID
 #
 # Optional (enables auto-deploy — ask admin to create):
 #   AZURE_CREDENTIALS              az ad sp create-for-rbac --sdk-auth output
@@ -133,7 +134,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: 9c673b89-f870-4b2e-ac72-fb91ac4fdd12
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         continue-on-error: true
         id: oidc_login
 
@@ -146,7 +147,7 @@ jobs:
           az containerapp update \
             --name "${{ secrets.CONTAINER_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --subscription "9c673b89-f870-4b2e-ac72-fb91ac4fdd12" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --container-name backend \
             --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}"
 
@@ -158,7 +159,7 @@ jobs:
           az containerapp update \
             --name "${{ secrets.CONTAINER_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --subscription "9c673b89-f870-4b2e-ac72-fb91ac4fdd12" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --container-name auth-sidecar \
             --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}"
 
@@ -171,18 +172,18 @@ jobs:
           echo "Images were built and pushed to ACR. Deploy manually from **Cloud Shell**:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription 9c673b89-f870-4b2e-ac72-fb91ac4fdd12 --container-name backend --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name backend --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription 9c673b89-f870-4b2e-ac72-fb91ac4fdd12 --container-name auth-sidecar --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "az containerapp update --name ${{ secrets.CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name auth-sidecar --image ${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔓 To enable auto-deploy, ask an admin to run:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo '# Scoped to Container App ONLY — cannot touch VNet, DB, or other resources' >> $GITHUB_STEP_SUMMARY
-          echo 'az role assignment create --role "Contributor" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/9c673b89-f870-4b2e-ac72-fb91ac4fdd12/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.App/containerApps/summarization-backend"' >> $GITHUB_STEP_SUMMARY
+          echo 'az role assignment create --role "Contributor" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.App/containerApps/summarization-backend"' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '# Scoped to ACR ONLY — can push images but nothing else' >> $GITHUB_STEP_SUMMARY
-          echo 'az role assignment create --role "AcrPush" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/9c673b89-f870-4b2e-ac72-fb91ac4fdd12/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.ContainerRegistry/registries/summarizationtoolacr"' >> $GITHUB_STEP_SUMMARY
+          echo 'az role assignment create --role "AcrPush" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.ContainerRegistry/registries/summarizationtoolacr"' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "Uses passwordless Workload Identity Federation (OIDC) — no client secrets." >> $GITHUB_STEP_SUMMARY
           echo "Then add these GitHub secrets: \`AZURE_CLIENT_ID\` = \`e10a9305-348e-4f45-b85f-5595b8469ff7\`, \`AZURE_TENANT_ID\` = \`8c1a4d93-d828-4d0e-9303-fd3bd611c822\`" >> $GITHUB_STEP_SUMMARY
@@ -207,7 +208,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: 9c673b89-f870-4b2e-ac72-fb91ac4fdd12
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         continue-on-error: true
         id: oidc_login
 
