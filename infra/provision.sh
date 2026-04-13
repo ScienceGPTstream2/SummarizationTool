@@ -27,7 +27,7 @@ set -euo pipefail
 : "${ACR_USERNAME:?Need ACR_USERNAME}"
 : "${ACR_PASSWORD:?Need ACR_PASSWORD}"
 
-: "${STATIC_WEB_APP_URL:?Need STATIC_WEB_APP_URL}"   # e.g. lemon-river-abc.azurestaticapps.net
+: "${FRONTEND_URL:?Need FRONTEND_URL}"   # e.g. summarization-frontend.azurewebsites.net
 
 : "${DATABASE_URL:?Need DATABASE_URL}"
 : "${GITHUB_CLIENT_ID:?Need GITHUB_CLIENT_ID}"
@@ -48,4 +48,4 @@ echo "$RESOLVED_YAML" | az containerapp create \
 
 echo "✓ Done. Container App is live."
 echo "  Remember to register the GitHub OAuth callback URL in your GitHub App:"
-echo "  https://${STATIC_WEB_APP_URL}/api/auth/callback/github"
+echo "  https://${FRONTEND_URL}/api/auth/callback/github"
