@@ -1625,9 +1625,7 @@ export default function App() {
     restoringSessionRef.current = true;
     try {
       setLoading(true);
-      const response = await authenticatedFetch(
-        `/api/sessions/${sessionId}`
-      );
+      const response = await authenticatedFetch(`/api/sessions/${sessionId}`);
       if (!response.ok) throw new Error("Failed to fetch session");
       const sessionData = await response.json();
       console.log("🚀 Restoring session:", sessionData.session_id);
