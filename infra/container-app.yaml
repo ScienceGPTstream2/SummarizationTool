@@ -49,7 +49,7 @@ properties:
           - name: AUTH_SIDECAR_URL
             value: http://localhost:3001
           - name: CORS_ALLOWED_ORIGINS
-            value: https://${STATIC_WEB_APP_URL}
+            value: https://${FRONTEND_URL}
           # 1 worker per replica — see backend/Dockerfile comment for rationale.
           # Scale via minReplicas/maxReplicas below, not by increasing this.
           - name: WORKERS
@@ -84,11 +84,11 @@ properties:
           # Must be the public SWA URL so GitHub OAuth callbacks and cookie
           # domains resolve correctly (NOT the internal localhost:3001 address).
           - name: BETTER_AUTH_URL
-            value: https://${STATIC_WEB_APP_URL}
+            value: https://${FRONTEND_URL}
           - name: BETTER_AUTH_SECRET
             secretRef: better-auth-secret
           - name: FRONTEND_URL
-            value: https://${STATIC_WEB_APP_URL}
+            value: https://${FRONTEND_URL}
           - name: GITHUB_CLIENT_ID
             secretRef: github-client-id
           - name: GITHUB_CLIENT_SECRET
