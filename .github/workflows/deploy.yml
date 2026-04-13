@@ -178,10 +178,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔓 To enable auto-deploy, ask an admin to run:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo 'az role assignment create --role "Contributor" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/9c673b89-f870-4b2e-ac72-fb91ac4fdd12/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg"' >> $GITHUB_STEP_SUMMARY
+          echo '# Scoped to Container App ONLY — cannot touch VNet, DB, or other resources' >> $GITHUB_STEP_SUMMARY
+          echo 'az role assignment create --role "Contributor" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/9c673b89-f870-4b2e-ac72-fb91ac4fdd12/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.App/containerApps/summarization-backend"' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo '# Scoped to ACR ONLY — can push images but nothing else' >> $GITHUB_STEP_SUMMARY
           echo 'az role assignment create --role "AcrPush" --assignee-object-id "455f376c-da32-4098-aa0d-cc2961b49b2d" --assignee-principal-type ServicePrincipal --scope "/subscriptions/9c673b89-f870-4b2e-ac72-fb91ac4fdd12/resourceGroups/HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg/providers/Microsoft.ContainerRegistry/registries/summarizationtoolacr"' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Uses passwordless Workload Identity Federation (OIDC) — no client secrets." >> $GITHUB_STEP_SUMMARY
           echo "Then add these GitHub secrets: \`AZURE_CLIENT_ID\` = \`e10a9305-348e-4f45-b85f-5595b8469ff7\`, \`AZURE_TENANT_ID\` = \`8c1a4d93-d828-4d0e-9303-fd3bd611c822\`" >> $GITHUB_STEP_SUMMARY
 
   # ── Deploy Frontend (Azure App Service — Docker) ───────────────────────────
