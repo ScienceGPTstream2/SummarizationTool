@@ -17,8 +17,8 @@ FROM nginx:1.27-alpine
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY frontend/nginx.conf.template /etc/nginx/nginx.conf.template
-COPY frontend/docker-entrypoint.sh /docker-entrypoint.sh
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 EXPOSE 80
 

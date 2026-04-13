@@ -82,10 +82,6 @@ jobs:
   build-frontend:
     runs-on: ubuntu-latest
     if: |
-      contains(github.event.head_commit.modified, 'components/') ||
-      contains(github.event.head_commit.modified, 'contexts/') ||
-      contains(github.event.head_commit.modified, 'lib/') ||
-      contains(github.event.head_commit.modified, 'styles/') ||
       contains(github.event.head_commit.modified, 'frontend/') ||
       github.event_name == 'workflow_dispatch'
     outputs:
@@ -108,7 +104,7 @@ jobs:
             -f frontend/Dockerfile \
             -t "${IMAGE}:${{ github.sha }}" \
             -t "${IMAGE}:latest" \
-            .
+            ./frontend
           docker push "${IMAGE}" --all-tags
           echo "built=true" >> "$GITHUB_OUTPUT"
 

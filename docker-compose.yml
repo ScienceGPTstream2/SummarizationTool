@@ -68,8 +68,8 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     environment:
       BACKEND_URL: http://backend:8001
     ports:
