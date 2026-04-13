@@ -20,8 +20,9 @@ on:
 #   GITHUB_CLIENT_SECRET           GitHub OAuth App client secret
 #   BETTER_AUTH_SECRET             Better Auth signing secret
 #   AZURE_STORAGE_CONNECTION_STRING  Blob storage connection string
-#   STATIC_WEB_APP_URL             SWA hostname (no https://)
-#   SWA_DEPLOY_TOKEN               Azure Static Web Apps deployment token
+#   FRONTEND_URL                   App Service hostname (no https://), e.g. summarization-frontend.azurewebsites.net
+#   FRONTEND_APP_NAME              Azure App Service resource name
+#   CONTAINER_APP_HOSTNAME         Container App external hostname (no https://), used as nginx BACKEND_URL
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -77,6 +78,40 @@ jobs:
           docker push "${IMAGE}" --all-tags
           echo "built=true" >> "$GITHUB_OUTPUT"
 
+  # ── Build & push frontend image ───────────────────────────────────────────
+  build-frontend:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'components/') ||
+      contains(github.event.head_commit.modified, 'contexts/') ||
+      contains(github.event.head_commit.modified, 'lib/') ||
+      contains(github.event.head_commit.modified, 'styles/') ||
+      contains(github.event.head_commit.modified, 'frontend/') ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Build & push frontend
+        id: mark
+        run: |
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend"
+          docker build \
+            -f frontend/Dockerfile \
+            -t "${IMAGE}:${{ github.sha }}" \
+            -t "${IMAGE}:latest" \
+            .
+          docker push "${IMAGE}" --all-tags
+          echo "built=true" >> "$GITHUB_OUTPUT"
+
   # ── Deploy Container App (images + secrets) ───────────────────────────────
   deploy-backend:
     needs: [build-backend, build-auth]
@@ -122,33 +157,34 @@ jobs:
             --container-name auth-sidecar \
             --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ github.sha }}"
 
-  # ── Deploy Frontend (Azure Static Web Apps) ───────────────────────────────
+  # ── Deploy Frontend (Azure App Service — Docker) ───────────────────────────
   deploy-frontend:
+    needs: [build-frontend]
+    if: needs.build-frontend.outputs.built == 'true'
     runs-on: ubuntu-latest
-    if: |
-      contains(github.event.head_commit.modified, 'components/') ||
-      contains(github.event.head_commit.modified, 'contexts/') ||
-      contains(github.event.head_commit.modified, 'lib/') ||
-      contains(github.event.head_commit.modified, 'styles/') ||
-      github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: azure/login@v2
         with:
-          node-version: 20
-          cache: npm
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - run: npm ci
-      - run: npm run build
-        env:
-          # Auth requests go to the same SWA origin in production (proxied by FastAPI).
-          VITE_AUTH_URL: ""
-          VITE_API_BASE_URL: ""
+      # Point the App Service at the newly pushed image
+      - name: Update App Service container image
+        run: |
+          az webapp config container set \
+            --name "${{ secrets.FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --docker-custom-image-name \
+              "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ github.sha }}" \
+            --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
+            --docker-registry-server-user "${{ secrets.ACR_USERNAME }}" \
+            --docker-registry-server-password "${{ secrets.ACR_PASSWORD }}"
 
-      - uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOY_TOKEN }}
-          action: upload
-          app_location: /
-          output_location: dist
+      # Ensure BACKEND_URL and WEBSITES_PORT are set (idempotent)
+      - name: Sync App Service settings
+        run: |
+          az webapp config appsettings set \
+            --name "${{ secrets.FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --settings \
+              BACKEND_URL="https://${{ secrets.CONTAINER_APP_HOSTNAME }}" \
+              WEBSITES_PORT=80
