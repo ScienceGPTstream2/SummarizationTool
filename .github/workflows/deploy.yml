@@ -15,9 +15,7 @@ on:
 #   CONTAINER_APP_NAME             Container App name (summarization-backend)
 #   AZURE_SUBSCRIPTION_ID          Azure subscription ID
 #
-# Optional (enables auto-deploy — ask admin to create):
-#   AZURE_CREDENTIALS              az ad sp create-for-rbac --sdk-auth output
-#                                  OR use OIDC with:
+# Optional (enables auto-deploy — ask admin for OIDC role assignments):
 #   AZURE_CLIENT_ID                Managed identity client ID
 #   AZURE_TENANT_ID                Tenant ID
 #
@@ -118,18 +116,8 @@ jobs:
     if: always() && (needs.build-backend.result == 'success' || needs.build-auth.result == 'success')
     runs-on: ubuntu-latest
     steps:
-      # Try AZURE_CREDENTIALS (service principal) first
-      - name: Azure Login (Service Principal)
-        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-        continue-on-error: true
-        id: sp_login
-
-      # Fallback: Try OIDC (managed identity)
+      # Try OIDC (managed identity) — passwordless, preferred
       - name: Azure Login (OIDC)
-        if: steps.sp_login.outcome != 'success'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -138,10 +126,10 @@ jobs:
         continue-on-error: true
         id: oidc_login
 
-      # Deploy if either login succeeded
+      # Deploy if login succeeded
       - name: Update backend image
         if: |
-          (steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success') &&
+          steps.oidc_login.outcome == 'success' &&
           needs.build-backend.outputs.built == 'true'
         run: |
           az containerapp update \
@@ -153,7 +141,7 @@ jobs:
 
       - name: Update auth image
         if: |
-          (steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success') &&
+          steps.oidc_login.outcome == 'success' &&
           needs.build-auth.outputs.built == 'true'
         run: |
           az containerapp update \
@@ -165,7 +153,7 @@ jobs:
 
       # If no Azure login available, print manual deploy instructions
       - name: Manual deploy instructions
-        if: steps.sp_login.outcome != 'success' && steps.oidc_login.outcome != 'success'
+        if: steps.oidc_login.outcome != 'success'
         run: |
           echo "## ⚠️ Auto-deploy skipped (no Azure credentials)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -194,16 +182,7 @@ jobs:
     if: needs.build-frontend.outputs.built == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Azure Login (Service Principal)
-        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-        continue-on-error: true
-        id: sp_login
-
       - name: Azure Login (OIDC)
-        if: steps.sp_login.outcome != 'success'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -213,7 +192,7 @@ jobs:
         id: oidc_login
 
       - name: Update App Service container image
-        if: steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success'
+        if: steps.oidc_login.outcome == 'success'
         run: |
           az webapp config container set \
             --name "${{ secrets.FRONTEND_APP_NAME }}" \
@@ -225,7 +204,7 @@ jobs:
             --docker-registry-server-password "${{ secrets.ACR_PASSWORD }}"
 
       - name: Sync App Service settings
-        if: steps.sp_login.outcome == 'success' || steps.oidc_login.outcome == 'success'
+        if: steps.oidc_login.outcome == 'success'
         run: |
           az webapp config appsettings set \
             --name "${{ secrets.FRONTEND_APP_NAME }}" \
@@ -235,7 +214,7 @@ jobs:
               WEBSITES_PORT=80
 
       - name: Manual deploy instructions
-        if: steps.sp_login.outcome != 'success' && steps.oidc_login.outcome != 'success'
+        if: steps.oidc_login.outcome != 'success'
         run: |
           echo "## ⚠️ Frontend auto-deploy skipped" >> $GITHUB_STEP_SUMMARY
           echo "Image pushed to ACR. Deploy manually or add AZURE_CREDENTIALS / OIDC secrets." >> $GITHUB_STEP_SUMMARY
