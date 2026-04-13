@@ -90,10 +90,13 @@ async def process_uploaded_file(
 
             # Read cached metadata and content via service (blob-safe)
             cached_metadata = (
-                await file_service.get_processed_metadata(file_hash, processor_name) or {}
+                await file_service.get_processed_metadata(file_hash, processor_name)
+                or {}
             )
             markdown_content_length = 0
-            _cached_md = await file_service.get_processed_content(file_hash, processor_name)
+            _cached_md = await file_service.get_processed_content(
+                file_hash, processor_name
+            )
             if _cached_md:
                 markdown_content_length = len(_cached_md)
 
@@ -225,7 +228,9 @@ async def process_uploaded_file(
                     try:
                         _upload_meta = await file_service.get_file_metadata(file_hash)
                         if _upload_meta:
-                            _upload_meta_filename = _upload_meta.get("original_filename")
+                            _upload_meta_filename = _upload_meta.get(
+                                "original_filename"
+                            )
                     except Exception:
                         pass
 
@@ -374,7 +379,8 @@ async def process_uploaded_file(
         # access later can return the real value (blob-safe via service).
         try:
             _meta_data = (
-                await file_service.get_processed_metadata(file_hash, processor_name) or {}
+                await file_service.get_processed_metadata(file_hash, processor_name)
+                or {}
             )
             _needs_write = False
             if parse_cost:
@@ -491,7 +497,9 @@ async def get_document_content(document_id: str, processor_used: str = None):
         for proc in processors_to_check:
             if proc is None:
                 continue
-            markdown_content = await file_service.get_processed_content(document_id, proc)
+            markdown_content = await file_service.get_processed_content(
+                document_id, proc
+            )
             if markdown_content is not None:
                 return JSONResponse(
                     status_code=200,
@@ -928,7 +936,12 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
     try:
         # Validate filename to prevent path traversal
-        if not figure_filename or "/" in figure_filename or "\\" in figure_filename or ".." in figure_filename:
+        if (
+            not figure_filename
+            or "/" in figure_filename
+            or "\\" in figure_filename
+            or ".." in figure_filename
+        ):
             raise HTTPException(status_code=403, detail="Access denied")
 
         print(f"[FIGURE] Attempting to serve figure: {document_id}/{figure_filename}")
@@ -1149,7 +1162,9 @@ async def generate_figure_summary(
             import json as _json_sum
 
             for proc in ("azure_doc_intelligence", "docling"):
-                _proc_meta = await file_service.get_processed_metadata(document_id, proc)
+                _proc_meta = await file_service.get_processed_metadata(
+                    document_id, proc
+                )
                 if _proc_meta and "figures" in _proc_meta:
                     for fig in _proc_meta["figures"]:
                         if fig.get("id") == figure_id:
@@ -1244,7 +1259,12 @@ async def get_table_html(document_id: str, table_filename: str):
 
     try:
         # Validate filename to prevent path traversal
-        if not table_filename or "/" in table_filename or "\\" in table_filename or ".." in table_filename:
+        if (
+            not table_filename
+            or "/" in table_filename
+            or "\\" in table_filename
+            or ".." in table_filename
+        ):
             raise HTTPException(status_code=403, detail="Access denied")
 
         print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")

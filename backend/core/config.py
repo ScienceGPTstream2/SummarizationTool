@@ -144,6 +144,5 @@ def load_config():
                         f"✅ Google Cloud credentials loaded from: {service_account_path.name}"
                     )
 
-
     except Exception:
         pass

@@ -224,9 +224,7 @@ class OrganizedFileService:
     async def get_file_content(self, file_hash: str) -> Optional[bytes]:
         """Get the original file content by hash."""
         for ext in (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"):
-            data = await self._blob.download_bytes(
-                f"global/{file_hash}/original{ext}"
-            )
+            data = await self._blob.download_bytes(f"global/{file_hash}/original{ext}")
             if data:
                 return data
         return None
@@ -251,15 +249,10 @@ class OrganizedFileService:
         ext = metadata.get("extension", ".pdf")
 
         tmp_file = (
-            Path(tempfile.gettempdir())
-            / "summarization"
-            / file_hash
-            / f"original{ext}"
+            Path(tempfile.gettempdir()) / "summarization" / file_hash / f"original{ext}"
         )
         if not tmp_file.exists():
-            data = await self._blob.download_bytes(
-                f"global/{file_hash}/original{ext}"
-            )
+            data = await self._blob.download_bytes(f"global/{file_hash}/original{ext}")
             if not data:
                 return None
             tmp_file.parent.mkdir(parents=True, exist_ok=True)

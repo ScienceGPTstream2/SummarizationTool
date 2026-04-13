@@ -19,8 +19,18 @@ _AUTH_SIDECAR_URL = os.getenv("AUTH_SIDECAR_URL", "http://localhost:3001")
 
 # Headers that must not be forwarded (hop-by-hop or would break the proxy).
 _HOP_BY_HOP = frozenset(
-    ["host", "content-length", "transfer-encoding", "connection", "keep-alive",
-     "proxy-authenticate", "proxy-authorization", "te", "trailers", "upgrade"]
+    [
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
+    ]
 )
 
 
@@ -34,9 +44,7 @@ async def proxy_auth(path: str, request: Request) -> Response:
 
     # Pass all headers except hop-by-hop ones; add forwarding hints.
     forward_headers = {
-        k: v
-        for k, v in request.headers.items()
-        if k.lower() not in _HOP_BY_HOP
+        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
     }
     forward_headers["x-forwarded-host"] = request.headers.get("host", "")
     forward_headers["x-forwarded-proto"] = request.url.scheme
@@ -55,9 +63,7 @@ async def proxy_auth(path: str, request: Request) -> Response:
 
     # Strip hop-by-hop from response but keep everything else (incl. Set-Cookie).
     resp_headers = {
-        k: v
-        for k, v in upstream.headers.multi_items()
-        if k.lower() not in _HOP_BY_HOP
+        k: v for k, v in upstream.headers.multi_items() if k.lower() not in _HOP_BY_HOP
     }
 
     return Response(

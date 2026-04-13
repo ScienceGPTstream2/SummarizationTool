@@ -111,7 +111,9 @@ class FolderService:
             if scope == "user":
                 query = query.where(TemplateFolder.owner_user_id == user_id)
             elif scope == "group" and owner_group_id:
-                query = query.where(TemplateFolder.owner_group_id == _to_uuid(owner_group_id))
+                query = query.where(
+                    TemplateFolder.owner_group_id == _to_uuid(owner_group_id)
+                )
             # For global, no extra filter needed
 
             # Filter by parent level
@@ -167,7 +169,9 @@ class FolderService:
                 kwargs["owner_user_id"] = user_id
             elif scope == "group":
                 if not owner_group_id:
-                    raise ValueError("owner_group_id is required for group-scope folders")
+                    raise ValueError(
+                        "owner_group_id is required for group-scope folders"
+                    )
                 kwargs["owner_group_id"] = _to_uuid(owner_group_id)
             # global: neither
 
@@ -234,20 +238,34 @@ class FolderService:
         db = get_db_session()
         try:
             # Check if folder still has templates
-            template_count = db.execute(
-                select(PromptTemplate).where(PromptTemplate.folder_id == _to_uuid(folder_id))
-            ).scalars().all()
+            template_count = (
+                db.execute(
+                    select(PromptTemplate).where(
+                        PromptTemplate.folder_id == _to_uuid(folder_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if template_count:
                 raise ValueError(
                     "Cannot delete a folder that still contains templates. Move or delete them first."
                 )
 
             # Check if folder still has subfolders
-            subfolders = db.execute(
-                select(TemplateFolder).where(TemplateFolder.parent_id == _to_uuid(folder_id))
-            ).scalars().all()
+            subfolders = (
+                db.execute(
+                    select(TemplateFolder).where(
+                        TemplateFolder.parent_id == _to_uuid(folder_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if subfolders:
-                raise ValueError("Cannot delete a folder that still contains subfolders.")
+                raise ValueError(
+                    "Cannot delete a folder that still contains subfolders."
+                )
         finally:
             db.close()
 

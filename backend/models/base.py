@@ -30,11 +30,13 @@ def _load_dotenv():
             continue
         os.environ.setdefault(key, value)
 
+
 _load_dotenv()
 
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models"""
+
     pass
 
 
@@ -78,8 +80,8 @@ def get_engine():
             pool_size=5,
             max_overflow=10,
             pool_pre_ping=True,  # Test connections before using them
-            pool_recycle=300,    # Recycle connections every 5 minutes
-            echo=False,          # Set True for SQL debugging
+            pool_recycle=300,  # Recycle connections every 5 minutes
+            echo=False,  # Set True for SQL debugging
         )
     return _engine
 
@@ -101,7 +103,7 @@ def get_db_session() -> Session:
 @contextmanager
 def db_session_scope():
     """Context manager that provides a transactional scope around operations.
-    
+
     Usage:
         with db_session_scope() as session:
             session.add(obj)

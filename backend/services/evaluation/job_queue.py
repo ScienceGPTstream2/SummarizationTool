@@ -289,6 +289,7 @@ async def _sync_job_to_db(job: "EvalJob") -> None:
     except Exception as exc:
         print(f"[JobQueue] DB sync failed for {job.job_id[:8]}: {exc}")
 
+
 # ---------------------------------------------------------------------------
 # Background job cleanup
 # ---------------------------------------------------------------------------

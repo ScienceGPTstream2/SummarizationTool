@@ -245,9 +245,7 @@ async def share_session(
     """
     try:
         user_id = current_user["id"]
-        result = session_service.share_session(
-            user_id, session_id, request.group_id
-        )
+        result = session_service.share_session(user_id, session_id, request.group_id)
     except Exception as e:
         raise HTTPException(
             status_code=500,

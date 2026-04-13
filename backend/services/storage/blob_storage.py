@@ -43,12 +43,16 @@ class BlobStorageClient:
         from azure.core.exceptions import ResourceNotFoundError
 
         try:
-            async with self._service.get_blob_client(self._container, blob_path) as blob:
+            async with self._service.get_blob_client(
+                self._container, blob_path
+            ) as blob:
                 await blob.upload_blob(data, overwrite=overwrite)
         except ResourceNotFoundError:
             # Container doesn't exist yet — create it and retry once
             await self._ensure_container()
-            async with self._service.get_blob_client(self._container, blob_path) as blob:
+            async with self._service.get_blob_client(
+                self._container, blob_path
+            ) as blob:
                 await blob.upload_blob(data, overwrite=overwrite)
 
     async def download_bytes(self, blob_path: str) -> Optional[bytes]:

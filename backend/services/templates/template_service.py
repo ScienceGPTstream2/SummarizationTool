@@ -13,7 +13,10 @@ from sqlalchemy import select, delete, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models import (
-    PromptTemplate, TemplateVersion, TemplatePermission, Group,
+    PromptTemplate,
+    TemplateVersion,
+    TemplatePermission,
+    Group,
 )
 from models.base import get_db_session, db_session_scope
 from services.groups.group_service import get_group_service
@@ -164,9 +167,15 @@ class TemplateService:
                 and t["owner_group_id"] not in group_name_map
             ]
             if extra_group_ids:
-                extra_groups = db.execute(
-                    select(Group).where(Group.id.in_([_to_uuid(g) for g in extra_group_ids]))
-                ).scalars().all()
+                extra_groups = (
+                    db.execute(
+                        select(Group).where(
+                            Group.id.in_([_to_uuid(g) for g in extra_group_ids])
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 for g in extra_groups:
                     group_name_map[str(g.id)] = g.name
 
@@ -174,7 +183,9 @@ class TemplateService:
             for t in templates:
                 if not self._can_read(t, user_id, user_group_ids=group_ids, db=db):
                     continue
-                t["can_edit"] = self._can_edit(t, user_id, user_group_ids=group_ids, db=db)
+                t["can_edit"] = self._can_edit(
+                    t, user_id, user_group_ids=group_ids, db=db
+                )
                 t["is_owner"] = self._is_owner(t, user_id, user_group_ids=group_ids)
                 if t["scope"] == "group" and t.get("owner_group_id"):
                     t["group_name"] = group_name_map.get(t["owner_group_id"])
@@ -182,7 +193,8 @@ class TemplateService:
 
             if tags:
                 accessible = [
-                    t for t in accessible
+                    t
+                    for t in accessible
                     if any(tag in (t.get("tags") or []) for tag in tags)
                 ]
 
@@ -205,9 +217,16 @@ class TemplateService:
             return None
 
         allowed = {
-            "name", "description", "study_type", "system_prompt",
-            "entities", "summary_prompt", "variables", "tags",
-            "is_immutable", "folder_id",
+            "name",
+            "description",
+            "study_type",
+            "system_prompt",
+            "entities",
+            "summary_prompt",
+            "variables",
+            "tags",
+            "is_immutable",
+            "folder_id",
         }
         data = {k: v for k, v in updates.items() if k in allowed}
         if not data:
@@ -270,7 +289,9 @@ class TemplateService:
     # Version Operations
     # ==========================================
 
-    def get_version_history(self, template_id: str, user_id: str) -> Optional[List[Dict[str, Any]]]:
+    def get_version_history(
+        self, template_id: str, user_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """Get version history for a template."""
         template = self.get_template(template_id, user_id)
         if not template:
@@ -278,16 +299,22 @@ class TemplateService:
 
         db = get_db_session()
         try:
-            versions = db.execute(
-                select(TemplateVersion)
-                .where(TemplateVersion.template_id == _to_uuid(template_id))
-                .order_by(TemplateVersion.version.desc())
-            ).scalars().all()
+            versions = (
+                db.execute(
+                    select(TemplateVersion)
+                    .where(TemplateVersion.template_id == _to_uuid(template_id))
+                    .order_by(TemplateVersion.version.desc())
+                )
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(v) for v in versions]
         finally:
             db.close()
 
-    def revert_to_version(self, template_id: str, version: int, user_id: str) -> Optional[Dict[str, Any]]:
+    def revert_to_version(
+        self, template_id: str, version: int, user_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Revert a template to a previous version."""
         template = self.get_template(template_id, user_id)
         if not template or not template.get("can_edit"):
@@ -313,13 +340,20 @@ class TemplateService:
             "summary_prompt": old.summary_prompt,
             "variables": old.variables,
         }
-        return self.update_template(template_id, user_id, updates, change_summary=f"Reverted to version {version}")
+        return self.update_template(
+            template_id,
+            user_id,
+            updates,
+            change_summary=f"Reverted to version {version}",
+        )
 
     # ==========================================
     # Fork Operations
     # ==========================================
 
-    def fork_template(self, template_id: str, user_id: str, new_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fork_template(
+        self, template_id: str, user_id: str, new_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Create a personal copy of a template."""
         source = self.get_template(template_id, user_id)
         if not source:
@@ -407,7 +441,9 @@ class TemplateService:
     # Permission Operations
     # ==========================================
 
-    def set_immutable(self, template_id: str, user_id: str, is_immutable: bool) -> Optional[Dict[str, Any]]:
+    def set_immutable(
+        self, template_id: str, user_id: str, is_immutable: bool
+    ) -> Optional[Dict[str, Any]]:
         """Set template immutability. Requires ownership."""
         template = self.get_template(template_id, user_id)
         if not template:
@@ -449,7 +485,9 @@ class TemplateService:
             if template["owner_user_id"] != granting_user_id:
                 return None
         elif template["scope"] == "group":
-            role = self.group_service._get_role(template["owner_group_id"], granting_user_id)
+            role = self.group_service._get_role(
+                template["owner_group_id"], granting_user_id
+            )
             if role not in ("admin", "owner"):
                 return None
         else:
@@ -467,14 +505,20 @@ class TemplateService:
                 )
                 .on_conflict_do_update(
                     constraint="uq_template_permission",
-                    set_={"can_read": can_read, "can_write": can_write, "granted_by": granting_user_id},
+                    set_={
+                        "can_read": can_read,
+                        "can_write": can_write,
+                        "granted_by": granting_user_id,
+                    },
                 )
                 .returning(TemplatePermission)
             )
             result = db.execute(stmt).scalar_one_or_none()
             return _row_to_dict(result) if result else None
 
-    def get_permissions(self, template_id: str, user_id: str) -> Optional[List[Dict[str, Any]]]:
+    def get_permissions(
+        self, template_id: str, user_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """Get all permission overrides for a template."""
         template = self.get_template(template_id, user_id)
         if not template:
@@ -489,16 +533,22 @@ class TemplateService:
 
         db = get_db_session()
         try:
-            perms = db.execute(
-                select(TemplatePermission).where(
-                    TemplatePermission.template_id == _to_uuid(template_id)
+            perms = (
+                db.execute(
+                    select(TemplatePermission).where(
+                        TemplatePermission.template_id == _to_uuid(template_id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(p) for p in perms]
         finally:
             db.close()
 
-    def remove_permission(self, template_id: str, target_user_id: str, removing_user_id: str) -> bool:
+    def remove_permission(
+        self, template_id: str, target_user_id: str, removing_user_id: str
+    ) -> bool:
         """Remove a permission override."""
         template = self.get_template(template_id, removing_user_id)
         if not template:
@@ -507,7 +557,9 @@ class TemplateService:
             if template["owner_user_id"] != removing_user_id:
                 return False
         elif template["scope"] == "group":
-            role = self.group_service._get_role(template["owner_group_id"], removing_user_id)
+            role = self.group_service._get_role(
+                template["owner_group_id"], removing_user_id
+            )
             if role not in ("admin", "owner"):
                 return False
         else:

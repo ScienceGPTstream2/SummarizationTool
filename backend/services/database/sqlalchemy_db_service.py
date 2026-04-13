@@ -29,10 +29,10 @@ from models import (
 from models.base import db_session_scope
 from utils.text_utils import sanitize_text as _sanitize_text
 
-
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
+
 
 def _row_to_dict(obj) -> Dict[str, Any]:
     """Convert a SQLAlchemy model instance to a plain dict.
@@ -66,6 +66,7 @@ def _to_uuid(value) -> Optional[_uuid_module.UUID]:
 # ---------------------------------------------------------------------------
 # Service class
 # ---------------------------------------------------------------------------
+
 
 class SQLAlchemyDBService:
     """Database service using SQLAlchemy / Azure Postgres directly."""
@@ -115,17 +116,23 @@ class SQLAlchemyDBService:
             sid = _to_uuid(session_id)
 
             # Documents
-            docs = db.execute(
-                select(Document).where(Document.session_id == sid)
-            ).scalars().all()
+            docs = (
+                db.execute(select(Document).where(Document.session_id == sid))
+                .scalars()
+                .all()
+            )
             session_dict["documents"] = [_row_to_dict(d) for d in docs]
 
             # Extraction results
-            exts = db.execute(
-                select(ExtractionResult)
-                .where(ExtractionResult.session_id == sid)
-                .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
-            ).scalars().all()
+            exts = (
+                db.execute(
+                    select(ExtractionResult)
+                    .where(ExtractionResult.session_id == sid)
+                    .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
+                )
+                .scalars()
+                .all()
+            )
             session_dict["extraction_results"] = [_row_to_dict(e) for e in exts]
 
             # Evaluation results (batch by extraction IDs)
@@ -133,15 +140,19 @@ class SQLAlchemyDBService:
                 ext_ids = [
                     _to_uuid(e["id"]) for e in session_dict["extraction_results"]
                 ]
-                evals = db.execute(
-                    select(EvaluationResult)
-                    .where(EvaluationResult.extraction_result_id.in_(ext_ids))
-                    .order_by(
-                        EvaluationResult.extraction_result_id,
-                        EvaluationResult.judge_model,
-                        EvaluationResult.metric,
+                evals = (
+                    db.execute(
+                        select(EvaluationResult)
+                        .where(EvaluationResult.extraction_result_id.in_(ext_ids))
+                        .order_by(
+                            EvaluationResult.extraction_result_id,
+                            EvaluationResult.judge_model,
+                            EvaluationResult.metric,
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 session_dict["evaluation_results"] = [_row_to_dict(ev) for ev in evals]
             else:
                 session_dict["evaluation_results"] = []
@@ -155,13 +166,17 @@ class SQLAlchemyDBService:
     ) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            sessions = db.execute(
-                select(AppSession)
-                .where(AppSession.user_id == user_id)
-                .order_by(AppSession.updated_at.desc())
-                .offset(offset)
-                .limit(limit)
-            ).scalars().all()
+            sessions = (
+                db.execute(
+                    select(AppSession)
+                    .where(AppSession.user_id == user_id)
+                    .order_by(AppSession.updated_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
 
             if not sessions:
                 return []
@@ -171,8 +186,9 @@ class SQLAlchemyDBService:
 
             # Batch-fetch document filenames
             docs = db.execute(
-                select(Document.session_id, Document.filename)
-                .where(Document.session_id.in_(session_ids))
+                select(Document.session_id, Document.filename).where(
+                    Document.session_id.in_(session_ids)
+                )
             ).all()
             docs_by_session: Dict[str, List[str]] = {}
             for doc in docs:
@@ -181,12 +197,15 @@ class SQLAlchemyDBService:
 
             # Batch-fetch extraction counts
             from sqlalchemy import func
+
             ext_counts_rows = db.execute(
                 select(ExtractionResult.session_id, func.count().label("cnt"))
                 .where(ExtractionResult.session_id.in_(session_ids))
                 .group_by(ExtractionResult.session_id)
             ).all()
-            ext_counts: Dict[str, int] = {str(r.session_id): r.cnt for r in ext_counts_rows}
+            ext_counts: Dict[str, int] = {
+                str(r.session_id): r.cnt for r in ext_counts_rows
+            }
 
             for s in result:
                 sid = s["id"]
@@ -285,29 +304,41 @@ class SQLAlchemyDBService:
 
             session_dict = _row_to_dict(sess)
 
-            docs = db.execute(
-                select(Document).where(Document.session_id == sid)
-            ).scalars().all()
+            docs = (
+                db.execute(select(Document).where(Document.session_id == sid))
+                .scalars()
+                .all()
+            )
             session_dict["documents"] = [_row_to_dict(d) for d in docs]
 
-            exts = db.execute(
-                select(ExtractionResult)
-                .where(ExtractionResult.session_id == sid)
-                .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
-            ).scalars().all()
+            exts = (
+                db.execute(
+                    select(ExtractionResult)
+                    .where(ExtractionResult.session_id == sid)
+                    .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
+                )
+                .scalars()
+                .all()
+            )
             session_dict["extraction_results"] = [_row_to_dict(e) for e in exts]
 
             if session_dict["extraction_results"]:
-                ext_ids = [_to_uuid(e["id"]) for e in session_dict["extraction_results"]]
-                evals = db.execute(
-                    select(EvaluationResult)
-                    .where(EvaluationResult.extraction_result_id.in_(ext_ids))
-                    .order_by(
-                        EvaluationResult.extraction_result_id,
-                        EvaluationResult.judge_model,
-                        EvaluationResult.metric,
+                ext_ids = [
+                    _to_uuid(e["id"]) for e in session_dict["extraction_results"]
+                ]
+                evals = (
+                    db.execute(
+                        select(EvaluationResult)
+                        .where(EvaluationResult.extraction_result_id.in_(ext_ids))
+                        .order_by(
+                            EvaluationResult.extraction_result_id,
+                            EvaluationResult.judge_model,
+                            EvaluationResult.metric,
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 session_dict["evaluation_results"] = [_row_to_dict(ev) for ev in evals]
             else:
                 session_dict["evaluation_results"] = []
@@ -385,9 +416,13 @@ class SQLAlchemyDBService:
     def get_documents_by_session(self, session_id: str) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            docs = db.execute(
-                select(Document).where(Document.session_id == _to_uuid(session_id))
-            ).scalars().all()
+            docs = (
+                db.execute(
+                    select(Document).where(Document.session_id == _to_uuid(session_id))
+                )
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(d) for d in docs]
         finally:
             db.close()
@@ -415,11 +450,15 @@ class SQLAlchemyDBService:
     def list_user_documents(self, user_id: str) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            docs = db.execute(
-                select(Document)
-                .where(Document.user_id == user_id)
-                .order_by(Document.created_at.desc())
-            ).scalars().all()
+            docs = (
+                db.execute(
+                    select(Document)
+                    .where(Document.user_id == user_id)
+                    .order_by(Document.created_at.desc())
+                )
+                .scalars()
+                .all()
+            )
 
             # Deduplicate by file_hash (keep most recent)
             seen: set = set()
@@ -562,11 +601,15 @@ class SQLAlchemyDBService:
     ) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            exts = db.execute(
-                select(ExtractionResult)
-                .where(ExtractionResult.session_id == _to_uuid(session_id))
-                .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
-            ).scalars().all()
+            exts = (
+                db.execute(
+                    select(ExtractionResult)
+                    .where(ExtractionResult.session_id == _to_uuid(session_id))
+                    .order_by(ExtractionResult.entity_name, ExtractionResult.model_id)
+                )
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(e) for e in exts]
         finally:
             db.close()
@@ -576,10 +619,15 @@ class SQLAlchemyDBService:
     ) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            exts = db.execute(
-                select(ExtractionResult)
-                .where(ExtractionResult.document_id == _to_uuid(document_id))
-            ).scalars().all()
+            exts = (
+                db.execute(
+                    select(ExtractionResult).where(
+                        ExtractionResult.document_id == _to_uuid(document_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(e) for e in exts]
         finally:
             db.close()
@@ -647,11 +695,16 @@ class SQLAlchemyDBService:
     ) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            evals = db.execute(
-                select(EvaluationResult).where(
-                    EvaluationResult.extraction_result_id == _to_uuid(extraction_result_id)
+            evals = (
+                db.execute(
+                    select(EvaluationResult).where(
+                        EvaluationResult.extraction_result_id
+                        == _to_uuid(extraction_result_id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return [_row_to_dict(ev) for ev in evals]
         finally:
             db.close()
@@ -751,9 +804,7 @@ class SQLAlchemyDBService:
     ) -> List[Dict[str, Any]]:
         db = get_db_session()
         try:
-            q = select(UserPromptTemplate).where(
-                UserPromptTemplate.user_id == user_id
-            )
+            q = select(UserPromptTemplate).where(UserPromptTemplate.user_id == user_id)
             if study_type:
                 q = q.where(UserPromptTemplate.study_type == study_type)
             rows = db.execute(q).scalars().all()
@@ -825,15 +876,19 @@ class SQLAlchemyDBService:
         group_uuids = [_to_uuid(g) for g in group_ids]
         db = get_db_session()
         try:
-            sessions = db.execute(
-                select(AppSession)
-                .where(
-                    AppSession.shared_with_group_id.in_(group_uuids),
-                    AppSession.user_id != user_id,
+            sessions = (
+                db.execute(
+                    select(AppSession)
+                    .where(
+                        AppSession.shared_with_group_id.in_(group_uuids),
+                        AppSession.user_id != user_id,
+                    )
+                    .order_by(AppSession.shared_at.desc())
+                    .limit(50)
                 )
-                .order_by(AppSession.shared_at.desc())
-                .limit(50)
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             if not sessions:
                 return []
@@ -842,8 +897,9 @@ class SQLAlchemyDBService:
             session_ids = [_to_uuid(s["id"]) for s in result]
 
             docs = db.execute(
-                select(Document.session_id, Document.filename)
-                .where(Document.session_id.in_(session_ids))
+                select(Document.session_id, Document.filename).where(
+                    Document.session_id.in_(session_ids)
+                )
             ).all()
             docs_by_session: Dict[str, List[str]] = {}
             for doc in docs:
@@ -851,12 +907,15 @@ class SQLAlchemyDBService:
                 docs_by_session.setdefault(sid, []).append(doc.filename)
 
             from sqlalchemy import func
+
             ext_counts_rows = db.execute(
                 select(ExtractionResult.session_id, func.count().label("cnt"))
                 .where(ExtractionResult.session_id.in_(session_ids))
                 .group_by(ExtractionResult.session_id)
             ).all()
-            ext_counts: Dict[str, int] = {str(r.session_id): r.cnt for r in ext_counts_rows}
+            ext_counts: Dict[str, int] = {
+                str(r.session_id): r.cnt for r in ext_counts_rows
+            }
 
             for s in result:
                 sid = s["id"]
@@ -983,6 +1042,7 @@ class SQLAlchemyDBService:
     ) -> None:
         """Insert a new eval_jobs row on job submission."""
         from models.eval_job import EvalJobRecord
+
         with db_session_scope() as db:
             row = EvalJobRecord(
                 job_id=job_id,
@@ -1011,6 +1071,7 @@ class SQLAlchemyDBService:
         """Upsert the current state of an eval job (used on completion)."""
         from models.eval_job import EvalJobRecord
         from sqlalchemy.dialects.postgresql import insert as pg_insert_local
+
         stmt = (
             pg_insert_local(EvalJobRecord)
             .values(
@@ -1042,6 +1103,7 @@ class SQLAlchemyDBService:
     def get_eval_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Return a status dict for the given job_id, or None if not found."""
         from models.eval_job import EvalJobRecord
+
         db = get_db_session()
         try:
             row = db.execute(
@@ -1058,7 +1120,9 @@ class SQLAlchemyDBService:
                 "errors": row.errors or [],
                 "error": row.error,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
-                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "completed_at": (
+                    row.completed_at.isoformat() if row.completed_at else None
+                ),
             }
         finally:
             db.close()
@@ -1066,6 +1130,7 @@ class SQLAlchemyDBService:
     def mark_eval_job_cancelled(self, job_id: str) -> bool:
         """Mark a job as cancelled in DB (cross-worker cancel). Returns True if row existed."""
         from models.eval_job import EvalJobRecord
+
         with db_session_scope() as db:
             result = db.execute(
                 update(EvalJobRecord)
