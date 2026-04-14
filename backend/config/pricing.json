@@ -43,6 +43,12 @@
       "cached_input_per_million": 0.01,
       "output_per_million": 0.4
     },
+    "azure:gpt-5.4-nano": {
+      "provider": "azure",
+      "input_per_million": 0.05,
+      "cached_input_per_million": 0.01,
+      "output_per_million": 0.4
+    },
     "azure:gpt-4.1": {
       "provider": "azure",
       "input_per_million": 2.0,
