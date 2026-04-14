@@ -483,6 +483,32 @@ async def get_available_models():
             else:
                 print("[MacbookLLM] No models returned; skipping Macbook models")
 
+    # Add VLLM models if configured
+    vllm_base_url = os.getenv("VLLM_BASE_URL")
+    if vllm_base_url:
+        try:
+            from services.llm.vllm import VLLMClient
+
+            vllm_client = VLLMClient()
+            vllm_models = await vllm_client.fetch_available_models()
+            if vllm_models:
+                for model in vllm_models:
+                    models.append(
+                        {
+                            "id": model["id"],
+                            "name": model.get("name", model["id"]),
+                            "provider": "VLLM",
+                            "description": "Self-hosted model (VLLM)",
+                            "supports_temperature": True,
+                            "default_temperature": 0.5,
+                        }
+                    )
+                print(f"✅ Loaded {len(vllm_models)} VLLM model(s)")
+            else:
+                print("[VLLM] No models returned from VLLM server")
+        except Exception as e:
+            print(f"[VLLM] Failed to fetch models: {e}")
+
     return JSONResponse(status_code=200, content=models)
 
 

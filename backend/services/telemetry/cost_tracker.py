@@ -363,6 +363,8 @@ def infer_provider_from_model_id(model_id: str) -> str:
         return "gcp"
     if "macbook" in m:
         return "macbook"
+    if m.startswith("vllm-") or "vllm" in m:
+        return "vllm"
     return "azure"  # safe default — azure is most common deployment
 
 
