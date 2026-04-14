@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from schemas.enums import ProcessorType
-from .processors.docling import DoclingService
+from .processors.docling import DoclingRemoteClient
 from .processors.azure_doc_intelligence.azure_doc_intelligence_service import (
     AzureDocIntelligenceService,
 )
@@ -22,7 +22,7 @@ class DocumentService:
     """Main service for document processing with multiple processor support"""
 
     def __init__(self):
-        self.docling_service = DoclingService()
+        self.docling_service = DoclingRemoteClient()
         self.azure_doc_intelligence_service = AzureDocIntelligenceService()
 
         self.available_processors = self._check_processor_availability()

@@ -34,27 +34,15 @@ class OrganizedDocumentProcessor:
         self.file_service = get_organized_file_service()
         self.azure_service = AzureDocIntelligenceService()
 
-        # Auto-select local vs remote Docling based on DOCLING_SERVICE_URL.
-        # When running in Azure Container Apps (no GPU), the backend calls
-        # the remote docling-service over the VNet.  On the dev VM (has GPU),
-        # it runs docling in-process.
-        docling_url = os.environ.get("DOCLING_SERVICE_URL")
-        if docling_url:
-            from services.document.processors.docling.docling_remote_client import (
-                DoclingRemoteClient,
-            )
+        # Docling runs as a separate Container App — always remote.
+        # DOCLING_SERVICE_URL must be set (e.g. http://docling-service.internal.<env>.azurecontainerapps.io).
+        from services.document.processors.docling.docling_remote_client import (
+            DoclingRemoteClient,
+        )
 
-            self.docling_service = DoclingRemoteClient(base_url=docling_url)
-            self._docling_mode = "remote"
-            print(f"[OrganizedProcessor] Using REMOTE docling-service → {docling_url}")
-        else:
-            from services.document.processors.docling.docling_service import (
-                DoclingService,
-            )
-
-            self.docling_service = DoclingService()
-            self._docling_mode = "local"
-            print("[OrganizedProcessor] Using LOCAL DoclingService (in-process)")
+        docling_url = os.environ.get("DOCLING_SERVICE_URL", "")
+        self.docling_service = DoclingRemoteClient(base_url=docling_url)
+        print(f"[OrganizedProcessor] Using REMOTE docling-service → {docling_url}")
 
     async def process_document(
         self,
@@ -218,85 +206,24 @@ class OrganizedDocumentProcessor:
     async def _process_with_docling(
         self, file_path: str, output_path: Path
     ) -> Dict[str, Any]:
-        """Process document with Docling and save to output_path.
-
-        Works with both the local DoclingService (in-process GPU) and the
-        remote DoclingRemoteClient (HTTP API to separate container).
-        """
+        """Process document with remote docling-service and save to output_path."""
         try:
-            if self._docling_mode == "remote":
-                # Remote mode: pass output_dir so the client writes
-                # document.md and metadata.json directly there.
-                result = await self.docling_service.convert_document_to_markdown(
-                    file_path, output_dir=output_path
-                )
-                if not result["success"]:
-                    return result
+            # Remote mode: pass output_dir so the client writes
+            # document.md and metadata.json directly there.
+            result = await self.docling_service.convert_document_to_markdown(
+                file_path, output_dir=output_path
+            )
+            if not result["success"]:
+                return result
 
-                markdown_content = result.get("markdown_content", "")
-                return {
-                    "success": True,
-                    "processor_used": "docling",
-                    "markdown_content": markdown_content,
-                    "metadata": result.get("metadata", {}),
-                    "original_conversion_id": result.get("conversion_id", ""),
-                }
-            else:
-                # Local mode: DoclingService writes to its own output dir,
-                # then we copy artefacts into the organized output_path.
-                result = await self.docling_service.convert_document_to_markdown(
-                    file_path
-                )
-                if not result["success"]:
-                    return result
-
-                old_conversion_dir = (
-                    self.docling_service.output_base_dir / result["conversion_id"]
-                )
-
-                import shutil
-
-                # Copy markdown
-                old_md = old_conversion_dir / "document.md"
-                new_md = output_path / "document.md"
-                if old_md.exists():
-                    shutil.copy2(old_md, new_md)
-
-                # Copy metadata
-                old_meta = old_conversion_dir / "metadata.json"
-                new_meta = output_path / "metadata.json"
-                if old_meta.exists():
-                    shutil.copy2(old_meta, new_meta)
-
-                # Copy figures directory
-                old_figures = old_conversion_dir / "figures"
-                new_figures = output_path / "figures"
-                if old_figures.exists():
-                    if new_figures.exists():
-                        shutil.rmtree(new_figures)
-                    shutil.copytree(old_figures, new_figures)
-
-                # Copy tables directory
-                old_tables = old_conversion_dir / "tables"
-                new_tables = output_path / "tables"
-                if old_tables.exists():
-                    if new_tables.exists():
-                        shutil.rmtree(new_tables)
-                    shutil.copytree(old_tables, new_tables)
-
-                # Read markdown content
-                markdown_content = ""
-                if new_md.exists():
-                    async with aiofiles.open(new_md, "r") as f:
-                        markdown_content = await f.read()
-
-                return {
-                    "success": True,
-                    "processor_used": "docling",
-                    "markdown_content": markdown_content,
-                    "metadata": result.get("metadata", {}),
-                    "original_conversion_id": result["conversion_id"],
-                }
+            markdown_content = result.get("markdown_content", "")
+            return {
+                "success": True,
+                "processor_used": "docling",
+                "markdown_content": markdown_content,
+                "metadata": result.get("metadata", {}),
+                "original_conversion_id": result.get("conversion_id", ""),
+            }
 
         except Exception as e:
             return {"success": False, "error": str(e), "processor_used": "docling"}
