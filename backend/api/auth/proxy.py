@@ -61,13 +61,25 @@ async def proxy_auth(path: str, request: Request) -> Response:
             follow_redirects=False,
         )
 
-    # Strip hop-by-hop from response but keep everything else (incl. Set-Cookie).
-    resp_headers = {
-        k: v for k, v in upstream.headers.multi_items() if k.lower() not in _HOP_BY_HOP
-    }
+    # Build response — handle Set-Cookie specially since there can be multiples
+    # and a dict would drop all but the last one.
+    single_headers = {}
+    set_cookie_values = []
+    for k, v in upstream.headers.multi_items():
+        if k.lower() in _HOP_BY_HOP:
+            continue
+        if k.lower() == "set-cookie":
+            set_cookie_values.append(v)
+        else:
+            single_headers[k] = v
 
-    return Response(
+    response = Response(
         content=upstream.content,
         status_code=upstream.status_code,
-        headers=resp_headers,
+        headers=single_headers,
     )
+    # Append each Set-Cookie header individually so none are lost
+    for cookie_val in set_cookie_values:
+        response.headers.append("set-cookie", cookie_val)
+
+    return response
