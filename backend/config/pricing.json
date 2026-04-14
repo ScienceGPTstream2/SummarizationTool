@@ -179,11 +179,19 @@
       "cost_per_page": 0.013671
     },
     "docling": {
-      "provider": "azure",
+      "provider": "self-hosted",
       "input_per_million": 0.0,
       "output_per_million": 0.0,
       "cost_per_page": 0.0,
-      "cost_per_minute": 0.007838333333333333
+      "cost_per_minute": 0.01083,
+      "note": "Azure Container Apps GPU NC8as-T4 @ ~$0.65/hr"
+    },
+    "vllm": {
+      "provider": "self-hosted",
+      "input_per_million": 0.0,
+      "output_per_million": 0.0,
+      "cost_per_minute": 0.01083,
+      "note": "Azure Container Apps GPU NC8as-T4 @ ~$0.65/hr, scale-to-zero"
     }
   }
 }
