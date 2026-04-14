@@ -21,14 +21,19 @@ import { Pool } from "pg";
 
 // ---------- Better Auth Configuration ----------
 
-const frontendURL = process.env.FRONTEND_URL || "http://localhost:3000";
+// Support comma-separated FRONTEND_URL for multiple trusted origins
+// e.g. "https://my-app.azurecontainerapps.io,http://localhost:3000"
+const frontendURLs = (process.env.FRONTEND_URL || "http://localhost:3000")
+  .split(",")
+  .map((u) => u.trim())
+  .filter(Boolean);
+const primaryFrontendURL = frontendURLs[0];
 
 const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3001",
 
-  // Trust the frontend origin (browser sends Origin: http://localhost:3000
-  // but sidecar runs on :3001, so we must explicitly allow the frontend)
-  trustedOrigins: [frontendURL],
+  // Trust all configured frontend origins (production FQDN + dev port-forward)
+  trustedOrigins: frontendURLs,
 
   database: new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -69,7 +74,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: frontendURLs,
     credentials: true,
   })
 );
