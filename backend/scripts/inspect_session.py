@@ -7,7 +7,7 @@ import asyncpg
 load_dotenv()
 
 DB_USER = os.getenv("POSTGRES_USER", "postgres.summarization-tool")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "REMOVED_DB_PASSWORD")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
 DB_PORT = os.getenv("POSTGRES_PORT", "6543")
 DB_NAME = os.getenv("POSTGRES_DB", "postgres")
