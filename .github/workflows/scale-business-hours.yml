@@ -1,0 +1,43 @@
+name: Scale Container Apps (Business Hours)
+
+on:
+  schedule:
+    # Run hourly; script decides day vs night using America/Toronto.
+    - cron: '5 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Scaling mode"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - day
+          - night
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Apply scheduled scale profile
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          RG: HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg
+          TIMEZONE: America/Toronto
+        run: |
+          chmod +x infra/set-aca-scale.sh
+          infra/set-aca-scale.sh "${{ inputs.mode || 'auto' }}"
