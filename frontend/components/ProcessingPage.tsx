@@ -236,6 +236,68 @@ export function ProcessingPage({
     fetchMissingFigures();
   }, [files.map((f) => f.fileId).join(",")]); // Re-run when file set changes
 
+  // Rehydrate completed file viewer state from the canonical backend document-view
+  // endpoint so reloads/restores don't depend on fragile local React state.
+  useEffect(() => {
+    const hydrateCompletedFiles = async () => {
+      const filesNeedingHydration = files.filter(
+        (f) =>
+          f.status === "completed" &&
+          f.processingResult?.conversionId &&
+          (!f.processingResult?.processorUsed ||
+            !Array.isArray(f.processingResult?.figures) ||
+            (f.processingResult?.figuresCount || 0) >
+              (f.processingResult?.figures?.length || 0))
+      );
+
+      if (filesNeedingHydration.length === 0) return;
+
+      for (const file of filesNeedingHydration) {
+        try {
+          const qs = file.processingResult?.processorUsed
+            ? `?processor_used=${encodeURIComponent(
+                file.processingResult.processorUsed
+              )}`
+            : "";
+          const response = await authenticatedFetch(
+            `/api/documents/${file.processingResult!.conversionId}/view${qs}`
+          );
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          const canonicalView = data.document_view;
+          if (!canonicalView) continue;
+
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.fileId === file.fileId
+                ? {
+                    ...f,
+                    fileId: canonicalView.fileId || f.fileId,
+                    processorUsed:
+                      canonicalView.processorUsed ||
+                      f.processingResult?.processorUsed ||
+                      f.processorUsed,
+                    processingResult: {
+                      ...f.processingResult,
+                      ...(canonicalView.processingResult || {}),
+                    },
+                  }
+                : f
+            )
+          );
+        } catch (err) {
+          console.warn(
+            `[ProcessingPage] Failed to hydrate canonical view for ${file.fileId}:`,
+            err
+          );
+        }
+      }
+    };
+
+    hydrateCompletedFiles();
+  }, [files.map((f) => `${f.fileId}:${f.status}`).join(",")]);
+
   const handleProceed = () => {
     const completedFiles = files.filter((f) => f.status === "completed");
 

@@ -21,6 +21,48 @@ document_service = DocumentService()
 llm_service = LLMService()
 
 
+@router.get("/{document_id}/view", dependencies=[Depends(get_current_user)])
+async def get_document_view(document_id: str, processor_used: str = None):
+    """Return canonical backend-owned file/viewer state for a processed document."""
+    try:
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
+        )
+        if not resolved_processor:
+            raise HTTPException(status_code=404, detail="Processed document not found")
+
+        metadata = await file_service.get_processed_metadata(document_id, resolved_processor)
+        file_metadata = await file_service.get_file_metadata(document_id)
+
+        document_view = await file_service.build_document_view(
+            file_hash=document_id,
+            preferred_processor=resolved_processor,
+            filename=(file_metadata or {}).get("original_filename"),
+            parse_cost=(metadata or {}).get("parse_cost"),
+            parse_duration_seconds=(metadata or {}).get("parse_duration_seconds"),
+            page_count=(metadata or {}).get("page_count"),
+            figure_count=(metadata or {}).get("figures_found"),
+            table_count=(metadata or {}).get("tables_found"),
+            status="completed",
+            selected_parser=resolved_processor,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "document_id": document_id,
+                "processor": resolved_processor,
+                "document_view": document_view,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving document view: {str(e)}"
+        )
+
+
 def camel_to_snake_case(name: str) -> str:
     """Convert camelCase to snake_case"""
     import re
