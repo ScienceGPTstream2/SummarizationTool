@@ -17,6 +17,8 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -122,6 +124,15 @@ class DoclingRemoteClient:
         meta_path = output_dir / "metadata.json"
         meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
+        try:
+            await self._download_artifact_bundle(conversion_id, output_dir)
+        except Exception as exc:
+            _log.warning(
+                "DoclingRemoteClient bundle download failed for %s: %s",
+                conversion_id,
+                exc,
+            )
+
         return {
             "success": True,
             "conversion_id": conversion_id,
@@ -136,7 +147,7 @@ class DoclingRemoteClient:
 
     async def _call_sync_convert(self, source_path: Path) -> Dict[str, Any]:
         """POST the PDF to /convert and return parsed JSON."""
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout), follow_redirects=True) as client:
             with open(source_path, "rb") as f:
                 _log.info(f"Uploading {source_path.name} to {self.base_url}/convert ...")
                 t0 = time.perf_counter()
@@ -161,6 +172,51 @@ class DoclingRemoteClient:
             f"pages={data.get('metadata', {}).get('page_count', '?')}"
         )
         return data
+
+    async def _download_artifact_bundle(self, conversion_id: str, output_dir: Path) -> None:
+        """Download and extract the full conversion artifact bundle into output_dir."""
+        bundle_url = f"{self.base_url}/artifacts/{conversion_id}/bundle"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = output_dir / f"{conversion_id}.tar.gz"
+        extract_root = output_dir / "__bundle_extract__"
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout), follow_redirects=True
+        ) as client:
+            _log.info("Downloading Docling artifact bundle %s", bundle_url)
+            resp = await client.get(bundle_url)
+
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Artifact bundle download failed: HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+
+        bundle_path.write_bytes(resp.content)
+        if extract_root.exists():
+            shutil.rmtree(extract_root)
+        extract_root.mkdir(parents=True, exist_ok=True)
+
+        with tarfile.open(bundle_path, "r:gz") as tar:
+            tar.extractall(path=extract_root)
+
+        extracted_dir = extract_root / conversion_id
+        source_dir = extracted_dir if extracted_dir.exists() else extract_root
+
+        for child in source_dir.iterdir():
+            target = output_dir / child.name
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(child), str(target))
+
+        shutil.rmtree(extract_root, ignore_errors=True)
+        try:
+            bundle_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 
     async def convert_async(self, source_path: Path) -> Dict[str, Any]:
         """
