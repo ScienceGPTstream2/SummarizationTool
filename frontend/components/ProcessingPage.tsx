@@ -75,11 +75,26 @@ export function ProcessingPage({
   // Initialize files from documentData
   const [files, setFiles] = useState<FileStatus[]>(() => {
     if (documentData.uploadedFiles && documentData.uploadedFiles.length > 0) {
-      return documentData.uploadedFiles.map((f) => ({
-        ...f,
-        status: f.status || "pending",
-        selectedParser: f.selectedParser || "azure_doc_intelligence",
-      }));
+      return documentData.uploadedFiles.map((f) => {
+        const normalizedConversionId =
+          f.processingResult?.fileHash ||
+          f.processingResult?.conversionId ||
+          f.fileId;
+        const normalizedFileId = normalizedConversionId || f.fileId;
+
+        return {
+          ...f,
+          fileId: normalizedFileId,
+          processingResult: f.processingResult
+            ? {
+                ...f.processingResult,
+                conversionId: normalizedConversionId,
+              }
+            : f.processingResult,
+          status: f.status || "pending",
+          selectedParser: f.selectedParser || "azure_doc_intelligence",
+        };
+      });
     } else if (documentData.file && documentData.fileId) {
       // Backward compatibility for single file
       return [
