@@ -49,6 +49,7 @@ const allParsers = [
 interface FileStatus {
   file: File;
   fileId: string;
+  processorUsed?: string;
   uploadResult?: any;
   status: "pending" | "processing" | "completed" | "error";
   processingResult?: {
@@ -160,7 +161,10 @@ export function ProcessingPage({
         (f) =>
           f.status === "completed" &&
           f.processingResult?.conversionId &&
-          !f.processingResult?.figures
+          (Boolean(f.processingResult?.figuresCount) ||
+            Boolean(f.processingResult?.tablesCount)) &&
+          (!Array.isArray(f.processingResult?.figures) ||
+            f.processingResult?.figures.length === 0)
       );
 
       if (filesToFetch.length === 0) return;
@@ -183,17 +187,34 @@ export function ProcessingPage({
           );
           if (response.ok) {
             const data = await response.json();
+            const canonicalView = data.document_view;
             setFiles((prev) =>
               prev.map((f) =>
                 f.fileId === file.fileId
                   ? {
                       ...f,
+                      fileId: canonicalView?.fileId || f.fileId,
+                      processorUsed:
+                        canonicalView?.processorUsed ||
+                        f.processingResult?.processorUsed ||
+                        f.processorUsed,
                       processingResult: {
                         ...f.processingResult,
-                        figures: data.figures || [],
+                        ...(canonicalView?.processingResult || {}),
+                        figures:
+                          (Array.isArray(canonicalView?.processingResult?.figures) &&
+                          canonicalView.processingResult.figures.length > 0
+                            ? canonicalView.processingResult.figures
+                            : undefined) ||
+                          data.figures ||
+                          [],
                         figuresCount:
-                          data.figures_found ?? data.figures?.length ?? 0,
+                          canonicalView?.processingResult?.figuresCount ??
+                          data.figures_found ??
+                          data.figures?.length ??
+                          0,
                         tablesCount:
+                          canonicalView?.processingResult?.tablesCount ??
                           data.tables_found ??
                           f.processingResult?.tablesCount ??
                           0,
@@ -384,6 +405,11 @@ export function ProcessingPage({
                         fileId={selectedFile.fileId}
                         conversionId={
                           selectedFile.processingResult.conversionId || ""
+                        }
+                        processorUsed={
+                          selectedFile.processingResult.processorUsed ||
+                          selectedFile.processorUsed ||
+                          ""
                         }
                         fileName={selectedFile.file.name}
                       />

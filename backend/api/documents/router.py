@@ -260,6 +260,25 @@ async def process_uploaded_file(
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
 
+            processor_used = await document_service.resolve_processor_used(
+                file_hash, processor_name
+            ) or processor_name
+            canonical_view = await file_service.build_document_view(
+                file_hash=file_hash,
+                preferred_processor=processor_used,
+                filename=_cached_doc_filename or file_path.name,
+                parse_cost=parse_cost,
+                parse_duration_seconds=float(
+                    cached_metadata.get("parse_duration_seconds") or 0
+                )
+                or None,
+                page_count=cached_metadata.get("page_count"),
+                figure_count=cached_metadata.get("figures_found"),
+                table_count=cached_metadata.get("tables_found"),
+                status="completed",
+                selected_parser=processor_name,
+            )
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -269,17 +288,18 @@ async def process_uploaded_file(
                     "markdown_path": str(output_dir / "document.md"),
                     "content_length": markdown_content_length,
                     "conversion_time": cached_metadata.get("conversion_time", "cached"),
-                    "processor_used": processor_name,
+                    "processor_used": canonical_view["processingResult"]["processorUsed"],
                     "cached": True,
-                    "figures_found": cached_metadata.get("figures_found", 0),
-                    "figures": cached_metadata.get("figures", []),
-                    "tables_found": cached_metadata.get("tables_found", 0),
+                    "figures_found": canonical_view["processingResult"]["figuresCount"],
+                    "figures": canonical_view["processingResult"]["figures"],
+                    "tables_found": canonical_view["processingResult"]["tablesCount"],
                     "parse_cost": parse_cost,
-                    "page_count": cached_metadata.get("page_count"),
+                    "page_count": canonical_view["processingResult"]["pageCount"],
                     "parse_duration_seconds": float(
                         cached_metadata.get("parse_duration_seconds") or 0
                     )
                     or None,
+                    "document_view": canonical_view,
                 },
             )
 
@@ -440,6 +460,19 @@ async def process_uploaded_file(
         processor_used = result.get("processor_used", processor_name)
         print(f"[PROCESS] ✅ Saved directly to organized structure: {output_dir}")
 
+        canonical_view = await file_service.build_document_view(
+            file_hash=file_hash,
+            preferred_processor=processor_used,
+            filename=_original_filename or _metadata_filename or file_path.name,
+            parse_cost=parse_cost,
+            parse_duration_seconds=actual_duration,
+            page_count=metadata.get("page_count"),
+            figure_count=metadata.get("figures_found"),
+            table_count=metadata.get("tables_found"),
+            status="completed",
+            selected_parser=processor_name,
+        )
+
         # Build response with available metadata
         response_content = {
             "message": "Document processed successfully",
@@ -448,26 +481,30 @@ async def process_uploaded_file(
             "markdown_path": result["markdown_path"],
             "content_length": result["metadata"]["content_length"],
             "conversion_time": result["metadata"]["conversion_time"],
-            "processor_used": processor_used,
+            "processor_used": canonical_view["processingResult"]["processorUsed"],
             "processor_fallback": result.get("processor_fallback", False),
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
             "parse_cost": parse_cost,
             "parse_duration_seconds": actual_duration,
+            "document_view": canonical_view,
         }
 
         # Include figures information if available
-        if "figures_found" in result["metadata"]:
-            response_content["figures_found"] = result["metadata"]["figures_found"]
-            response_content["figures"] = result["metadata"].get("figures", [])
+        response_content["figures_found"] = canonical_view["processingResult"][
+            "figuresCount"
+        ]
+        response_content["figures"] = canonical_view["processingResult"]["figures"]
 
         # Include tables information if available
-        if "tables_found" in result["metadata"]:
-            response_content["tables_found"] = result["metadata"]["tables_found"]
+        response_content["tables_found"] = canonical_view["processingResult"][
+            "tablesCount"
+        ]
 
         # Include page_count for parse cost recompute on history reload
-        if "page_count" in result["metadata"]:
-            response_content["page_count"] = result["metadata"]["page_count"]
+        response_content["page_count"] = canonical_view["processingResult"][
+            "pageCount"
+        ]
 
         return JSONResponse(status_code=200, content=response_content)
 
@@ -835,7 +872,7 @@ async def get_document_figures(document_id: str):
 
 
 @router.get("/{document_id}/analysis", dependencies=[Depends(get_current_user)])
-async def get_document_analysis(document_id: str):
+async def get_document_analysis(document_id: str, processor_used: str = None):
     """
     Get the complete raw analysis result with ALL bounding boxes
 
@@ -870,8 +907,12 @@ async def get_document_analysis(document_id: str):
         import json
 
         # Read raw_analysis.json via service (blob-safe)
-        resolved_processor = await document_service.resolve_processor_used(document_id)
-        analysis_result = await document_service.get_raw_analysis_result(document_id)
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
+        )
+        analysis_result = await document_service.get_raw_analysis_result(
+            document_id, resolved_processor
+        )
 
         if analysis_result is None:
             raise HTTPException(

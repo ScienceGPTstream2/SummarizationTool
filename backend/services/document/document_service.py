@@ -185,9 +185,21 @@ class DocumentService:
         )
         if not resolved_processor:
             return None
-        return await self.file_service.get_processed_content(
+        content = await self.file_service.get_processed_content(
             conversion_id, resolved_processor
         )
+        if content is not None:
+            return content
+
+        # Fallback: raw_analysis.json often carries the exported markdown-like
+        # content under "content" even when document.md is missing.
+        raw = await self.get_raw_analysis_result(conversion_id)
+        if isinstance(raw, dict):
+            raw_content = raw.get("content")
+            if isinstance(raw_content, str) and raw_content:
+                return raw_content
+
+        return None
 
     async def resolve_processor_used(
         self, conversion_id: str, processor_used: Optional[str] = None
@@ -198,7 +210,7 @@ class DocumentService:
         )
 
     async def get_figures_for_conversion(
-        self, conversion_id: str
+        self, conversion_id: str, processor_used: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get all figures metadata for a specific conversion
@@ -212,7 +224,7 @@ class DocumentService:
             List of figure metadata dictionaries or None if not found
         """
         resolved_processor = await self.file_service.resolve_processed_processor(
-            conversion_id
+            conversion_id, processor_used
         )
         if not resolved_processor:
             return None
@@ -224,7 +236,7 @@ class DocumentService:
         return []
 
     async def get_raw_analysis_result(
-        self, conversion_id: str
+        self, conversion_id: str, processor_used: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get the complete raw analysis result with ALL bounding boxes
@@ -255,7 +267,7 @@ class DocumentService:
         import json
 
         resolved_processor = await self.file_service.resolve_processed_processor(
-            conversion_id
+            conversion_id, processor_used
         )
         if not resolved_processor:
             return None

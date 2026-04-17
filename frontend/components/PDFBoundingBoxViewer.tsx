@@ -21,6 +21,7 @@ import { getValidToken } from "../utils/authUtils";
 interface PDFBoundingBoxViewerProps {
   fileId: string;
   conversionId: string | null;
+  processorUsed?: string | null;
   fileName?: string;
 }
 
@@ -99,6 +100,7 @@ const COLOR_BORDER_MAP: Record<ElementType | string, string> = {
 export function PDFBoundingBoxViewer({
   fileId,
   conversionId,
+  processorUsed,
   fileName,
 }: PDFBoundingBoxViewerProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -236,12 +238,12 @@ export function PDFBoundingBoxViewer({
 
       try {
         const token = await getValidToken();
-        const response = await fetch(
-          `/api/documents/${conversionId}/analysis`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const qs = processorUsed
+          ? `?processor_used=${encodeURIComponent(processorUsed)}`
+          : "";
+        const response = await fetch(`/api/documents/${conversionId}/analysis${qs}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         if (isCancelled) return;
 
@@ -304,7 +306,7 @@ export function PDFBoundingBoxViewer({
       isCancelled = true;
       retryTimeouts.forEach((timeout) => clearTimeout(timeout));
     };
-  }, [conversionId]);
+  }, [conversionId, processorUsed]);
 
   // Load and render PDF
   useEffect(() => {

@@ -384,17 +384,36 @@ export function UploadPage({
 
           // Store processing result with camelCase mapping
           // Use file_hash as the primary identifier for document API calls (not UUID conversion_id)
+          const canonicalView = result.document_view;
           setProcessedFiles((prev) => ({
             ...prev,
             [file.name]: {
               ...result,
+              ...(canonicalView?.processingResult || {}),
               // Use file_hash as conversionId for document API calls
-              conversionId: result.file_hash || result.conversion_id,
-              fileHash: result.file_hash,
+              conversionId:
+                canonicalView?.processingResult?.conversionId ||
+                result.file_hash ||
+                result.conversion_id,
+              fileHash:
+                canonicalView?.processingResult?.fileHash || result.file_hash,
               markdownPath: result.markdown_path,
-              processorUsed: result.processor_used,
-              figuresCount: result.figures_found,
-              tablesCount: result.tables_found,
+              processorUsed:
+                canonicalView?.processingResult?.processorUsed ||
+                result.processor_used,
+              figures:
+                (Array.isArray(canonicalView?.processingResult?.figures) &&
+                canonicalView.processingResult.figures.length > 0
+                  ? canonicalView.processingResult.figures
+                  : undefined) ||
+                result.figures ||
+                [],
+              figuresCount:
+                canonicalView?.processingResult?.figuresCount ||
+                result.figures_found,
+              tablesCount:
+                canonicalView?.processingResult?.tablesCount ||
+                result.tables_found,
               parseCost: result.parse_cost,
               parseDuration: result.parse_duration_seconds,
               parser,

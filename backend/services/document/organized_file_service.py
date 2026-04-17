@@ -225,6 +225,110 @@ class OrganizedFileService:
                 return proc
         return None
 
+    async def build_document_view(
+        self,
+        file_hash: str,
+        preferred_processor: Optional[Any] = None,
+        filename: Optional[str] = None,
+        parse_cost: Optional[float] = None,
+        parse_duration_seconds: Optional[float] = None,
+        page_count: Optional[int] = None,
+        figure_count: Optional[int] = None,
+        table_count: Optional[int] = None,
+        status: str = "completed",
+        selected_parser: Optional[str] = None,
+        extra_file_fields: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build a canonical backend-owned document/viewer state model."""
+        processor_used = await self.resolve_processed_processor(file_hash, preferred_processor)
+        file_metadata = await self.get_file_metadata(file_hash) or {}
+        processed_metadata = (
+            await self.get_processed_metadata(file_hash, processor_used)
+            if processor_used
+            else {}
+        ) or {}
+
+        resolved_filename = (
+            filename
+            or file_metadata.get("original_filename")
+            or f"{file_hash}.pdf"
+        )
+
+        resolved_parse_cost = (
+            parse_cost
+            if parse_cost is not None
+            else processed_metadata.get("parse_cost")
+        )
+        resolved_parse_duration = (
+            parse_duration_seconds
+            if parse_duration_seconds is not None
+            else processed_metadata.get("parse_duration_seconds")
+        )
+        resolved_page_count = (
+            page_count if page_count is not None else processed_metadata.get("page_count")
+        )
+        resolved_figures = processed_metadata.get("figures", []) or []
+        resolved_figure_count = (
+            figure_count
+            if figure_count is not None
+            else processed_metadata.get("figures_found")
+        )
+        resolved_table_count = (
+            table_count
+            if table_count is not None
+            else processed_metadata.get("tables_found")
+        )
+
+        markdown_available = (
+            await self.is_file_processed(file_hash, processor_used)
+            if processor_used
+            else False
+        )
+        analysis_available = (
+            await self.processing_file_exists(file_hash, processor_used, "raw_analysis.json")
+            if processor_used
+            else False
+        )
+        tables_available = bool(resolved_table_count) or (
+            await self.processing_file_exists(file_hash, processor_used, "tables/table-1.html")
+            if processor_used
+            else False
+        )
+        figures_available = bool(resolved_figures) or bool(resolved_figure_count)
+
+        result = {
+            "fileName": resolved_filename,
+            "fileId": file_hash,
+            "status": status,
+            "selectedParser": selected_parser or processor_used,
+            "processorUsed": processor_used,
+            "processingResult": {
+                "conversionId": file_hash,
+                "fileHash": file_hash,
+                "processorUsed": processor_used,
+                "markdownPath": None,
+                "parseCost": resolved_parse_cost,
+                "parse_cost": resolved_parse_cost,
+                "parseDuration": resolved_parse_duration,
+                "parse_duration_seconds": resolved_parse_duration,
+                "pageCount": resolved_page_count,
+                "page_count": resolved_page_count,
+                "figures": resolved_figures,
+                "figuresCount": resolved_figure_count or 0,
+                "tablesCount": resolved_table_count or 0,
+                "artifactAvailability": {
+                    "original": bool(file_metadata),
+                    "markdown": markdown_available,
+                    "analysis": analysis_available,
+                    "figures": figures_available,
+                    "tables": tables_available,
+                },
+            },
+        }
+        if extra_file_fields:
+            result.update(extra_file_fields)
+        return result
+
     def _get_processor_str(self, processor: Any) -> str:
         if hasattr(processor, "value"):
             return str(processor.value)

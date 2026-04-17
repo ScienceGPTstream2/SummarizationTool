@@ -938,59 +938,34 @@ class SessionService:
                 or file_cfg.get("processor_used")
                 or "azure_doc_intelligence"
             )
-
-            proc_metadata = await self.file_service.get_processed_metadata(
-                file_hash, processor_used
-            ) or {}
-
             uploaded_files.append(
-                {
-                    "fileName": doc.filename,
-                    "fileId": file_hash,
-                    "status": "completed",
-                    "selectedParser": processor_used,
-                    "studyType": file_cfg.get("study_type")
-                    or session.configuration.study_type
-                    or "",
-                    "summaryPrompt": file_cfg.get("summary_prompt")
-                    or session.configuration.summary_prompt
-                    or "",
-                    "paragraph_system_prompt": file_cfg.get("paragraph_system_prompt")
-                    or session.configuration.paragraph_system_prompt
-                    or "",
-                    "modelTemperatures": file_cfg.get("model_temperatures") or {},
-                    "selectedModels": session.configuration.selected_models or [],
-                    "processorUsed": processor_used,
-                    "processingResult": {
-                        "conversionId": file_hash,
-                        "fileHash": file_hash,
-                        "processorUsed": processor_used,
-                        "markdownPath": None,
-                        "parseCost": doc.parse_cost,
-                        "parse_cost": doc.parse_cost,
-                        "parseDuration": doc.parse_duration_seconds,
-                        "parse_duration_seconds": doc.parse_duration_seconds,
-                        "pageCount": doc.page_count,
-                        "page_count": doc.page_count,
-                        "figures": proc_metadata.get("figures", []),
-                        "figuresCount": proc_metadata.get("figures_found")
-                        or getattr(doc, "figure_count", None)
-                        or 0,
-                        "tablesCount": proc_metadata.get("tables_found")
-                        or getattr(doc, "table_count", None)
-                        or 0,
-                        "artifactAvailability": {
-                            "markdown": await self.file_service.is_file_processed(
-                                file_hash, processor_used
-                            ),
-                            "analysis": await self.file_service.processing_file_exists(
-                                file_hash, processor_used, "raw_analysis.json"
-                            ),
-                            "original": await self.file_service.get_file_metadata(file_hash)
-                            is not None,
-                        },
+                await self.file_service.build_document_view(
+                    file_hash=file_hash,
+                    preferred_processor=processor_used,
+                    filename=doc.filename,
+                    parse_cost=doc.parse_cost,
+                    parse_duration_seconds=doc.parse_duration_seconds,
+                    page_count=doc.page_count,
+                    figure_count=getattr(doc, "figure_count", None),
+                    table_count=getattr(doc, "table_count", None),
+                    status="completed",
+                    selected_parser=processor_used,
+                    extra_file_fields={
+                        "studyType": file_cfg.get("study_type")
+                        or session.configuration.study_type
+                        or "",
+                        "summaryPrompt": file_cfg.get("summary_prompt")
+                        or session.configuration.summary_prompt
+                        or "",
+                        "paragraph_system_prompt": file_cfg.get(
+                            "paragraph_system_prompt"
+                        )
+                        or session.configuration.paragraph_system_prompt
+                        or "",
+                        "modelTemperatures": file_cfg.get("model_temperatures") or {},
+                        "selectedModels": session.configuration.selected_models or [],
                     },
-                }
+                )
             )
 
         primary_file_id = uploaded_files[0]["fileId"] if uploaded_files else ""
