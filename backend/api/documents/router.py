@@ -487,29 +487,23 @@ async def get_document_content(document_id: str, processor_used: str = None):
         processor_used: Optional processor that was used (improves efficiency)
     """
     try:
-        # Check organized file structure
-        processors_to_check = (
-            [processor_used]
-            if processor_used
-            else ["azure_doc_intelligence", "docling"]
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
         )
+        markdown_content = await document_service.get_markdown_content(
+            document_id, resolved_processor
+        )
+        if markdown_content is None:
+            raise HTTPException(status_code=404, detail="Document processing not found")
 
-        for proc in processors_to_check:
-            if proc is None:
-                continue
-            markdown_content = await file_service.get_processed_content(
-                document_id, proc
-            )
-            if markdown_content is not None:
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "document_id": document_id,
-                        "markdown_content": markdown_content,
-                    },
-                )
-
-        raise HTTPException(status_code=404, detail="Document processing not found")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "document_id": document_id,
+                "processor": resolved_processor,
+                "markdown_content": markdown_content,
+            },
+        )
 
     except HTTPException:
         raise
@@ -813,18 +807,20 @@ async def get_document_figures(document_id: str):
         List of figure metadata including captions, bounding regions, and image paths
     """
     try:
+        resolved_processor = await document_service.resolve_processor_used(document_id)
         figures = await document_service.get_figures_for_conversion(document_id)
 
         if figures is None:
             raise HTTPException(
                 status_code=404,
-                detail="No figures found. Document may not exist or was not processed with Azure Document Intelligence.",
+                detail="No figures found. Document may not exist or was not processed yet.",
             )
 
         return JSONResponse(
             status_code=200,
             content={
                 "document_id": document_id,
+                "processor": resolved_processor,
                 "figures_count": len(figures),
                 "figures": figures,
             },
@@ -874,16 +870,8 @@ async def get_document_analysis(document_id: str):
         import json
 
         # Read raw_analysis.json via service (blob-safe)
-        processors_to_check = ["azure_doc_intelligence", "docling"]
-        analysis_result = None
-
-        for proc in processors_to_check:
-            raw_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, "raw_analysis.json"
-            )
-            if raw_bytes:
-                analysis_result = json.loads(raw_bytes.decode("utf-8"))
-                break
+        resolved_processor = await document_service.resolve_processor_used(document_id)
+        analysis_result = await document_service.get_raw_analysis_result(document_id)
 
         if analysis_result is None:
             raise HTTPException(
@@ -946,13 +934,9 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
         print(f"[FIGURE] Attempting to serve figure: {document_id}/{figure_filename}")
 
-        figure_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            figure_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"figures/{figure_filename}"
-            )
-            if figure_bytes:
-                break
+        figure_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"figures/{figure_filename}"
+        )
 
         if not figure_bytes:
             print(f"[FIGURE] File not found")
@@ -1027,13 +1011,9 @@ async def generate_figure_summary(
         # because the vision model requires a filesystem path.
         figure_filename = Path(figure["image_path"]).name
 
-        figure_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            figure_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"figures/{figure_filename}"
-            )
-            if figure_bytes:
-                break
+        figure_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"figures/{figure_filename}"
+        )
 
         if not figure_bytes:
             print(f"[FIGURE SUMMARY] Image not found for figure {figure_id}")
@@ -1161,24 +1141,22 @@ async def generate_figure_summary(
         try:
             import json as _json_sum
 
-            for proc in ("azure_doc_intelligence", "docling"):
+            resolved_processor = await document_service.resolve_processor_used(document_id)
+            if resolved_processor:
                 _proc_meta = await file_service.get_processed_metadata(
-                    document_id, proc
+                    document_id, resolved_processor
                 )
                 if _proc_meta and "figures" in _proc_meta:
                     for fig in _proc_meta["figures"]:
                         if fig.get("id") == figure_id:
                             fig["scientific_summary"] = summary_data
                             await file_service.update_processed_metadata(
-                                document_id, proc, _proc_meta
+                                document_id, resolved_processor, _proc_meta
                             )
                             print(
-                                f"[SUMMARY] ✅ Stored summary for figure {figure_id} ({proc})"
+                                f"[SUMMARY] ✅ Stored summary for figure {figure_id} ({resolved_processor})"
                             )
                             break
-                    else:
-                        continue
-                    break
         except Exception as e:
             print(f"[SUMMARY] Warning: Could not persist summary to metadata: {e}")
             # Continue anyway - the summary is still returned to the UI
@@ -1269,13 +1247,9 @@ async def get_table_html(document_id: str, table_filename: str):
 
         print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")
 
-        table_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            table_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"tables/{table_filename}"
-            )
-            if table_bytes:
-                break
+        table_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"tables/{table_filename}"
+        )
 
         if not table_bytes:
             print(f"[TABLE] File not found")

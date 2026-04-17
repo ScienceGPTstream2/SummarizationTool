@@ -207,6 +207,24 @@ class OrganizedFileService:
             f"global/{file_hash}/processed/{proc_str}/{norm_path}"
         )
 
+    async def resolve_processed_processor(
+        self, file_hash: str, preferred_processor: Optional[Any] = None
+    ) -> Optional[str]:
+        """Resolve the processor that actually has persisted artifacts for a file."""
+        candidates: List[str] = []
+        if preferred_processor is not None:
+            candidates.append(self._get_processor_str(preferred_processor))
+        for proc in ("azure_doc_intelligence", "docling"):
+            if proc not in candidates:
+                candidates.append(proc)
+
+        for proc in candidates:
+            if await self._blob.exists(f"global/{file_hash}/processed/{proc}/metadata.json"):
+                return proc
+            if await self._blob.exists(f"global/{file_hash}/processed/{proc}/document.md"):
+                return proc
+        return None
+
     def _get_processor_str(self, processor: Any) -> str:
         if hasattr(processor, "value"):
             return str(processor.value)

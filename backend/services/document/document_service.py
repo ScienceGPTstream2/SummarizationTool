@@ -24,6 +24,7 @@ class DocumentService:
     def __init__(self):
         self.docling_service = DoclingRemoteClient()
         self.azure_doc_intelligence_service = AzureDocIntelligenceService()
+        self.file_service = get_organized_file_service()
 
         self.available_processors = self._check_processor_availability()
 
@@ -179,32 +180,22 @@ class DocumentService:
             processor_used: The processor that was used (if known) - improves efficiency
         """
 
-        # Try OrganizedFileService first (New Structure)
-        # Note: conversion_id is treated as file_hash in the new structure
-        org_service = get_organized_file_service()
+        resolved_processor = await self.file_service.resolve_processed_processor(
+            conversion_id, processor_used
+        )
+        if not resolved_processor:
+            return None
+        return await self.file_service.get_processed_content(
+            conversion_id, resolved_processor
+        )
 
-        if processor_used:
-            # Try specific processor
-            content = await org_service.get_processed_content(
-                conversion_id, processor_used
-            )
-            if content:
-                return content
-        else:
-            # Try Azure then Docling
-            content = await org_service.get_processed_content(
-                conversion_id, ProcessorType.AZURE_DOC_INTELLIGENCE
-            )
-            if content:
-                return content
-
-            content = await org_service.get_processed_content(
-                conversion_id, ProcessorType.DOCLING
-            )
-            if content:
-                return content
-
-        return None
+    async def resolve_processor_used(
+        self, conversion_id: str, processor_used: Optional[str] = None
+    ) -> Optional[str]:
+        """Resolve the actual processor with persisted artifacts for a file hash."""
+        return await self.file_service.resolve_processed_processor(
+            conversion_id, processor_used
+        )
 
     async def get_figures_for_conversion(
         self, conversion_id: str
@@ -220,38 +211,17 @@ class DocumentService:
         Returns:
             List of figure metadata dictionaries or None if not found
         """
-        # Try OrganizedFileService first
-        org_service = get_organized_file_service()
-
-        # Helper to check organized storage for figures
-        async def check_organized_figures(processor):
-            try:
-                path = (
-                    org_service.get_processing_output_path(conversion_id, processor)
-                    / "metadata.json"
-                )
-                if path.exists():
-                    import json
-                    import aiofiles
-
-                    async with aiofiles.open(path, "r") as f:
-                        data = json.loads(await f.read())
-                        if "figures" in data:
-                            return data["figures"]
-            except Exception:
-                pass
+        resolved_processor = await self.file_service.resolve_processed_processor(
+            conversion_id
+        )
+        if not resolved_processor:
             return None
-
-        # Try Azure then Docling in organized storage
-        figures = await check_organized_figures(ProcessorType.AZURE_DOC_INTELLIGENCE)
-        if figures is not None:
-            return figures
-
-        figures = await check_organized_figures(ProcessorType.DOCLING)
-        if figures is not None:
-            return figures
-
-        return None
+        metadata = await self.file_service.get_processed_metadata(
+            conversion_id, resolved_processor
+        )
+        if metadata and "figures" in metadata:
+            return metadata["figures"]
+        return []
 
     async def get_raw_analysis_result(
         self, conversion_id: str
@@ -282,34 +252,32 @@ class DocumentService:
         Returns:
             Complete analysis result dictionary or None if not found
         """
-        # Try OrganizedFileService first
-        org_service = get_organized_file_service()
+        import json
 
-        # Helper to check organized storage for raw analysis
-        async def check_organized_analysis(processor):
-            try:
-                # Azure stores as raw_analysis.json, Docling might differ but let's assume raw_analysis.json standard
-                path = (
-                    org_service.get_processing_output_path(conversion_id, processor)
-                    / "raw_analysis.json"
-                )
-                if path.exists():
-                    import json
-                    import aiofiles
-
-                    async with aiofiles.open(path, "r", encoding="utf-8") as f:
-                        return json.loads(await f.read())
-            except Exception:
-                pass
+        resolved_processor = await self.file_service.resolve_processed_processor(
+            conversion_id
+        )
+        if not resolved_processor:
             return None
+        raw_bytes = await self.file_service.get_processing_file_bytes(
+            conversion_id, resolved_processor, "raw_analysis.json"
+        )
+        if not raw_bytes:
+            return None
+        return json.loads(raw_bytes.decode("utf-8"))
 
-        # Try Azure then Docling in organized storage
-        result = await check_organized_analysis(ProcessorType.AZURE_DOC_INTELLIGENCE)
-        if result:
-            return result
-
-        result = await check_organized_analysis(ProcessorType.DOCLING)
-        if result:
-            return result
-
-        return None
+    async def get_processing_file_bytes(
+        self,
+        conversion_id: str,
+        relative_path: str,
+        processor_used: Optional[str] = None,
+    ) -> Optional[bytes]:
+        """Resolve processor then fetch a specific processed artifact from blob."""
+        resolved_processor = await self.file_service.resolve_processed_processor(
+            conversion_id, processor_used
+        )
+        if not resolved_processor:
+            return None
+        return await self.file_service.get_processing_file_bytes(
+            conversion_id, resolved_processor, relative_path
+        )
