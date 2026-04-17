@@ -223,6 +223,18 @@ class OrganizedFileService:
                 return proc
             if await self._blob.exists(f"global/{file_hash}/processed/{proc}/document.md"):
                 return proc
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/raw_analysis.json"
+            ):
+                return proc
+            # Last fallback: if *any* blob exists under the processor subtree,
+            # treat that processor as valid. This avoids false 404s when a
+            # document has tables/figures/raw analysis but no document.md.
+            prefix_hits = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{proc}/", limit=1
+            )
+            if prefix_hits:
+                return proc
         return None
 
     async def build_document_view(
