@@ -197,6 +197,16 @@ class OrganizedFileService:
             tmp_file.write_bytes(data)
         return data
 
+    async def processing_file_exists(
+        self, file_hash: str, processor: Any, relative_path: str
+    ) -> bool:
+        """Check whether a specific processor output file exists in blob storage."""
+        proc_str = self._get_processor_str(processor)
+        norm_path = relative_path.replace("\\", "/")
+        return await self._blob.exists(
+            f"global/{file_hash}/processed/{proc_str}/{norm_path}"
+        )
+
     def _get_processor_str(self, processor: Any) -> str:
         if hasattr(processor, "value"):
             return str(processor.value)

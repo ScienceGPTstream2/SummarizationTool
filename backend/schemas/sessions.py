@@ -44,6 +44,8 @@ class SessionDocument(BaseModel):
     parse_cost: Optional[float] = None
     page_count: Optional[int] = None
     parse_duration_seconds: Optional[float] = None
+    figure_count: Optional[int] = None
+    table_count: Optional[int] = None
 
 
 class ExtractionResult(BaseModel):

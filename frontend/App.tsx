@@ -1633,12 +1633,39 @@ export default function App() {
     restoringSessionRef.current = true;
     try {
       setLoading(true);
-      const response = await authenticatedFetch(`/api/sessions/${sessionId}`);
+      const [response, restoreViewResponse] = await Promise.all([
+        authenticatedFetch(`/api/sessions/${sessionId}`),
+        authenticatedFetch(`/api/sessions/${sessionId}/restore-view`),
+      ]);
       if (!response.ok) throw new Error("Failed to fetch session");
+      if (!restoreViewResponse.ok) throw new Error("Failed to fetch restore view");
       const sessionData = await response.json();
+      const restoreView = await restoreViewResponse.json();
       console.log("🚀 Restoring session:", sessionData.session_id);
 
       const restoredData = await buildRestoredDocumentData(sessionData);
+      const restoredFilesById = new Map(
+        (restoredData.uploadedFiles || []).map((f: any) => [f.fileId, f])
+      );
+      restoredData.uploadedFiles = (restoreView.uploadedFiles || []).map((f: any) => {
+        const existing = restoredFilesById.get(f.fileId) || {};
+        return {
+          ...existing,
+          ...f,
+          file: new File([""], f.fileName || existing.file?.name || "Restored Document", {
+            type: "application/pdf",
+          }),
+          processingResult: {
+            ...(existing.processingResult || {}),
+            ...(f.processingResult || {}),
+          },
+        };
+      });
+      restoredData.fileId = restoreView.fileId || restoredData.fileId;
+      restoredData.conversionId =
+        restoreView.conversionId || restoredData.conversionId;
+      restoredData.processorUsed =
+        restoreView.processorUsed || restoredData.processorUsed;
       restoredData.sessionId = sessionData.session_id;
       restoredData.sharedSourceName = undefined;
 
@@ -1727,15 +1754,40 @@ export default function App() {
     restoringSessionRef.current = true;
     try {
       setLoading(true);
-      const response = await authenticatedFetch(
-        `/api/sessions/shared/${sessionId}`
-      );
+      const [response, restoreViewResponse] = await Promise.all([
+        authenticatedFetch(`/api/sessions/shared/${sessionId}`),
+        authenticatedFetch(`/api/sessions/shared/${sessionId}/restore-view`),
+      ]);
       if (!response.ok) throw new Error("Failed to fetch shared session");
+      if (!restoreViewResponse.ok) throw new Error("Failed to fetch shared restore view");
       const sessionData = await response.json();
+      const restoreView = await restoreViewResponse.json();
 
       // Build full restored data via the shared helper, then override
       // sessionId to undefined (lazy clone) and set sharedSourceName.
       const restoredData = await buildRestoredDocumentData(sessionData);
+      const restoredFilesById = new Map(
+        (restoredData.uploadedFiles || []).map((f: any) => [f.fileId, f])
+      );
+      restoredData.uploadedFiles = (restoreView.uploadedFiles || []).map((f: any) => {
+        const existing = restoredFilesById.get(f.fileId) || {};
+        return {
+          ...existing,
+          ...f,
+          file: new File([""], f.fileName || existing.file?.name || "Restored Document", {
+            type: "application/pdf",
+          }),
+          processingResult: {
+            ...(existing.processingResult || {}),
+            ...(f.processingResult || {}),
+          },
+        };
+      });
+      restoredData.fileId = restoreView.fileId || restoredData.fileId;
+      restoredData.conversionId =
+        restoreView.conversionId || restoredData.conversionId;
+      restoredData.processorUsed =
+        restoreView.processorUsed || restoredData.processorUsed;
       restoredData.sessionId = undefined;
       restoredData.sharedSourceName = sessionData.name || "Shared Session";
 

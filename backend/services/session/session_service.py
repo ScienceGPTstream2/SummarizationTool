@@ -22,6 +22,7 @@ from schemas.sessions import (
 )
 from services.database import get_db_service, SQLAlchemyDBService
 from services.telemetry.cost_tracker import cost_tracker, infer_provider_from_model_id
+from services.document.organized_file_service import get_organized_file_service
 
 
 class SessionService:
@@ -31,6 +32,13 @@ class SessionService:
         self.db: SQLAlchemyDBService = get_db_service()
         # Cache for document lookups to avoid repeated queries
         self._doc_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._file_service = None
+
+    @property
+    def file_service(self):
+        if self._file_service is None:
+            self._file_service = get_organized_file_service()
+        return self._file_service
 
     def _parse_timestamp(self, ts_str: Optional[str]) -> datetime:
         """Parse timestamp string with variable microsecond precision"""
@@ -771,6 +779,8 @@ class SessionService:
                     parse_cost=parse_cost,
                     page_count=doc.get("page_count"),
                     parse_duration_seconds=doc.get("parse_duration_seconds"),
+                    figure_count=doc.get("figure_count"),
+                    table_count=doc.get("table_count"),
                 )
             )
 
@@ -911,6 +921,89 @@ class SessionService:
             extraction_results=extraction_results,
             evaluation_results=evaluation_results,
         )
+
+    async def build_restore_view(self, session: Session) -> Dict[str, Any]:
+        """Build canonical, blob-aware restored file/viewer state for the frontend."""
+        files_config = {
+            **(session.configuration.files_config or {}),
+            **(session.files_config or {}),
+        }
+
+        uploaded_files: List[Dict[str, Any]] = []
+        for doc in session.documents:
+            file_hash = doc.file_hash
+            file_cfg = files_config.get(file_hash, {}) or {}
+            processor_used = (
+                doc.processor_used
+                or file_cfg.get("processor_used")
+                or "azure_doc_intelligence"
+            )
+
+            proc_metadata = await self.file_service.get_processed_metadata(
+                file_hash, processor_used
+            ) or {}
+
+            uploaded_files.append(
+                {
+                    "fileName": doc.filename,
+                    "fileId": file_hash,
+                    "status": "completed",
+                    "selectedParser": processor_used,
+                    "studyType": file_cfg.get("study_type")
+                    or session.configuration.study_type
+                    or "",
+                    "summaryPrompt": file_cfg.get("summary_prompt")
+                    or session.configuration.summary_prompt
+                    or "",
+                    "paragraph_system_prompt": file_cfg.get("paragraph_system_prompt")
+                    or session.configuration.paragraph_system_prompt
+                    or "",
+                    "modelTemperatures": file_cfg.get("model_temperatures") or {},
+                    "selectedModels": session.configuration.selected_models or [],
+                    "processorUsed": processor_used,
+                    "processingResult": {
+                        "conversionId": file_hash,
+                        "fileHash": file_hash,
+                        "processorUsed": processor_used,
+                        "markdownPath": None,
+                        "parseCost": doc.parse_cost,
+                        "parse_cost": doc.parse_cost,
+                        "parseDuration": doc.parse_duration_seconds,
+                        "parse_duration_seconds": doc.parse_duration_seconds,
+                        "pageCount": doc.page_count,
+                        "page_count": doc.page_count,
+                        "figures": proc_metadata.get("figures", []),
+                        "figuresCount": proc_metadata.get("figures_found")
+                        or getattr(doc, "figure_count", None)
+                        or 0,
+                        "tablesCount": proc_metadata.get("tables_found")
+                        or getattr(doc, "table_count", None)
+                        or 0,
+                        "artifactAvailability": {
+                            "markdown": await self.file_service.is_file_processed(
+                                file_hash, processor_used
+                            ),
+                            "analysis": await self.file_service.processing_file_exists(
+                                file_hash, processor_used, "raw_analysis.json"
+                            ),
+                            "original": await self.file_service.get_file_metadata(file_hash)
+                            is not None,
+                        },
+                    },
+                }
+            )
+
+        primary_file_id = uploaded_files[0]["fileId"] if uploaded_files else ""
+        primary_processor = (
+            uploaded_files[0].get("processorUsed") if uploaded_files else None
+        )
+
+        return {
+            "fileId": primary_file_id,
+            "conversionId": primary_file_id,
+            "processorUsed": primary_processor,
+            "uploadedFiles": uploaded_files,
+        }
 
 
 # Singleton instance

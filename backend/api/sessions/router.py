@@ -82,6 +82,19 @@ async def get_session(
     return session
 
 
+@router.get("/{session_id}/restore-view", response_model=dict)
+async def get_session_restore_view(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return canonical, blob-aware viewer state for restoring a session."""
+    user_id = current_user["id"]
+    session = session_service.get_session(user_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return await session_service.build_restore_view(session)
+
+
 @router.patch("/{session_id}", response_model=dict)
 async def update_session(
     session_id: str,
@@ -231,6 +244,22 @@ async def get_shared_session(
         )
 
     return session
+
+
+@router.get("/shared/{session_id}/restore-view", response_model=dict)
+async def get_shared_session_restore_view(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return canonical, blob-aware viewer state for restoring a shared session."""
+    user_id = current_user["id"]
+    session = session_service.get_session_for_shared_view(user_id, session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Shared session not found or you don't have access",
+        )
+    return await session_service.build_restore_view(session)
 
 
 @router.post("/{session_id}/share")
