@@ -311,7 +311,7 @@ class OrganizedFileService:
                 resolved_figure_count = len(resolved_figures)
 
         # markdown_available checks document.md directly (honest UI flag, independent of
-        # the broader is_file_processed cache check which uses 4-tier fallback)
+        # the strict is_file_processed cache gate)
         markdown_available = (
             await self._blob.exists(
                 f"global/{file_hash}/processed/{self._get_processor_str(processor_used)}/document.md"
@@ -379,23 +379,16 @@ class OrganizedFileService:
         return str(processor)
 
     async def is_file_processed(self, file_hash: str, processor: Any) -> bool:
-        """True if any meaningful artifact subtree exists for this processor.
+        """True if the canonical markdown artifact exists for this processor.
 
-        Uses the same 4-tier fallback as resolve_processed_processor so that
-        documents with raw_analysis/figures/tables but no document.md are still
-        treated as cached and won't trigger a redundant re-process.
+        This method is used as the process-endpoint cache gate, so it must stay
+        strict: metadata-only or partial artifact subtrees should trigger a
+        fresh processing run that can repopulate blob storage.
         """
         proc_str = self._get_processor_str(processor)
-        base = f"global/{file_hash}/processed/{proc_str}"
-        for path in (
-            f"{base}/metadata.json",
-            f"{base}/document.md",
-            f"{base}/raw_analysis.json",
-        ):
-            if await self._blob.exists(path):
-                return True
-        hits = await self._blob.list_blobs_with_prefix(f"{base}/", limit=1)
-        return bool(hits)
+        return await self._blob.exists(
+            f"global/{file_hash}/processed/{proc_str}/document.md"
+        )
 
     async def get_processed_content(
         self, file_hash: str, processor: Any
