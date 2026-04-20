@@ -7,6 +7,7 @@ Better Auth 'session' table in Postgres via SQLAlchemy.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -82,6 +83,10 @@ async def get_current_user(request: Request) -> dict:
         if now > expires:
             raise HTTPException(status_code=401, detail="Session expired")
 
+        allowed = _get_allowed_emails()
+        if allowed and user.email.lower() not in allowed:
+            raise HTTPException(status_code=403, detail="Access denied: email not authorized")
+
         return {
             "id": user.id,
             "email": user.email,
@@ -96,6 +101,14 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Authentication failed")
     finally:
         db.close()
+
+
+def _get_allowed_emails() -> set:
+    """Return lowercased allowed email set. Empty set = allow all (dev mode)."""
+    raw = os.environ.get("ALLOWED_EMAILS", "")
+    if not raw.strip():
+        return set()
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
 def _extract_token(request: Request) -> Optional[str]:
