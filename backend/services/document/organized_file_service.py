@@ -291,8 +291,31 @@ class OrganizedFileService:
             else processed_metadata.get("tables_found")
         )
 
+        # Fallback: if metadata.json had no figures data, enumerate blob prefix
+        if not resolved_figures and not resolved_figure_count and processor_used:
+            figure_blobs = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{processor_used}/figures/", limit=50
+            )
+            image_blobs = [b for b in figure_blobs if b.lower().endswith((".png", ".jpg", ".jpeg"))]
+            if image_blobs:
+                from pathlib import Path as _Path
+                resolved_figures = [
+                    {
+                        "id": _Path(b).stem,
+                        "image_path": f"figures/{_Path(b).name}",
+                        "caption": None,
+                        "page": None,
+                    }
+                    for b in sorted(image_blobs)
+                ]
+                resolved_figure_count = len(resolved_figures)
+
+        # markdown_available checks document.md directly (honest UI flag, independent of
+        # the broader is_file_processed cache check which uses 4-tier fallback)
         markdown_available = (
-            await self.is_file_processed(file_hash, processor_used)
+            await self._blob.exists(
+                f"global/{file_hash}/processed/{self._get_processor_str(processor_used)}/document.md"
+            )
             if processor_used
             else False
         )
@@ -347,11 +370,23 @@ class OrganizedFileService:
         return str(processor)
 
     async def is_file_processed(self, file_hash: str, processor: Any) -> bool:
-        """Check if a file has already been processed by a specific processor."""
+        """True if any meaningful artifact subtree exists for this processor.
+
+        Uses the same 4-tier fallback as resolve_processed_processor so that
+        documents with raw_analysis/figures/tables but no document.md are still
+        treated as cached and won't trigger a redundant re-process.
+        """
         proc_str = self._get_processor_str(processor)
-        return await self._blob.exists(
-            f"global/{file_hash}/processed/{proc_str}/document.md"
-        )
+        base = f"global/{file_hash}/processed/{proc_str}"
+        for path in (
+            f"{base}/metadata.json",
+            f"{base}/document.md",
+            f"{base}/raw_analysis.json",
+        ):
+            if await self._blob.exists(path):
+                return True
+        hits = await self._blob.list_blobs_with_prefix(f"{base}/", limit=1)
+        return bool(hits)
 
     async def get_processed_content(
         self, file_hash: str, processor: Any

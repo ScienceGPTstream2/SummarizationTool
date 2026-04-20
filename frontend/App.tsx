@@ -1014,7 +1014,7 @@ export default function App() {
           processingResult: {
             conversionId: doc.file_hash,
             fileHash: doc.file_hash,
-            markdownPath: `files/global/${doc.file_hash}/output/content.md`, // Legacy path assumption, but ID is what matters
+            markdownPath: null,
             processorUsed:
               doc.processor_used ||
               fileConfig.processor_used ||

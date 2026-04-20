@@ -121,9 +121,6 @@ class DoclingRemoteClient:
         md_path = output_dir / "document.md"
         md_path.write_text(markdown_content, encoding="utf-8")
 
-        meta_path = output_dir / "metadata.json"
-        meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
         try:
             await self._download_artifact_bundle(conversion_id, output_dir)
         except Exception as exc:
@@ -132,6 +129,32 @@ class DoclingRemoteClient:
                 conversion_id,
                 exc,
             )
+
+        # Backfill figures into metadata after bundle extraction so that
+        # build_document_view can populate figures[] from metadata.json
+        figures_dir = output_dir / "figures"
+        if figures_dir.exists():
+            figures_list = [
+                {
+                    "id": f.stem,
+                    "image_path": f"figures/{f.name}",
+                    "caption": None,
+                    "page": None,
+                }
+                for f in sorted(figures_dir.iterdir())
+                if f.suffix.lower() in (".png", ".jpg", ".jpeg")
+            ]
+            if figures_list:
+                metadata["figures"] = figures_list
+                metadata["figures_found"] = len(figures_list)
+                _log.info(
+                    "DoclingRemoteClient: backfilled %d figures into metadata for %s",
+                    len(figures_list),
+                    conversion_id,
+                )
+
+        meta_path = output_dir / "metadata.json"
+        meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         return {
             "success": True,
