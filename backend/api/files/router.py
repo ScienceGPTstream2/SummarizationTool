@@ -192,7 +192,10 @@ async def download_file(file_id: str):
         return Response(
             content=content,
             media_type=mime_type,
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Accept-Ranges": "none",
+            },
         )
 
     except HTTPException:
