@@ -324,6 +324,15 @@ class OrganizedFileService:
             if processor_used
             else False
         )
+        # Fallback: if metadata.json had no tables count, enumerate blob prefix
+        if not resolved_table_count and processor_used:
+            table_blobs = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{processor_used}/tables/", limit=50
+            )
+            html_blobs = [b for b in table_blobs if b.lower().endswith(".html")]
+            if html_blobs:
+                resolved_table_count = len(html_blobs)
+
         tables_available = bool(resolved_table_count) or (
             await self.processing_file_exists(file_hash, processor_used, "tables/table-1.html")
             if processor_used

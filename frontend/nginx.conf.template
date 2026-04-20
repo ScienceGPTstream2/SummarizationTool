@@ -7,6 +7,8 @@ server {
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
     gzip_min_length 1000;
 
+    client_max_body_size 50m;
+
     # Proxy all API calls (including /api/auth/*) to the backend.
     # FastAPI's api/auth/proxy.py forwards /api/auth/* onward to the
     # auth sidecar at localhost:3001 — nginx does not need to know about it.

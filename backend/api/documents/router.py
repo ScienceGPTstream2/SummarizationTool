@@ -500,6 +500,17 @@ async def process_uploaded_file(
             )
 
         processor_used = result.get("processor_used", processor_name)
+
+        # Sync the full output directory to blob so artifacts are durable across
+        # container restarts and available to restore-view, analysis, and figure routes.
+        try:
+            await file_service.sync_processing_output_to_blob(
+                file_hash, processor_used, output_dir
+            )
+            print(f"[PROCESS] ✅ Synced {output_dir} to blob for {file_hash}")
+        except Exception as _sync_err:
+            print(f"[PROCESS] ⚠️  Blob sync failed (artifacts only in /tmp): {_sync_err}")
+
         print(f"[PROCESS] ✅ Saved directly to organized structure: {output_dir}")
 
         canonical_view = await file_service.build_document_view(
