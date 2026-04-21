@@ -40,7 +40,6 @@ const frontendURLs = (process.env.FRONTEND_URL || "http://localhost:3000")
   .split(",")
   .map((u) => u.trim())
   .filter(Boolean);
-const primaryFrontendURL = frontendURLs[0];
 
 const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3001",
@@ -110,6 +109,25 @@ app.use(
     credentials: true,
   })
 );
+
+// Allowlist enforcement: intercept get-session before Better Auth handles it.
+// This is the call the frontend makes on every page load to check auth state.
+// Returning 403 causes authUtils._fetchSession() to return null → user treated as logged out.
+app.get("/api/auth/get-session", async (req, res, next) => {
+  const allowed = getAllowedEmails();
+  if (allowed.size === 0) return next();
+  try {
+    const session = await auth.api.getSession({ headers: req.headers as any });
+    if (!session?.user?.email) return next();
+    if (!allowed.has(session.user.email.toLowerCase())) {
+      console.log(`[Allowlist] Blocked get-session for ${session.user.email}`);
+      return res.status(403).json({ error: "Access denied: email not authorized" });
+    }
+  } catch (err) {
+    console.error("[Allowlist] Error in get-session check:", err);
+  }
+  return next();
+});
 
 // Mount Better Auth handler at /api/auth/*
 app.all("/api/auth/*", toNodeHandler(auth));
