@@ -46,6 +46,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # The backend calls docling-service over HTTP via DOCLING_SERVICE_URL.
 #
 # Horizontal scaling is handled by Azure Container Apps replicas (1-5).
+# Each replica is one independent worker with its own semaphore.
 # Gunicorn is kept for process supervision: it enforces --timeout on stuck
 # requests and performs graceful shutdown on SIGTERM.
 CMD ["sh", "-c", "gunicorn main:app \

@@ -41,27 +41,9 @@ async def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="No auth token provided")
 
-    # Debug: log token prefix and DB URL
-    from models.base import DATABASE_URL as _db_url
-
-    logger.info(f"[AUTH] Token prefix: {token[:20]}... | DB: {_db_url[:60]}...")
-
     # Query session + user in one go
     db: SASession = get_db_session()
     try:
-        # First check if token exists at all
-        token_check = db.execute(
-            select(AuthSession).where(AuthSession.token == token)
-        ).first()
-        logger.info(f"[AUTH] Token lookup result: {token_check is not None}")
-
-        if not token_check:
-            # Count total sessions for debugging
-            from sqlalchemy import func
-
-            total = db.execute(select(func.count()).select_from(AuthSession)).scalar()
-            logger.info(f"[AUTH] Total sessions in DB: {total}")
-
         stmt = (
             select(AuthSession, User)
             .join(User, AuthSession.user_id == User.id)

@@ -9,14 +9,10 @@ FastAPI backend. Because the auth sidecar runs on localhost:3001 inside the
 same container-app pod, we forward rather than running nginx.
 """
 
-import logging
 import os
-
 import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth-proxy"])
 
@@ -28,6 +24,7 @@ def _get_allowed_emails() -> set:
     if not raw.strip():
         return set()
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
 
 # Headers that must not be forwarded (hop-by-hop or would break the proxy).
 _HOP_BY_HOP = frozenset(
@@ -52,7 +49,6 @@ _HOP_BY_HOP = frozenset(
 )
 async def proxy_auth(path: str, request: Request) -> Response:
     """Forward any /api/auth/* request to the BetterAuth sidecar."""
-    print(f"[PROXY] {request.method} /api/auth/{path}", flush=True)
     target_url = f"{_AUTH_SIDECAR_URL}/api/auth/{path}"
 
     # Pass all headers except hop-by-hop ones; add forwarding hints.
@@ -77,29 +73,19 @@ async def proxy_auth(path: str, request: Request) -> Response:
     # Enforce email allowlist: intercept get-session before returning to browser.
     # This is the call the frontend makes to determine auth state on every page load.
     if path == "get-session" and request.method.upper() == "GET" and upstream.status_code == 200:
-        raw_env = os.getenv("ALLOWED_EMAILS", "")
         allowed = _get_allowed_emails()
-        print(f"[ALLOWLIST] get-session hit. ALLOWED_EMAILS={raw_env!r} allowed_set={allowed!r}", flush=True)
         if allowed:
             try:
                 data = upstream.json()
-                if not isinstance(data, dict):
-                    print(f"[ALLOWLIST] get-session response is not a dict: {type(data)} — skipping check", flush=True)
-                else:
+                if isinstance(data, dict):
                     email = (data.get("user") or {}).get("email", "")
-                    print(f"[ALLOWLIST] checking email={email!r} against allowed={allowed!r}", flush=True)
                     if email and email.lower() not in allowed:
-                        print(f"[ALLOWLIST] BLOCKED get-session for {email!r}", flush=True)
                         return JSONResponse(
                             status_code=403,
                             content={"error": "Access denied: email not authorized"},
                         )
-                    else:
-                        print(f"[ALLOWLIST] ALLOWED get-session for {email!r}", flush=True)
-            except Exception as exc:
-                print(f"[ALLOWLIST] Error parsing get-session response: {exc}", flush=True)
-        else:
-            print("[ALLOWLIST] ALLOWED_EMAILS empty — allowing all (dev mode)", flush=True)
+            except Exception:
+                pass
 
     # Build response — handle Set-Cookie specially since there can be multiples
     # and a dict would drop all but the last one.

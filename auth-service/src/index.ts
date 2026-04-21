@@ -90,7 +90,7 @@ const auth = betterAuth({
           );
           const email = (result.rows[0]?.email as string | undefined)?.toLowerCase();
           if (!email || !allowed.has(email)) {
-            console.log(`[Allowlist] Blocked session for userId=${session.userId} email=${email}`);
+            console.log(`[Allowlist] Blocked session creation for userId=${session.userId}`);
             return false;
           }
         },
@@ -120,7 +120,7 @@ app.get("/api/auth/get-session", async (req, res, next) => {
     const session = await auth.api.getSession({ headers: req.headers as any });
     if (!session?.user?.email) return next();
     if (!allowed.has(session.user.email.toLowerCase())) {
-      console.log(`[Allowlist] Blocked get-session for ${session.user.email}`);
+      console.log("[Allowlist] Blocked get-session: email not on allowlist");
       return res.status(403).json({ error: "Access denied: email not authorized" });
     }
   } catch (err) {
@@ -154,7 +154,6 @@ app.get("/api/auth/validate", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-console.log(`[Allowlist] ALLOWED_EMAILS at startup: "${process.env.ALLOWED_EMAILS || "(empty — allow all)"}"`);
 app.listen(PORT, () => {
   console.log(`✅ Better Auth sidecar running on http://localhost:${PORT}`);
   console.log(`   Auth endpoints: http://localhost:${PORT}/api/auth/*`);

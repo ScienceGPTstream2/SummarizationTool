@@ -1,166 +1,271 @@
 # AI Document Summarization Tool 🚀
 
-Full-stack React + FastAPI application for AI-powered document summarization and entity extraction, with Supabase for authentication and data persistence.
+A full-stack platform for document ingestion, multimodal extraction, prompt-driven workflows, and in-app evaluation.
 
-🔗 **Additional Documentation:**
-
-- [Backend README](backend/README.md) - Backend setup, configuration, and secrets
-- [Supabase README](supabase-docker/README.md) - Database and authentication setup
+Built with a React frontend, FastAPI backend, Better Auth sidecar, PostgreSQL, and a flexible AI model layer that can be adapted to multiple providers and deployment environments.
 
 ---
 
-## ✨ Features
+## ✨ At a glance
 
-- 📄 Upload and process PDFs (and other document formats)
-- 🤖 Summarization using AI models (Azure OpenAI, Google Gemini, local Ollama)
-- 🕵️‍♂️ Entity extraction with customizable prompts
-- 🔐 User authentication via Supabase (GitHub OAuth)
-- 💾 Session persistence and history tracking
-- ⚙️ Settings management for API keys and model choices
-- 🌙 Dark/light theme toggle for comfortable reading
+This platform is designed for teams that need to ingest documents, extract structured information, analyze figures, run prompt-based workflows, and evaluate output quality in one place.
 
----
+It supports:
 
-## 🏗 Architecture Overview
-
-| Service                 | Port | Description                                     |
-| ----------------------- | ---- | ----------------------------------------------- |
-| Frontend (Vite/React)   | 3000 | User interface                                  |
-| Backend (FastAPI)       | 8001 | API server for document processing and LLM      |
-| Supabase (Kong Gateway) | 8000 | Authentication, database, and REST API          |
-| Supabase Studio         | 8000 | Database management UI (via `/project/default`) |
-
----
-
-## 🛠 Prerequisites
-
-- **Node.js & npm** (LTS recommended)
-- **Python 3.10+** & pip
-- **Docker & Docker Compose** (for Supabase)
-- A valid `secrets.toml` in `backend/core/` (see Backend README)
+- **Containerized local development and deployment** across frontend, backend, auth, and supporting services
+- **Document processing pipelines** with parser options such as **Azure Document Intelligence** and **Docling**
+- **Pluggable model providers** including:
+  - Azure OpenAI
+  - Google Vertex AI / Gemini
+  - Ollama
+  - vLLM-backed endpoints
+  - other provider-specific or self-hosted runtimes
+- **Prompt-based entity extraction** and structured downstream workflows
+- **Template workspaces** for creating, organizing, versioning, and sharing prompts
+- **User groups and shared workspaces** for collaborative review and reuse
+- **Improved authentication** through Better Auth with GitHub OAuth and Microsoft Entra support
+- **In-app evaluation workflows** powered by **DeepEval**, including custom evaluation steps and LLM-as-a-judge patterns
+- **Batch and interactive workflows** for extraction, review, and evaluation
+- **Production-oriented deployment paths** for Azure infrastructure and other containerized environments
 
 ---
 
-## 🚀 Quick Start
+## 🏗 Architecture overview
 
-### 1. Clone Repository
+The application is organized around a small set of core services:
 
-```bash
-git clone <repo-url> SummarizationTool
-cd SummarizationTool
-```
+| Service | Port | Purpose |
+| --- | ---: | --- |
+| Frontend (React + Vite) | 3000 | Main user interface |
+| Backend (FastAPI) | 8001 | Document processing, extraction, evaluation, and APIs |
+| Auth sidecar (Better Auth) | 3001 | Authentication, session handling, and OAuth flows |
+| PostgreSQL | 5432 | Application data, auth tables, sessions, templates, and groups |
+| Azurite (local dev) | 10000 | Local Azure Blob Storage emulator |
 
-### 2. Start Supabase (Database & Auth)
-
-```bash
-cd supabase-docker
-cp .env.example .env  # If first time, configure secrets
-docker compose up -d
-cd ..
-```
-
-Supabase will be available at `http://localhost:8000`
-
-### 3. Install & Start Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8001
-```
-
-### 4. Install & Start Frontend
-
-```bash
-# Copy environment template
-cp .env.example .env.local
-
-# Edit .env.local with your Supabase anon key (from supabase-docker/.env)
-# VITE_SUPABASE_ANON_KEY=your-anon-key-here
-
-npm install
-npm run dev
-```
-
-App will be available at `http://localhost:3000`
+In production, the frontend can be deployed separately while the backend and auth service run together in a containerized environment.
 
 ---
 
-## 📂 Project Structure
+## 🖼 Product walkthrough
 
-```
-├── backend/               # FastAPI server (see Backend README)
-│   └── core/secrets.toml  # Backend secrets (API keys, Supabase config)
-├── components/            # React UI components
-├── supabase-docker/       # Self-hosted Supabase (see Supabase README)
-│   └── .env               # Supabase secrets (JWT, passwords)
-├── styles/                # Global CSS
-├── templates/             # Summarization templates
-├── .env.example           # Frontend env template (copy to .env.local)
-├── .env.local             # Frontend env variables (gitignored)
-├── App.tsx                # Main application component
-├── main.tsx               # Front-end entry point
-└── README.md              # This file
-```
+> The screenshots below are sourced from `docs/images/`.
 
-### Environment Files
+### Overall application flow
 
-| File                        | Purpose                        | Git Status    |
-| --------------------------- | ------------------------------ | ------------- |
-| `.env.example`              | Template for frontend env vars | ✅ Committed  |
-| `.env.local`                | Actual frontend env vars       | ❌ Gitignored |
-| `supabase-docker/.env`      | Supabase secrets               | ❌ Gitignored |
-| `backend/core/secrets.toml` | Backend API keys & secrets     | ❌ Gitignored |
+![Overall application flow](docs/images/Science-GPT%20Summarization%20Web%20Application%20Work%20Flow.png)
 
----
+*Figure 1. High-level application flow showing document ingestion, extraction, prompt-driven workflows, review, and in-app evaluation.*
 
-## 🚀 Starting All Services
+### Multi-document upload and parser selection
 
-Run these in separate terminals (or use the systemd service for Supabase):
+![Document upload with multi-document ingestion and parser selection](docs/images/Document%20Upload%20box%20supports.png)
 
-```bash
-# Terminal 1: Supabase (if not using systemd auto-start)
-cd supabase-docker && docker compose up -d
+*Figure 2. Document upload workflow showing support for multiple document ingestion and parser selection through the document parser dropdown.*
 
-# Terminal 2: Backend (FastAPI)
-cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8001
+### Figure extraction and detailed vision analysis
 
-# Terminal 3: Frontend (React/Vite)
-npm run dev -- --host
-```
+![Expanded figure extraction with detailed figure analysis](docs/images/Expanded%20figure%20extraction.png)
 
-For remote access, set the API URL:
+*Figure 3. Expanded figure extraction view with detailed figure analysis and summarization generated by vision large language models (VLLMs).* 
 
-```bash
-VITE_API_BASE_URL="http://<PUBLIC_IP>:8001" npm run dev -- --host
-```
+### LLM selection for entity extraction
 
----
+![LLM selection for entity extraction](docs/images/LLM%20selection%20for%20entity%20extraction.png)
 
-## 📖 Deployment
+*Figure 4. Entity extraction workflow showing model selection for the extraction step.*
 
-### Production Build
+### Entity extraction results and visual grounding
 
-```bash
-npm run build
-```
+![Entity extraction results with visual grounding](docs/images/Entity%20extraction%20page.png)
 
-Serve `dist/` on any static host (Netlify, Vercel, GitHub Pages, Nginx).
+*Figure 5. Entity extraction page showing the entity name, prompt used for extraction, extracted value, and visual grounding with a bounding box drawn around the cited region in the PDF.*
 
-### Auto-Start Supabase on VM Boot
+### In-app evaluation setup
 
-For VMs with scheduled shutdowns (e.g., Azure), set up auto-start:
+![In-app evaluation setup with ground truth entry](docs/images/In-app%20evaluation%20page.png)
 
-```bash
-cd supabase-docker
-sudo ./setup-autostart.sh
-```
+*Figure 6. In-app evaluation page where users can enter ground truth and use LLM-as-a-judge workflows to score multiple outputs.*
 
-See [Supabase README](supabase-docker/README.md) for details.
+### In-app evaluation results and export
+
+![In-app evaluation results and export options](docs/images/In-app%20evaluation%20results%20and%20export.png)
+
+*Figure 7. Evaluation results page with a tabular view of scoring outputs and export options for Excel-compatible batch output.*
+
+### Session metrics tracked in app
+
+![Session metrics tracked in app](docs/images/Session%20metrics%20are%20tracked%20in%20app.png)
+
+*Figure 8. Additional in-app metrics view showing session-level tracking and performance insights captured during workflow execution.*
 
 ---
 
-## 🙏 Thank You :)
+## 🔑 Core capabilities
+
+### 1. Container-first development and deployment
+
+The stack is designed to run in containers for both local development and deployment. The repository already includes Docker support for:
+
+- frontend
+- backend
+- auth service
+- PostgreSQL
+- local blob storage emulation
+
+This makes it easier to maintain consistent environments across local development, CI/CD, and cloud deployments.
+
+### 2. Flexible model and provider integration
+
+The application is built so model access is not tied to a single vendor.
+
+The platform is designed to support providers and runtimes such as:
+
+- **Azure OpenAI**
+- **Vertex AI / Gemini**
+- **Anthropic-style providers**
+- **Local or self-hosted runtimes** such as **Ollama** and **vLLM**
+
+This makes it easier to swap providers based on cost, privacy, performance, or deployment constraints.
+
+### 3. Better Auth and session handling
+
+Authentication is handled by a dedicated **Better Auth** sidecar backed by PostgreSQL.
+
+This provides:
+
+- GitHub OAuth support
+- Microsoft Entra support
+- server-side session validation
+- clearer separation between application data and auth concerns
+- a more portable architecture for self-managed deployments
+
+### 4. Groups, sharing, and collaborative workflows
+
+The platform includes collaboration features for teams:
+
+- create and manage **user groups**
+- share sessions with groups
+- browse **shared history**
+- open shared work in a safe copy-on-write workflow
+
+### 5. Template workspace
+
+Prompt engineering is a first-class part of the product.
+
+The template workspace supports:
+
+- creating and editing prompt templates
+- organizing templates into folders and workspaces
+- user, group, and global scope
+- sharing templates with collaborators
+- template version history and iteration
+
+### 6. In-app evaluation with DeepEval
+
+The app includes built-in evaluation workflows so teams can assess extraction quality without leaving the product.
+
+This includes:
+
+- DeepEval-powered evaluation flows
+- configurable metrics
+- custom evaluation steps
+- support for multiple judge models and providers
+- persistent evaluation records tied to sessions
+
+---
+
+## 🚀 Quick start
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+- Provider credentials for any external models or services you want to enable
+
+### Start the local stack
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+This brings up the local development stack defined in `docker-compose.yml`, including:
+
+- PostgreSQL
+- Better Auth service
+- FastAPI backend
+- React frontend
+- Azurite for local blob storage emulation
+
+### Local URLs
+
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8001`
+- Auth service: `http://localhost:3001`
+- PostgreSQL: `localhost:5432`
+- Azurite blob endpoint: `http://localhost:10000`
+
+---
+
+## ⚙️ Configuration notes
+
+The exact credentials and environment variables you need depend on which providers and features you enable.
+
+Common configuration areas include:
+
+- PostgreSQL connection settings
+- Better Auth secrets and OAuth configuration
+- Azure storage configuration
+- Azure OpenAI credentials
+- Azure Document Intelligence credentials
+- Vertex AI / Gemini project configuration
+- optional local or self-hosted inference endpoints
+
+For service-specific setup details, see the linked documentation below.
+
+---
+
+## 📂 Repository structure
+
+```text
+SummarizationTool-dev/
+├── auth-service/        # Better Auth sidecar
+├── backend/             # FastAPI API, processing, evaluation, data models
+├── frontend/            # React/Vite client application
+├── docs/                # Migration, auth, deployment, and internal docs
+├── infra/               # Infrastructure and deployment manifests/scripts
+├── scripts/             # Deployment and utility scripts
+├── docker-compose.yml   # Local multi-service stack
+└── README.md            # Project overview
+```
+
+---
+
+## 📚 Additional documentation
+
+- [Backend README](backend/README.md) — backend setup and processing details
+- [Migration guide](docs/migration-guide.md) — architecture migration and platform transition notes
+- [GitHub auth setup](docs/setup-github-auth.md) — Better Auth GitHub OAuth configuration
+- [Dockerize & deploy to Azure](docs/superpowers/plans/dockerize-and-deploy.md) — deployment architecture and implementation notes
+
+---
+
+## ☁️ Deployment direction
+
+This repository is set up for container-based deployment and includes infrastructure artifacts for Azure-based environments.
+
+The current deployment path supports:
+
+- containerized backend and auth sidecar
+- separate frontend deployment
+- PostgreSQL-backed persistence
+- blob storage for uploaded and processed files
+- CI/CD-driven image build and rollout
+
+---
+
+## 🙏 Acknowledgements
 
 Special thanks to:
 
