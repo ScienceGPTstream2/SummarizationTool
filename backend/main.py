@@ -101,6 +101,11 @@ from api.auth.proxy import router as auth_proxy_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os as _os
+    _allowed = _os.getenv("ALLOWED_EMAILS", "")
+    logging.getLogger(__name__).info(
+        f"[Allowlist] STARTUP: ALLOWED_EMAILS={_allowed!r} ({'SET' if _allowed.strip() else 'EMPTY — allow all'})"
+    )
     # The default asyncio thread pool is min(32, cpu_count+4) — on this server
     # that is only 8 threads. Every LLM provider call uses asyncio.to_thread(),
     # so with the extraction semaphore allowing up to 50 concurrent tasks, 42 of

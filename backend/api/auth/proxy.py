@@ -76,19 +76,26 @@ async def proxy_auth(path: str, request: Request) -> Response:
     # Enforce email allowlist: intercept get-session before returning to browser.
     # This is the call the frontend makes to determine auth state on every page load.
     if path == "get-session" and request.method.upper() == "GET" and upstream.status_code == 200:
+        raw_env = os.getenv("ALLOWED_EMAILS", "")
         allowed = _get_allowed_emails()
+        logger.info(f"[Allowlist] get-session hit: ALLOWED_EMAILS={raw_env!r} allowed_set={allowed!r}")
         if allowed:
             try:
                 data = upstream.json()
                 email = (data.get("user") or {}).get("email", "")
+                logger.info(f"[Allowlist] checking email={email!r} against allowed={allowed!r}")
                 if email and email.lower() not in allowed:
-                    logger.info(f"[Allowlist] Blocked get-session for {email}")
+                    logger.info(f"[Allowlist] BLOCKED get-session for {email!r}")
                     return JSONResponse(
                         status_code=403,
                         content={"error": "Access denied: email not authorized"},
                     )
+                else:
+                    logger.info(f"[Allowlist] ALLOWED get-session for {email!r}")
             except Exception as exc:
                 logger.error(f"[Allowlist] Error parsing get-session response: {exc}")
+        else:
+            logger.info("[Allowlist] ALLOWED_EMAILS empty — allowing all (dev mode)")
 
     # Build response — handle Set-Cookie specially since there can be multiples
     # and a dict would drop all but the last one.
