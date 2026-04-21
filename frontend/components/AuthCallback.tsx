@@ -18,6 +18,7 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
   const [status, setStatus] = useState<"processing" | "success" | "error">(
     "processing"
   );
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   useEffect(() => {
     const handleAuthCallback = async () => {
@@ -48,17 +49,22 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
               setStatus("success");
               onSuccess();
             } else {
+              const urlError = new URLSearchParams(window.location.search).get("error");
+              const msg = urlError
+                ? "Your account is not authorized to access this application. Contact your administrator."
+                : "Authentication failed. Please try again.";
+              setErrorMessage(msg);
               setStatus("error");
-              onError("Authentication failed. Please try again.");
+              onError(msg);
             }
           }, 1500);
         }
       } catch (err) {
         console.error("Auth callback exception:", err);
+        const msg = err instanceof Error ? err.message : "An unexpected error occurred";
+        setErrorMessage(msg);
         setStatus("error");
-        onError(
-          err instanceof Error ? err.message : "An unexpected error occurred"
-        );
+        onError(msg);
       }
     };
 
@@ -131,7 +137,7 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
                 Sign in failed
               </h2>
               <p className="text-muted-foreground">
-                There was a problem signing you in.
+                {errorMessage || "There was a problem signing you in."}
               </p>
             </div>
           </>

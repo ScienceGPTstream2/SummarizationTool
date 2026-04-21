@@ -19,6 +19,19 @@ import { betterAuth } from "better-auth";
 import { toNodeHandler } from "better-auth/node";
 import { Pool } from "pg";
 
+// ---------- Shared DB Pool ----------
+
+const dbPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+function getAllowedEmails(): Set<string> {
+  const raw = process.env.ALLOWED_EMAILS || "";
+  if (!raw.trim()) return new Set();
+  return new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean));
+}
+
 // ---------- Better Auth Configuration ----------
 
 // Support comma-separated FRONTEND_URL for multiple trusted origins
@@ -35,10 +48,7 @@ const auth = betterAuth({
   // Trust all configured frontend origins (production FQDN + dev port-forward)
   trustedOrigins: frontendURLs,
 
-  database: new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-  }),
+  database: dbPool,
 
   // Session configuration
   session: {
@@ -65,6 +75,28 @@ const auth = betterAuth({
           },
         }
       : {}),
+  },
+
+  // Block session creation for non-allowlisted emails.
+  // Empty ALLOWED_EMAILS = allow all (dev mode).
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const allowed = getAllowedEmails();
+          if (allowed.size === 0) return;
+          const result = await dbPool.query(
+            'SELECT email FROM "user" WHERE id = $1',
+            [session.userId]
+          );
+          const email = (result.rows[0]?.email as string | undefined)?.toLowerCase();
+          if (!email || !allowed.has(email)) {
+            console.log(`[Allowlist] Blocked session for userId=${session.userId} email=${email}`);
+            return false;
+          }
+        },
+      },
+    },
   },
 });
 
