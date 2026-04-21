@@ -24,6 +24,12 @@ server {
         proxy_buffering    off;
     }
 
+    # Serve ES module worker files with correct MIME type (nginx mime.types omits .mjs)
+    location ~* \.mjs$ {
+        default_type application/javascript;
+        try_files $uri =404;
+    }
+
     # SPA fallback — serve index.html for all non-asset routes
     location / {
         try_files $uri $uri/ /index.html;
