@@ -154,6 +154,7 @@ app.get("/api/auth/validate", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
+console.log(`[Allowlist] ALLOWED_EMAILS at startup: "${process.env.ALLOWED_EMAILS || "(empty — allow all)"}"`);
 app.listen(PORT, () => {
   console.log(`✅ Better Auth sidecar running on http://localhost:${PORT}`);
   console.log(`   Auth endpoints: http://localhost:${PORT}/api/auth/*`);
