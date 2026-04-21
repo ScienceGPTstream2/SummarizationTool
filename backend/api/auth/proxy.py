@@ -52,6 +52,7 @@ _HOP_BY_HOP = frozenset(
 )
 async def proxy_auth(path: str, request: Request) -> Response:
     """Forward any /api/auth/* request to the BetterAuth sidecar."""
+    print(f"[PROXY] {request.method} /api/auth/{path}", flush=True)
     target_url = f"{_AUTH_SIDECAR_URL}/api/auth/{path}"
 
     # Pass all headers except hop-by-hop ones; add forwarding hints.
@@ -78,24 +79,27 @@ async def proxy_auth(path: str, request: Request) -> Response:
     if path == "get-session" and request.method.upper() == "GET" and upstream.status_code == 200:
         raw_env = os.getenv("ALLOWED_EMAILS", "")
         allowed = _get_allowed_emails()
-        logger.info(f"[Allowlist] get-session hit: ALLOWED_EMAILS={raw_env!r} allowed_set={allowed!r}")
+        print(f"[ALLOWLIST] get-session hit. ALLOWED_EMAILS={raw_env!r} allowed_set={allowed!r}", flush=True)
         if allowed:
             try:
                 data = upstream.json()
-                email = (data.get("user") or {}).get("email", "")
-                logger.info(f"[Allowlist] checking email={email!r} against allowed={allowed!r}")
-                if email and email.lower() not in allowed:
-                    logger.info(f"[Allowlist] BLOCKED get-session for {email!r}")
-                    return JSONResponse(
-                        status_code=403,
-                        content={"error": "Access denied: email not authorized"},
-                    )
+                if not isinstance(data, dict):
+                    print(f"[ALLOWLIST] get-session response is not a dict: {type(data)} — skipping check", flush=True)
                 else:
-                    logger.info(f"[Allowlist] ALLOWED get-session for {email!r}")
+                    email = (data.get("user") or {}).get("email", "")
+                    print(f"[ALLOWLIST] checking email={email!r} against allowed={allowed!r}", flush=True)
+                    if email and email.lower() not in allowed:
+                        print(f"[ALLOWLIST] BLOCKED get-session for {email!r}", flush=True)
+                        return JSONResponse(
+                            status_code=403,
+                            content={"error": "Access denied: email not authorized"},
+                        )
+                    else:
+                        print(f"[ALLOWLIST] ALLOWED get-session for {email!r}", flush=True)
             except Exception as exc:
-                logger.error(f"[Allowlist] Error parsing get-session response: {exc}")
+                print(f"[ALLOWLIST] Error parsing get-session response: {exc}", flush=True)
         else:
-            logger.info("[Allowlist] ALLOWED_EMAILS empty — allowing all (dev mode)")
+            print("[ALLOWLIST] ALLOWED_EMAILS empty — allowing all (dev mode)", flush=True)
 
     # Build response — handle Set-Cookie specially since there can be multiples
     # and a dict would drop all but the last one.
