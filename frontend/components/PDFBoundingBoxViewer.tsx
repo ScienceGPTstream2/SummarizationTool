@@ -208,9 +208,12 @@ export function PDFBoundingBoxViewer({
         const qs = processorUsed
           ? `?processor_used=${encodeURIComponent(processorUsed)}`
           : "";
-        const response = await fetch(`/api/documents/${conversionId}/analysis${qs}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await fetch(
+          `/api/documents/${conversionId}/analysis${qs}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
 
         if (isCancelled) return;
 
@@ -299,7 +302,9 @@ export function PDFBoundingBoxViewer({
         console.error("Error loading PDF:", err);
         setPdfDocument(null);
         setTotalPages(0);
-        setError(`Failed to load PDF document: ${err?.message || "Unknown error"}`);
+        setError(
+          `Failed to load PDF document: ${err?.message || "Unknown error"}`
+        );
       }
     };
 

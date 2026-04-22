@@ -519,7 +519,8 @@ export function UploadPage({
     const firstResult = uploadResults[firstFile.name];
     const firstExisting = existingFileMap[firstFile.name] || {};
     const firstProcessed =
-      processedFilesRef.current[firstFile.name] || firstExisting.processingResult;
+      processedFilesRef.current[firstFile.name] ||
+      firstExisting.processingResult;
     const firstCanonicalFileId =
       firstProcessed?.fileHash ||
       firstProcessed?.conversionId ||

@@ -72,9 +72,14 @@ async def get_session(
 ):
     """
     Get a session by ID with full details including extraction and evaluation results.
+    Falls back to shared access if the user doesn't own the session but has
+    access via group membership.
     """
     user_id = current_user["id"]
     session = session_service.get_session(user_id, session_id)
+
+    if session is None:
+        session = session_service.get_session_for_shared_view(user_id, session_id)
 
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")

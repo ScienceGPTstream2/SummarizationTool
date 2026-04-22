@@ -44,7 +44,9 @@ class DoclingRemoteClient:
         timeout: float = 600.0,
         poll_interval: float = 3.0,
     ):
-        self.base_url = (base_url or os.environ.get("DOCLING_SERVICE_URL", "")).rstrip("/")
+        self.base_url = (base_url or os.environ.get("DOCLING_SERVICE_URL", "")).rstrip(
+            "/"
+        )
         self.timeout = timeout
         self.poll_interval = poll_interval
 
@@ -115,7 +117,12 @@ class DoclingRemoteClient:
 
         # Persist to local output_dir so the caller can sync to blob
         if output_dir is None:
-            output_dir = Path(tempfile.gettempdir()) / "summarization" / "docling-remote" / conversion_id
+            output_dir = (
+                Path(tempfile.gettempdir())
+                / "summarization"
+                / "docling-remote"
+                / conversion_id
+            )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         md_path = output_dir / "document.md"
@@ -170,9 +177,13 @@ class DoclingRemoteClient:
 
     async def _call_sync_convert(self, source_path: Path) -> Dict[str, Any]:
         """POST the PDF to /convert and return parsed JSON."""
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout), follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout), follow_redirects=True
+        ) as client:
             with open(source_path, "rb") as f:
-                _log.info(f"Uploading {source_path.name} to {self.base_url}/convert ...")
+                _log.info(
+                    f"Uploading {source_path.name} to {self.base_url}/convert ..."
+                )
                 t0 = time.perf_counter()
                 resp = await client.post(
                     f"{self.base_url}/convert",
@@ -196,7 +207,9 @@ class DoclingRemoteClient:
         )
         return data
 
-    async def _download_artifact_bundle(self, conversion_id: str, output_dir: Path) -> None:
+    async def _download_artifact_bundle(
+        self, conversion_id: str, output_dir: Path
+    ) -> None:
         """Download and extract the full conversion artifact bundle into output_dir."""
         bundle_url = f"{self.base_url}/artifacts/{conversion_id}/bundle"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +253,6 @@ class DoclingRemoteClient:
         except Exception:
             pass
 
-
     async def convert_async(self, source_path: Path) -> Dict[str, Any]:
         """
         POST /convert/async — fire-and-forget, returns job_id.
@@ -272,16 +284,24 @@ class DoclingRemoteClient:
                     continue
                 status = status_resp.json()
                 if status["status"] == "done":
-                    result_resp = await client.get(f"{self.base_url}/jobs/{job_id}/result")
+                    result_resp = await client.get(
+                        f"{self.base_url}/jobs/{job_id}/result"
+                    )
                     return result_resp.json()
                 if status["status"] == "error":
                     return {
                         "success": False,
-                        "error": status.get("metadata", {}).get("error_message", "Unknown error"),
+                        "error": status.get("metadata", {}).get(
+                            "error_message", "Unknown error"
+                        ),
                         "conversion_id": job_id,
                     }
 
-            return {"success": False, "error": "Timed out waiting for async job", "conversion_id": job_id}
+            return {
+                "success": False,
+                "error": "Timed out waiting for async job",
+                "conversion_id": job_id,
+            }
 
     async def check_health(self) -> Dict[str, Any]:
         """Check if the remote docling-service is available."""

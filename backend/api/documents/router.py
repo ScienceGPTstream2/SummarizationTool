@@ -31,7 +31,9 @@ async def get_document_view(document_id: str, processor_used: str = None):
         if not resolved_processor:
             raise HTTPException(status_code=404, detail="Processed document not found")
 
-        metadata = await file_service.get_processed_metadata(document_id, resolved_processor)
+        metadata = await file_service.get_processed_metadata(
+            document_id, resolved_processor
+        )
         file_metadata = await file_service.get_file_metadata(document_id)
 
         document_view = await file_service.build_document_view(
@@ -302,9 +304,10 @@ async def process_uploaded_file(
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
 
-            processor_used = await document_service.resolve_processor_used(
-                file_hash, processor_name
-            ) or processor_name
+            processor_used = (
+                await document_service.resolve_processor_used(file_hash, processor_name)
+                or processor_name
+            )
             canonical_view = await file_service.build_document_view(
                 file_hash=file_hash,
                 preferred_processor=processor_used,
@@ -330,7 +333,9 @@ async def process_uploaded_file(
                     "markdown_path": str(output_dir / "document.md"),
                     "content_length": markdown_content_length,
                     "conversion_time": cached_metadata.get("conversion_time", "cached"),
-                    "processor_used": canonical_view["processingResult"]["processorUsed"],
+                    "processor_used": canonical_view["processingResult"][
+                        "processorUsed"
+                    ],
                     "cached": True,
                     "figures_found": canonical_view["processingResult"]["figuresCount"],
                     "figures": canonical_view["processingResult"]["figures"],
@@ -509,7 +514,9 @@ async def process_uploaded_file(
             )
             print(f"[PROCESS] ✅ Synced {output_dir} to blob for {file_hash}")
         except Exception as _sync_err:
-            print(f"[PROCESS] ⚠️  Blob sync failed (artifacts only in /tmp): {_sync_err}")
+            print(
+                f"[PROCESS] ⚠️  Blob sync failed (artifacts only in /tmp): {_sync_err}"
+            )
 
         print(f"[PROCESS] ✅ Saved directly to organized structure: {output_dir}")
 
@@ -555,9 +562,7 @@ async def process_uploaded_file(
         ]
 
         # Include page_count for parse cost recompute on history reload
-        response_content["page_count"] = canonical_view["processingResult"][
-            "pageCount"
-        ]
+        response_content["page_count"] = canonical_view["processingResult"]["pageCount"]
 
         return JSONResponse(status_code=200, content=response_content)
 
@@ -1235,7 +1240,9 @@ async def generate_figure_summary(
         try:
             import json as _json_sum
 
-            resolved_processor = await document_service.resolve_processor_used(document_id)
+            resolved_processor = await document_service.resolve_processor_used(
+                document_id
+            )
             if resolved_processor:
                 _proc_meta = await file_service.get_processed_metadata(
                     document_id, resolved_processor

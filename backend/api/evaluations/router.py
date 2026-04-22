@@ -343,6 +343,71 @@ async def list_evaluation_results():
         )
 
 
+def _build_eval_providers() -> dict:
+    """Build the evaluation providers dict from environment configuration."""
+    import json
+
+    providers: dict = {}
+
+    # Azure OpenAI — derive available deployments from AZURE_OPENAI_MODELS env var
+    azure_models_json = os.getenv("AZURE_OPENAI_MODELS")
+    azure_models: list[str] = []
+    if azure_models_json:
+        try:
+            for m in json.loads(azure_models_json):
+                name = m.get("model_name") or m.get("deployment")
+                if name:
+                    azure_models.append(name)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not azure_models:
+        single = os.getenv("AZURE_OPENAI_MODEL_NAME") or os.getenv(
+            "AZURE_OPENAI_DEPLOYMENT"
+        )
+        if single:
+            azure_models = [single]
+    providers["azure_openai"] = {
+        "name": "Azure OpenAI",
+        "models": azure_models or ["gpt-4o"],
+        "configured": bool(azure_models),
+        "required_config": ["azure_deployment", "azure_endpoint", "azure_api_key"],
+    }
+
+    # Vertex AI (Gemini) — only available if project is configured
+    gemini_project = os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_PROJECT")
+    GEMINI_EVAL_MODELS = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+    ]
+    providers["vertex_ai"] = {
+        "name": "Google Vertex AI",
+        "models": GEMINI_EVAL_MODELS,
+        "configured": bool(gemini_project),
+        "required_config": ["vertex_project", "vertex_model_name"],
+    }
+
+    # Anthropic via Vertex AI — only available if project is configured
+    anthropic_project = (
+        os.getenv("ANTHROPIC_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT_ID")
+        or os.getenv("GEMINI_PROJECT")
+    )
+    ANTHROPIC_EVAL_MODELS = [
+        "claude-sonnet-4-5@20250929",
+        "claude-opus-4-1@20250805",
+    ]
+    providers["anthropic"] = {
+        "name": "Anthropic (via Vertex AI)",
+        "models": ANTHROPIC_EVAL_MODELS,
+        "configured": bool(anthropic_project),
+        "required_config": [],
+        "note": "Uses server-side service account authentication - no user config needed",
+    }
+
+    return providers
+
+
 @router.get("/metrics/info", dependencies=[Depends(get_current_user)])
 async def get_metrics_info():
     """
@@ -377,28 +442,7 @@ async def get_metrics_info():
                 "use_case": "Ensure output aligns with ethical guidelines and doesn't leak sensitive information",
             },
         },
-        "providers": {
-            "azure_openai": {
-                "name": "Azure OpenAI",
-                "models": ["gpt-5-mini", "gpt-4", "gpt-4-turbo"],
-                "required_config": [
-                    "azure_deployment",
-                    "azure_endpoint",
-                    "azure_api_key",
-                ],
-            },
-            "vertex_ai": {
-                "name": "Google Vertex AI",
-                "models": ["gemini-2.0-flash-exp", "gemini-1.5-pro"],
-                "required_config": ["vertex_project", "vertex_model_name"],
-            },
-            "anthropic": {
-                "name": "Anthropic (via Vertex AI)",
-                "models": ["claude-sonnet-4-5@20250929"],
-                "required_config": [],
-                "note": "Uses server-side service account authentication - no user config needed",
-            },
-        },
+        "providers": _build_eval_providers(),
         "custom_metrics": {
             "description": "Create domain-specific metrics with custom evaluation steps",
             "endpoint": "/api/evaluations/evaluate/custom",

@@ -219,9 +219,13 @@ class OrganizedFileService:
                 candidates.append(proc)
 
         for proc in candidates:
-            if await self._blob.exists(f"global/{file_hash}/processed/{proc}/metadata.json"):
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/metadata.json"
+            ):
                 return proc
-            if await self._blob.exists(f"global/{file_hash}/processed/{proc}/document.md"):
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/document.md"
+            ):
                 return proc
             if await self._blob.exists(
                 f"global/{file_hash}/processed/{proc}/raw_analysis.json"
@@ -252,7 +256,9 @@ class OrganizedFileService:
         extra_file_fields: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build a canonical backend-owned document/viewer state model."""
-        processor_used = await self.resolve_processed_processor(file_hash, preferred_processor)
+        processor_used = await self.resolve_processed_processor(
+            file_hash, preferred_processor
+        )
         file_metadata = await self.get_file_metadata(file_hash) or {}
         processed_metadata = (
             await self.get_processed_metadata(file_hash, processor_used)
@@ -261,9 +267,7 @@ class OrganizedFileService:
         ) or {}
 
         resolved_filename = (
-            filename
-            or file_metadata.get("original_filename")
-            or f"{file_hash}.pdf"
+            filename or file_metadata.get("original_filename") or f"{file_hash}.pdf"
         )
 
         resolved_parse_cost = (
@@ -277,7 +281,9 @@ class OrganizedFileService:
             else processed_metadata.get("parse_duration_seconds")
         )
         resolved_page_count = (
-            page_count if page_count is not None else processed_metadata.get("page_count")
+            page_count
+            if page_count is not None
+            else processed_metadata.get("page_count")
         )
         resolved_figures = processed_metadata.get("figures", []) or []
         resolved_figure_count = (
@@ -296,9 +302,12 @@ class OrganizedFileService:
             figure_blobs = await self._blob.list_blobs_with_prefix(
                 f"global/{file_hash}/processed/{processor_used}/figures/", limit=50
             )
-            image_blobs = [b for b in figure_blobs if b.lower().endswith((".png", ".jpg", ".jpeg"))]
+            image_blobs = [
+                b for b in figure_blobs if b.lower().endswith((".png", ".jpg", ".jpeg"))
+            ]
             if image_blobs:
                 from pathlib import Path as _Path
+
                 resolved_figures = [
                     {
                         "id": _Path(b).stem,
@@ -320,7 +329,9 @@ class OrganizedFileService:
             else False
         )
         analysis_available = (
-            await self.processing_file_exists(file_hash, processor_used, "raw_analysis.json")
+            await self.processing_file_exists(
+                file_hash, processor_used, "raw_analysis.json"
+            )
             if processor_used
             else False
         )
@@ -334,7 +345,9 @@ class OrganizedFileService:
                 resolved_table_count = len(html_blobs)
 
         tables_available = bool(resolved_table_count) or (
-            await self.processing_file_exists(file_hash, processor_used, "tables/table-1.html")
+            await self.processing_file_exists(
+                file_hash, processor_used, "tables/table-1.html"
+            )
             if processor_used
             else False
         )

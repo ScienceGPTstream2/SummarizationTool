@@ -72,7 +72,11 @@ async def proxy_auth(path: str, request: Request) -> Response:
 
     # Enforce email allowlist: intercept get-session before returning to browser.
     # This is the call the frontend makes to determine auth state on every page load.
-    if path == "get-session" and request.method.upper() == "GET" and upstream.status_code == 200:
+    if (
+        path == "get-session"
+        and request.method.upper() == "GET"
+        and upstream.status_code == 200
+    ):
         allowed = _get_allowed_emails()
         if allowed:
             try:

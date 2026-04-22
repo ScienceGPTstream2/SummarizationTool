@@ -155,7 +155,7 @@ class VLLMClient:
 
         # If model_id has "vllm-" prefix, strip it
         if model_id and model_id.startswith("vllm-"):
-            model_id = model_id[len("vllm-"):]
+            model_id = model_id[len("vllm-") :]
 
         # If no model specified, try to use the first available
         if not model_id:
@@ -217,7 +217,10 @@ class VLLMClient:
             }
 
         except requests.exceptions.Timeout:
-            return {"success": False, "error": f"VLLM request timed out for model {model_id}"}
+            return {
+                "success": False,
+                "error": f"VLLM request timed out for model {model_id}",
+            }
         except Exception as exc:
             return {"success": False, "error": f"VLLM error: {str(exc)}"}
 

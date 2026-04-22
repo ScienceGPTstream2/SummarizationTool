@@ -202,8 +202,9 @@ export function ProcessingPage({
                         ...f.processingResult,
                         ...(canonicalView?.processingResult || {}),
                         figures:
-                          (Array.isArray(canonicalView?.processingResult?.figures) &&
-                          canonicalView.processingResult.figures.length > 0
+                          (Array.isArray(
+                            canonicalView?.processingResult?.figures
+                          ) && canonicalView.processingResult.figures.length > 0
                             ? canonicalView.processingResult.figures
                             : undefined) ||
                           data.figures ||

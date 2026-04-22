@@ -49,7 +49,9 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
               setStatus("success");
               onSuccess();
             } else {
-              const urlError = new URLSearchParams(window.location.search).get("error");
+              const urlError = new URLSearchParams(window.location.search).get(
+                "error"
+              );
               const msg = urlError
                 ? "Your account is not authorized to access this application. Contact your administrator."
                 : "Authentication failed. Please try again.";
@@ -61,7 +63,8 @@ export function AuthCallback({ onSuccess, onError }: AuthCallbackProps) {
         }
       } catch (err) {
         console.error("Auth callback exception:", err);
-        const msg = err instanceof Error ? err.message : "An unexpected error occurred";
+        const msg =
+          err instanceof Error ? err.message : "An unexpected error occurred";
         setErrorMessage(msg);
         setStatus("error");
         onError(msg);

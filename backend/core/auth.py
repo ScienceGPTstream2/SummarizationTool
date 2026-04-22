@@ -67,7 +67,9 @@ async def get_current_user(request: Request) -> dict:
 
         allowed = _get_allowed_emails()
         if allowed and user.email.lower() not in allowed:
-            raise HTTPException(status_code=403, detail="Access denied: email not authorized")
+            raise HTTPException(
+                status_code=403, detail="Access denied: email not authorized"
+            )
 
         return {
             "id": user.id,

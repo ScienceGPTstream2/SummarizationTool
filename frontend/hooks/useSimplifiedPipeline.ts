@@ -241,8 +241,7 @@ export function useSimplifiedPipeline() {
               // Show this file's summary and entities immediately — don't wait for all files
               setResults((prev) => [...prev, result]);
             } catch (err) {
-              const msg =
-                err instanceof Error ? err.message : "Unknown error";
+              const msg = err instanceof Error ? err.message : "Unknown error";
               updateFile(idx, { stage: "error", error: msg });
             }
           })
@@ -331,16 +330,19 @@ export function useSimplifiedPipeline() {
     }
   }, [results]);
 
-  const downloadSingleExecutiveResult = useCallback(async (result: FileResult) => {
-    const blob = await generateExecutiveSummary(result.docData);
-    const baseName = result.fileName.replace(/\.pdf$/i, "");
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    downloadFile(
-      blob,
-      `${baseName}_Summary_${timestamp}.docx`,
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    );
-  }, []);
+  const downloadSingleExecutiveResult = useCallback(
+    async (result: FileResult) => {
+      const blob = await generateExecutiveSummary(result.docData);
+      const baseName = result.fileName.replace(/\.pdf$/i, "");
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      downloadFile(
+        blob,
+        `${baseName}_Summary_${timestamp}.docx`,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      );
+    },
+    []
+  );
 
   return {
     state,
@@ -433,7 +435,10 @@ async function extractAllEntities(
   let completedEntitiesCount = 0;
 
   // Function to process a single entity and update progress
-  const processEntity = async (entityToExtract: { name: string; prompt: string }) => {
+  const processEntity = async (entityToExtract: {
+    name: string;
+    prompt: string;
+  }) => {
     if (abortRef.current) throw new Error("Cancelled");
 
     const extractBody = {
@@ -468,11 +473,11 @@ async function extractAllEntities(
 
     const data = await res.json();
     const entityResults = data.extracted_entities || [];
-    
+
     if (entityResults.length > 0) {
       const entityResult = entityResults[0];
       const meta = entityResult.meta || {};
-      
+
       extracted.push({
         name: entityResult.name,
         prompt: entityToExtract.prompt,
