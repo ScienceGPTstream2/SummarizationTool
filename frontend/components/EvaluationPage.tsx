@@ -3101,214 +3101,223 @@ export function EvaluationPage({
                     {/* Google AI Models — only render when at least one is configured */}
                     {staticProviders.some(
                       (p) => p.id.startsWith("vertex_ai") && p.available
-                    ) && <AccordionItem value="google">
-                      <AccordionTrigger className="hover:no-underline">
-                        <div className="flex items-center justify-between w-full pr-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">
-                              Google AI (Gemini)
-                            </span>
+                    ) && (
+                      <AccordionItem value="google">
+                        <AccordionTrigger className="hover:no-underline">
+                          <div className="flex items-center justify-between w-full pr-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">
+                                Google AI (Gemini)
+                              </span>
+                              {(() => {
+                                const googleIds = staticProviders
+                                  .filter((p) => p.id.startsWith("vertex_ai"))
+                                  .map((p) => p.id);
+                                const selection =
+                                  getCategorySelection(googleIds);
+                                return (
+                                  <Badge variant="outline" className="text-xs">
+                                    {selection.selected}/{selection.total}
+                                  </Badge>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <div className="space-y-3">
                             {(() => {
-                              const googleIds = staticProviders
-                                .filter((p) => p.id.startsWith("vertex_ai"))
-                                .map((p) => p.id);
+                              const googleProviders = staticProviders.filter(
+                                (p) => p.id.startsWith("vertex_ai")
+                              );
+                              const googleIds = googleProviders.map(
+                                (p) => p.id
+                              );
                               const selection = getCategorySelection(googleIds);
                               return (
-                                <Badge variant="outline" className="text-xs">
-                                  {selection.selected}/{selection.total}
-                                </Badge>
+                                <>
+                                  <div className="flex items-center justify-between pb-2 border-b">
+                                    <span className="text-sm text-muted-foreground">
+                                      {googleProviders.length} model
+                                      {googleProviders.length !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      available
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() =>
+                                        toggleCategory(
+                                          googleIds,
+                                          !selection.allSelected
+                                        )
+                                      }
+                                    >
+                                      {selection.allSelected ? (
+                                        <>
+                                          <CheckSquare className="h-3 w-3 mr-1" />
+                                          Deselect All
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Square className="h-3 w-3 mr-1" />
+                                          Select All
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {googleProviders.map((provider) => (
+                                      <div
+                                        key={provider.id}
+                                        className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                      >
+                                        <Checkbox
+                                          id={provider.id}
+                                          checked={selectedProviders.includes(
+                                            provider.id
+                                          )}
+                                          onCheckedChange={() =>
+                                            toggleProvider(provider.id)
+                                          }
+                                          disabled={!provider.available}
+                                          className="mt-1"
+                                        />
+                                        <div className="flex-1 space-y-1 min-w-0">
+                                          <Label
+                                            htmlFor={provider.id}
+                                            className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                          >
+                                            {provider.model}
+                                          </Label>
+                                          <p className="text-xs text-muted-foreground line-clamp-2">
+                                            {provider.description}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
                               );
                             })()}
                           </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-3">
-                          {(() => {
-                            const googleProviders = staticProviders.filter(
-                              (p) => p.id.startsWith("vertex_ai")
-                            );
-                            const googleIds = googleProviders.map((p) => p.id);
-                            const selection = getCategorySelection(googleIds);
-                            return (
-                              <>
-                                <div className="flex items-center justify-between pb-2 border-b">
-                                  <span className="text-sm text-muted-foreground">
-                                    {googleProviders.length} model
-                                    {googleProviders.length !== 1
-                                      ? "s"
-                                      : ""}{" "}
-                                    available
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs"
-                                    onClick={() =>
-                                      toggleCategory(
-                                        googleIds,
-                                        !selection.allSelected
-                                      )
-                                    }
-                                  >
-                                    {selection.allSelected ? (
-                                      <>
-                                        <CheckSquare className="h-3 w-3 mr-1" />
-                                        Deselect All
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Square className="h-3 w-3 mr-1" />
-                                        Select All
-                                      </>
-                                    )}
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {googleProviders.map((provider) => (
-                                    <div
-                                      key={provider.id}
-                                      className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
-                                    >
-                                      <Checkbox
-                                        id={provider.id}
-                                        checked={selectedProviders.includes(
-                                          provider.id
-                                        )}
-                                        onCheckedChange={() =>
-                                          toggleProvider(provider.id)
-                                        }
-                                        disabled={!provider.available}
-                                        className="mt-1"
-                                      />
-                                      <div className="flex-1 space-y-1 min-w-0">
-                                        <Label
-                                          htmlFor={provider.id}
-                                          className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                        >
-                                          {provider.model}
-                                        </Label>
-                                        <p className="text-xs text-muted-foreground line-clamp-2">
-                                          {provider.description}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>}
+                        </AccordionContent>
+                      </AccordionItem>
+                    )}
 
                     {/* Anthropic Models — only render when at least one is configured */}
                     {staticProviders.some(
                       (p) => p.id.startsWith("anthropic_") && p.available
-                    ) && <AccordionItem value="anthropic">
-                      <AccordionTrigger className="hover:no-underline">
-                        <div className="flex items-center justify-between w-full pr-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">
-                              Anthropic (Claude)
-                            </span>
+                    ) && (
+                      <AccordionItem value="anthropic">
+                        <AccordionTrigger className="hover:no-underline">
+                          <div className="flex items-center justify-between w-full pr-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">
+                                Anthropic (Claude)
+                              </span>
+                              {(() => {
+                                const anthropicIds = staticProviders
+                                  .filter((p) => p.id.startsWith("anthropic_"))
+                                  .map((p) => p.id);
+                                const selection =
+                                  getCategorySelection(anthropicIds);
+                                return (
+                                  <Badge variant="outline" className="text-xs">
+                                    {selection.selected}/{selection.total}
+                                  </Badge>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <div className="space-y-3">
                             {(() => {
-                              const anthropicIds = staticProviders
-                                .filter((p) => p.id.startsWith("anthropic_"))
-                                .map((p) => p.id);
+                              const anthropicProviders = staticProviders.filter(
+                                (p) => p.id.startsWith("anthropic_")
+                              );
+                              const anthropicIds = anthropicProviders.map(
+                                (p) => p.id
+                              );
                               const selection =
                                 getCategorySelection(anthropicIds);
                               return (
-                                <Badge variant="outline" className="text-xs">
-                                  {selection.selected}/{selection.total}
-                                </Badge>
+                                <>
+                                  <div className="flex items-center justify-between pb-2 border-b">
+                                    <span className="text-sm text-muted-foreground">
+                                      {anthropicProviders.length} model
+                                      {anthropicProviders.length !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      available
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() =>
+                                        toggleCategory(
+                                          anthropicIds,
+                                          !selection.allSelected
+                                        )
+                                      }
+                                    >
+                                      {selection.allSelected ? (
+                                        <>
+                                          <CheckSquare className="h-3 w-3 mr-1" />
+                                          Deselect All
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Square className="h-3 w-3 mr-1" />
+                                          Select All
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {anthropicProviders.map((provider) => (
+                                      <div
+                                        key={provider.id}
+                                        className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
+                                      >
+                                        <Checkbox
+                                          id={provider.id}
+                                          checked={selectedProviders.includes(
+                                            provider.id
+                                          )}
+                                          onCheckedChange={() =>
+                                            toggleProvider(provider.id)
+                                          }
+                                          disabled={!provider.available}
+                                          className="mt-1"
+                                        />
+                                        <div className="flex-1 space-y-1 min-w-0">
+                                          <Label
+                                            htmlFor={provider.id}
+                                            className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                          >
+                                            {getDisplayModelName(
+                                              provider.model
+                                            )}
+                                          </Label>
+                                          <p className="text-xs text-muted-foreground line-clamp-2">
+                                            {provider.description}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
                               );
                             })()}
                           </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-3">
-                          {(() => {
-                            const anthropicProviders = staticProviders.filter(
-                              (p) => p.id.startsWith("anthropic_")
-                            );
-                            const anthropicIds = anthropicProviders.map(
-                              (p) => p.id
-                            );
-                            const selection =
-                              getCategorySelection(anthropicIds);
-                            return (
-                              <>
-                                <div className="flex items-center justify-between pb-2 border-b">
-                                  <span className="text-sm text-muted-foreground">
-                                    {anthropicProviders.length} model
-                                    {anthropicProviders.length !== 1
-                                      ? "s"
-                                      : ""}{" "}
-                                    available
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs"
-                                    onClick={() =>
-                                      toggleCategory(
-                                        anthropicIds,
-                                        !selection.allSelected
-                                      )
-                                    }
-                                  >
-                                    {selection.allSelected ? (
-                                      <>
-                                        <CheckSquare className="h-3 w-3 mr-1" />
-                                        Deselect All
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Square className="h-3 w-3 mr-1" />
-                                        Select All
-                                      </>
-                                    )}
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {anthropicProviders.map((provider) => (
-                                    <div
-                                      key={provider.id}
-                                      className="flex items-start space-x-2 p-2 rounded-md border hover:bg-accent/50 transition-colors"
-                                    >
-                                      <Checkbox
-                                        id={provider.id}
-                                        checked={selectedProviders.includes(
-                                          provider.id
-                                        )}
-                                        onCheckedChange={() =>
-                                          toggleProvider(provider.id)
-                                        }
-                                        disabled={!provider.available}
-                                        className="mt-1"
-                                      />
-                                      <div className="flex-1 space-y-1 min-w-0">
-                                        <Label
-                                          htmlFor={provider.id}
-                                          className="text-sm font-medium leading-none cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                        >
-                                          {getDisplayModelName(provider.model)}
-                                        </Label>
-                                        <p className="text-xs text-muted-foreground line-clamp-2">
-                                          {provider.description}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>}
+                        </AccordionContent>
+                      </AccordionItem>
+                    )}
                   </Accordion>
                 </CardContent>
               </Card>
