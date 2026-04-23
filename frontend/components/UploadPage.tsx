@@ -37,6 +37,7 @@ export function UploadPage({
   onInvalidateDownstream,
 }: UploadPageProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>(
     documentData.uploadedFiles?.map((f) => f.file) ||
       (documentData.file ? [documentData.file] : [])
@@ -165,6 +166,7 @@ export function UploadPage({
     }
 
     if (newFiles.length > 0) {
+      setIsDirty(true);
       setSelectedFiles((prev) => [...prev, ...newFiles]);
       // Automatically start upload for new files
       for (const file of newFiles) {
@@ -218,6 +220,7 @@ export function UploadPage({
     const fileId = result?.file_id;
 
     // Remove from UI state immediately
+    setIsDirty(true);
     setSelectedFiles((prev) => prev.filter((f) => f.name !== fileName));
     setUploadResults((prev) => {
       const newResults = { ...prev };
@@ -538,6 +541,7 @@ export function UploadPage({
       fileId: firstCanonicalFileId,
       uploadResult: firstResult || firstExisting.uploadResult,
       uploadedFiles: uploadedFilesData,
+      documentsChanged: isDirty,
     });
   };
 

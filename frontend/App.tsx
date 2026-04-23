@@ -182,6 +182,7 @@ export interface DocumentData {
   // operation (extraction, evaluation) will create a clone named
   // "Copy of [sharedSourceName]".
   sharedSourceName?: string;
+  documentsChanged?: boolean;
 }
 
 // User info from Supabase session
@@ -556,6 +557,7 @@ export default function App() {
       data.uploadedFiles &&
       data.uploadedFiles.length > 0 &&
       !documentData.sessionId && // Only create if no session exists yet
+      (!documentData.sharedSourceName || data.documentsChanged) && // Don't clone shared session unless files changed
       !sessionCreationInProgressRef.current // Prevent duplicate creation
     ) {
       // Create a session immediately after upload

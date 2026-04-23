@@ -3098,8 +3098,10 @@ export function EvaluationPage({
                       </AccordionContent>
                     </AccordionItem>
 
-                    {/* Google AI Models */}
-                    <AccordionItem value="google">
+                    {/* Google AI Models — only render when at least one is configured */}
+                    {staticProviders.some(
+                      (p) => p.id.startsWith("vertex_ai") && p.available
+                    ) && <AccordionItem value="google">
                       <AccordionTrigger className="hover:no-underline">
                         <div className="flex items-center justify-between w-full pr-4">
                           <div className="flex items-center gap-2">
@@ -3107,9 +3109,9 @@ export function EvaluationPage({
                               Google AI (Gemini)
                             </span>
                             {(() => {
-                              const googleIds = STATIC_EVAL_PROVIDERS.filter(
-                                (p) => p.id.startsWith("vertex_ai")
-                              ).map((p) => p.id);
+                              const googleIds = staticProviders
+                                .filter((p) => p.id.startsWith("vertex_ai"))
+                                .map((p) => p.id);
                               const selection = getCategorySelection(googleIds);
                               return (
                                 <Badge variant="outline" className="text-xs">
@@ -3123,10 +3125,9 @@ export function EvaluationPage({
                       <AccordionContent>
                         <div className="space-y-3">
                           {(() => {
-                            const googleProviders =
-                              STATIC_EVAL_PROVIDERS.filter((p) =>
-                                p.id.startsWith("vertex_ai")
-                              );
+                            const googleProviders = staticProviders.filter(
+                              (p) => p.id.startsWith("vertex_ai")
+                            );
                             const googleIds = googleProviders.map((p) => p.id);
                             const selection = getCategorySelection(googleIds);
                             return (
@@ -3199,10 +3200,12 @@ export function EvaluationPage({
                           })()}
                         </div>
                       </AccordionContent>
-                    </AccordionItem>
+                    </AccordionItem>}
 
-                    {/* Anthropic Models */}
-                    <AccordionItem value="anthropic">
+                    {/* Anthropic Models — only render when at least one is configured */}
+                    {staticProviders.some(
+                      (p) => p.id.startsWith("anthropic_") && p.available
+                    ) && <AccordionItem value="anthropic">
                       <AccordionTrigger className="hover:no-underline">
                         <div className="flex items-center justify-between w-full pr-4">
                           <div className="flex items-center gap-2">
@@ -3210,9 +3213,9 @@ export function EvaluationPage({
                               Anthropic (Claude)
                             </span>
                             {(() => {
-                              const anthropicIds = STATIC_EVAL_PROVIDERS.filter(
-                                (p) => p.id.startsWith("anthropic_")
-                              ).map((p) => p.id);
+                              const anthropicIds = staticProviders
+                                .filter((p) => p.id.startsWith("anthropic_"))
+                                .map((p) => p.id);
                               const selection =
                                 getCategorySelection(anthropicIds);
                               return (
@@ -3227,10 +3230,9 @@ export function EvaluationPage({
                       <AccordionContent>
                         <div className="space-y-3">
                           {(() => {
-                            const anthropicProviders =
-                              STATIC_EVAL_PROVIDERS.filter((p) =>
-                                p.id.startsWith("anthropic_")
-                              );
+                            const anthropicProviders = staticProviders.filter(
+                              (p) => p.id.startsWith("anthropic_")
+                            );
                             const anthropicIds = anthropicProviders.map(
                               (p) => p.id
                             );
@@ -3306,7 +3308,7 @@ export function EvaluationPage({
                           })()}
                         </div>
                       </AccordionContent>
-                    </AccordionItem>
+                    </AccordionItem>}
                   </Accordion>
                 </CardContent>
               </Card>
