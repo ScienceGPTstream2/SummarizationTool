@@ -17,13 +17,16 @@ setup_logging()
 import asyncio
 import concurrent.futures
 import logging
+import time
 import traceback
+import uuid
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import os
 import toml
+import structlog
 
 logger = logging.getLogger("app")
 
@@ -35,7 +38,6 @@ from core.config import load_config
 def load_secrets_to_env(secrets_path: str = None):
     """Loads secrets from a TOML file into environment variables."""
     if secrets_path is None:
-        # Try relative path first (when running from backend directory)
         candidates = [
             "core/secrets.toml",
             os.path.join(os.path.dirname(__file__), "core", "secrets.toml"),
@@ -99,6 +101,31 @@ from api import (
 from api.auth.proxy import router as auth_proxy_router
 
 
+def _setup_otel(app: FastAPI) -> None:
+    """Configure OpenTelemetry tracing if OTLP_ENDPOINT is set."""
+    endpoint = os.getenv("OTLP_ENDPOINT")
+    if not endpoint:
+        return
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        provider = TracerProvider()
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces"))
+        )
+        trace.set_tracer_provider(provider)
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("OpenTelemetry tracing enabled — exporting to %s", endpoint)
+    except Exception as exc:
+        logger.warning("OpenTelemetry setup failed (non-fatal): %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The default asyncio thread pool is min(32, cpu_count+4) — on this server
@@ -121,7 +148,19 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Setup middleware
+    # Prometheus HTTP metrics — exposes /metrics scrape endpoint
+    try:
+        from prometheus_fastapi_instrumentator import Instrumentator
+
+        Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+        logger.info("Prometheus metrics enabled at /metrics")
+    except Exception as exc:
+        logger.warning("Prometheus instrumentator unavailable (non-fatal): %s", exc)
+
+    # OpenTelemetry distributed tracing
+    _setup_otel(app)
+
+    # Setup CORS middleware
     setup_cors(app)
 
     @app.exception_handler(Exception)
@@ -136,20 +175,33 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
     @app.middleware("http")
-    async def log_requests(request: Request, call_next):
+    async def observability_middleware(request: Request, call_next):
+        request_id = uuid.uuid4().hex[:12]
+        start = time.perf_counter()
+
+        # Bind request_id to structlog context — automatically scoped per async task
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+
         response = await call_next(request)
-        if response.status_code >= 500:
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        status = response.status_code
+
+        if status >= 500:
             logger.error(
-                "%s %s → %d", request.method, request.url.path, response.status_code
+                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
             )
-        elif response.status_code >= 400:
+        elif status >= 400:
             logger.warning(
-                "%s %s → %d", request.method, request.url.path, response.status_code
+                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
             )
         else:
             logger.info(
-                "%s %s → %d", request.method, request.url.path, response.status_code
+                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
             )
+
+        response.headers["X-Request-Id"] = request_id
         return response
 
     # Include API routers

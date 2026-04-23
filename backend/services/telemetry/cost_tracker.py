@@ -5,6 +5,30 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List
 
+# Prometheus metrics — created once at module level, no-op if package absent
+try:
+    from prometheus_client import Counter, Histogram
+
+    _llm_tokens = Counter(
+        "llm_tokens_total",
+        "LLM tokens consumed",
+        ["provider", "model", "token_type"],
+    )
+    _llm_cost_cents = Counter(
+        "llm_cost_cents_total",
+        "LLM cost in USD cents",
+        ["provider", "model"],
+    )
+    _llm_duration = Histogram(
+        "llm_request_duration_seconds",
+        "LLM call duration",
+        ["provider", "model"],
+        buckets=[1, 5, 10, 30, 60, 120, 300, 600],
+    )
+    _PROMETHEUS_AVAILABLE = True
+except ImportError:
+    _PROMETHEUS_AVAILABLE = False
+
 
 @dataclass
 class CallMetric:
@@ -229,6 +253,16 @@ class CostTracker:
                 batch_number=batch_number,
             )
         )
+
+        # Export to Prometheus
+        if _PROMETHEUS_AVAILABLE:
+            try:
+                _llm_tokens.labels(provider=provider, model=model, token_type="prompt").inc(prompt_tokens_int)
+                _llm_tokens.labels(provider=provider, model=model, token_type="completion").inc(completion_tokens_int)
+                _llm_cost_cents.labels(provider=provider, model=model).inc(cost * 100)
+                _llm_duration.labels(provider=provider, model=model).observe(duration)
+            except Exception:
+                pass
 
         # Update session metrics in database — fire and forget so it never blocks
         # the asyncio event loop. Previously this was a synchronous HTTP call

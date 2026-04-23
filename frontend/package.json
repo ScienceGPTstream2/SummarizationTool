@@ -71,7 +71,12 @@
     "tailwind-merge": "^2.2.1",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@opentelemetry/sdk-trace-web": "^1.25.0",
+    "@opentelemetry/sdk-trace-base": "^1.25.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.52.0",
+    "@opentelemetry/instrumentation-fetch": "^0.52.0",
+    "@opentelemetry/instrumentation": "^0.52.0"
   },
   "devDependencies": {
     "@types/dompurify": "^3.2.0",

@@ -1,5 +1,6 @@
 """Server configuration API endpoints"""
 
+import logging
 import os
 import subprocess
 import sys
@@ -12,6 +13,8 @@ from pydantic import BaseModel
 from core.auth import get_current_user
 from schemas.server import ServerConfig
 from services.llm.macbook import MacbookLLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class BatchMetricsRequest(BaseModel):
@@ -26,6 +29,61 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CLEAR_SCRIPT = _REPO_ROOT / "backend" / "scripts" / "clear_for_benchmarking.py"
 
 router = APIRouter(prefix="/api", tags=["server"])
+
+
+@router.get("/server/health", include_in_schema=False)
+async def health_check():
+    """Public liveness probe — no auth required. Used by container probes."""
+    try:
+        from models import get_db_session
+
+        db = get_db_session()
+        db.execute(__import__("sqlalchemy").text("SELECT 1"))
+        db.close()
+        return {"status": "ok", "db": "ok"}
+    except Exception as exc:
+        logger.error("Health check DB ping failed: %s", exc)
+        return JSONResponse(status_code=503, content={"status": "degraded", "db": "error"})
+
+
+@router.post("/telemetry/traces", include_in_schema=False)
+async def proxy_otlp_traces(request: Request):
+    """Proxy OTLP/HTTP traces from the browser to Tempo (avoids CORS from browser)."""
+    tempo_endpoint = os.getenv("OTLP_ENDPOINT")
+    if not tempo_endpoint:
+        return JSONResponse(status_code=204, content={})
+    try:
+        import httpx
+
+        body = await request.body()
+        headers = {
+            "Content-Type": request.headers.get("Content-Type", "application/x-protobuf")
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{tempo_endpoint.rstrip('/')}/v1/traces",
+                content=body,
+                headers=headers,
+            )
+    except Exception as exc:
+        logger.debug("OTLP trace proxy error (non-fatal): %s", exc)
+    return JSONResponse(status_code=200, content={})
+
+
+@router.post("/server/client-error", include_in_schema=False)
+async def record_client_error(request: Request):
+    """Receive unhandled frontend errors from the React ErrorBoundary."""
+    try:
+        body = await request.json()
+        logger.error(
+            "Frontend error: %s | url=%s | stack=%s",
+            body.get("error"),
+            body.get("url"),
+            (body.get("stack") or "")[:500],
+        )
+    except Exception:
+        pass
+    return JSONResponse(status_code=200, content={"ok": True})
 
 
 @router.get("/server-config", response_model=ServerConfig)
