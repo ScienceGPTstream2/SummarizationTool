@@ -43,7 +43,9 @@ async def health_check():
         return {"status": "ok", "db": "ok"}
     except Exception as exc:
         logger.error("Health check DB ping failed: %s", exc)
-        return JSONResponse(status_code=503, content={"status": "degraded", "db": "error"})
+        return JSONResponse(
+            status_code=503, content={"status": "degraded", "db": "error"}
+        )
 
 
 @router.post("/telemetry/traces", include_in_schema=False)
@@ -57,7 +59,9 @@ async def proxy_otlp_traces(request: Request):
 
         body = await request.body()
         headers = {
-            "Content-Type": request.headers.get("Content-Type", "application/x-protobuf")
+            "Content-Type": request.headers.get(
+                "Content-Type", "application/x-protobuf"
+            )
         }
         async with httpx.AsyncClient(timeout=5.0) as client:
             await client.post(
