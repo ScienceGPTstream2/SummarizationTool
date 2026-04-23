@@ -167,6 +167,7 @@ export function UploadPage({
 
     if (newFiles.length > 0) {
       setIsDirty(true);
+      onInvalidateDownstream?.();
       setSelectedFiles((prev) => [...prev, ...newFiles]);
       // Automatically start upload for new files
       for (const file of newFiles) {
@@ -221,6 +222,7 @@ export function UploadPage({
 
     // Remove from UI state immediately
     setIsDirty(true);
+    onInvalidateDownstream?.();
     setSelectedFiles((prev) => prev.filter((f) => f.name !== fileName));
     setUploadResults((prev) => {
       const newResults = { ...prev };
