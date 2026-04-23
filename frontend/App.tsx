@@ -11,6 +11,7 @@ import { SessionHistoryPage } from "./components/SessionHistoryPage";
 import { TemplateWorkspacePage } from "./components/TemplateWorkspace/TemplateWorkspacePage";
 import { GroupManagementPage } from "./components/GroupManagement/GroupManagementPage";
 import { SimplifiedFlowPage } from "./components/SimplifiedFlowPage";
+import { ChatPage } from "./components/ChatPage";
 
 // import { RainbowButton } from "./components/ui/rainbow-button"; // hidden for demo
 import { Button } from "./components/ui/button";
@@ -53,6 +54,7 @@ import { SessionMetrics } from "./components/SessionMetrics";
 export type Step =
   | "login"
   | "auth_callback"
+  | "chat"
   | "simplified"
   | "upload"
   | "processing"
@@ -224,7 +226,7 @@ export default function App() {
     window.location.hash.includes("access_token");
 
   const [currentStep, setCurrentStep] = useState<Step>(
-    isAuthCallback ? "auth_callback" : "simplified"
+    isAuthCallback ? "auth_callback" : "chat"
   );
   // Ref that always holds the current step — used in the onAuthStateChange closure
   // (which has [] deps and captures the initial value) to avoid stale closure bugs.
@@ -236,7 +238,7 @@ export default function App() {
   // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
-    useState<Step>("simplified");
+    useState<Step>("chat");
 
   // Track which workflow step currently has an in-flight operation
   const [inFlightStep, setInFlightStep] = useState<Step | null>(null);
@@ -405,7 +407,7 @@ export default function App() {
         // If we have a session and we're on callback, redirect to main app
         if (session && isAuthCallback) {
           window.history.replaceState({}, document.title, "/");
-          setCurrentStep("simplified");
+          setCurrentStep("chat");
         }
       })
       .catch(() => {
@@ -473,7 +475,9 @@ export default function App() {
         "evaluation",
       ];
       if (
-        (currentStep === "simplified" || currentStep === "upload") &&
+        (currentStep === "chat" ||
+          currentStep === "simplified" ||
+          currentStep === "upload") &&
         restoredSessionId &&
         workflowSteps.includes(restoredStep)
       ) {
@@ -535,7 +539,7 @@ export default function App() {
   const handleAuthSuccess = useCallback(() => {
     // Clean up URL
     window.history.replaceState({}, document.title, "/");
-    setCurrentStep("simplified");
+    setCurrentStep("chat");
   }, []);
 
   const handleAuthError = useCallback((error: string) => {
@@ -1790,6 +1794,14 @@ export default function App() {
             onError={handleAuthError}
           />
         );
+      case "chat":
+        return (
+          <ChatPage
+            onSwitchToWorkflow={() => setCurrentStep("simplified")}
+            userEmail={effectiveUserEmail}
+            onSignOut={handleLogout}
+          />
+        );
       case "history":
         return (
           <SessionHistoryPage
@@ -1899,6 +1911,22 @@ export default function App() {
   // Show login if no session
   if (!session) {
     return <LoginPage />;
+  }
+
+  const effectiveUserEmail = userInfo?.email;
+
+  // Chat page takes over the full viewport — render outside the main shell
+  if (currentStep === "chat") {
+    return (
+      <ThemeProvider>
+        <ChatPage
+          onSwitchToWorkflow={() => setCurrentStep("simplified")}
+          userEmail={effectiveUserEmail}
+          onSignOut={handleLogout}
+        />
+        <Toaster />
+      </ThemeProvider>
+    );
   }
 
   return (
