@@ -7,6 +7,7 @@ Supports both Azure OpenAI and Vertex AI for LLM-as-a-judge evaluation.
 
 import asyncio
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -111,13 +112,17 @@ class EvaluationService:
             )
         elif provider == "vertex_ai":
             return VertexAIDeepEvalModel(
-                model_name=model_name or "gemini-2.5-flash",
+                model_name=model_name
+                or os.getenv("EVAL_DEFAULT_GEMINI_MODEL", "gemini-2.5-flash"),
                 project=project,
                 location=location,
             )
         elif provider == "anthropic":
             return AnthropicVertexDeepEvalModel(
-                model_name=model_name or "claude-sonnet-4-5@20250929",
+                model_name=model_name
+                or os.getenv(
+                    "EVAL_DEFAULT_ANTHROPIC_MODEL", "claude-sonnet-4-5@20250929"
+                ),
                 project=project,
                 location=location or "global",
             )

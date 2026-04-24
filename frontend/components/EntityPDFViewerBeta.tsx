@@ -121,9 +121,8 @@ export async function loadPdfDocument(
     const loadingTask = pdfjsLib.getDocument({
       url: `/api/files/${fileId}`,
       httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
-      disableAutoFetch: false,
-      disableStream: false,
-      rangeChunkSize: 65536,
+      disableAutoFetch: true,
+      disableStream: true,
     });
 
     if (onProgress) {

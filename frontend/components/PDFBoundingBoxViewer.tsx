@@ -17,10 +17,12 @@ import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore - Vite handles ?url imports
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { getValidToken } from "../utils/authUtils";
+import { loadPdfDocument } from "./EntityPDFViewerBeta";
 
 interface PDFBoundingBoxViewerProps {
   fileId: string;
   conversionId: string | null;
+  processorUsed?: string | null;
   fileName?: string;
 }
 
@@ -99,9 +101,9 @@ const COLOR_BORDER_MAP: Record<ElementType | string, string> = {
 export function PDFBoundingBoxViewer({
   fileId,
   conversionId,
+  processorUsed,
   fileName,
 }: PDFBoundingBoxViewerProps) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
     null
   );
@@ -185,39 +187,6 @@ export function PDFBoundingBoxViewer({
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
 
-  // Fetch PDF file
-  useEffect(() => {
-    const fetchPDF = async () => {
-      try {
-        const token = await getValidToken();
-        const response = await fetch(`/api/files/${fileId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch PDF file");
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        setPdfUrl(url);
-      } catch (err: any) {
-        console.error("Error fetching PDF:", err);
-        setError(err.message || "Failed to load PDF");
-      }
-    };
-
-    if (fileId) {
-      fetchPDF();
-    }
-
-    return () => {
-      if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl);
-      }
-    };
-  }, [fileId]);
-
   // Fetch analysis result with bounding boxes
   useEffect(() => {
     let isCancelled = false;
@@ -236,8 +205,11 @@ export function PDFBoundingBoxViewer({
 
       try {
         const token = await getValidToken();
+        const qs = processorUsed
+          ? `?processor_used=${encodeURIComponent(processorUsed)}`
+          : "";
         const response = await fetch(
-          `/api/documents/${conversionId}/analysis`,
+          `/api/documents/${conversionId}/analysis${qs}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -304,26 +276,44 @@ export function PDFBoundingBoxViewer({
       isCancelled = true;
       retryTimeouts.forEach((timeout) => clearTimeout(timeout));
     };
-  }, [conversionId]);
+  }, [conversionId, processorUsed]);
 
   // Load and render PDF
   useEffect(() => {
-    const loadPDF = async () => {
-      if (!pdfUrl) return;
+    if (!fileId) {
+      setPdfDocument(null);
+      setTotalPages(0);
+      return;
+    }
 
+    let isCancelled = false;
+
+    const loadPDF = async () => {
       try {
-        const loadingTask = pdfjsLib.getDocument(pdfUrl);
-        const pdf = await loadingTask.promise;
+        setError(null);
+        const pdf = await loadPdfDocument(fileId, {
+          timeoutMs: 45000,
+        });
+        if (isCancelled) return;
         setPdfDocument(pdf);
         setTotalPages(pdf.numPages);
-      } catch (err) {
+      } catch (err: any) {
+        if (isCancelled) return;
         console.error("Error loading PDF:", err);
-        setError("Failed to load PDF document");
+        setPdfDocument(null);
+        setTotalPages(0);
+        setError(
+          `Failed to load PDF document: ${err?.message || "Unknown error"}`
+        );
       }
     };
 
     loadPDF();
-  }, [pdfUrl]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [fileId]);
 
   // Calculate fit-to-width scale and keep baseline updated
   useEffect(() => {

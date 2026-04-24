@@ -7,11 +7,12 @@ This package contains all business logic services organized by domain:
 - session/: Session management services
 """
 
-from .document import DoclingService, FileService
+from .document import DoclingRemoteClient, DoclingService, FileService
 from .llm import LLMService, AzureLLMClient, GeminiLLMClient
 
 __all__ = [
-    "DoclingService",
+    "DoclingRemoteClient",
+    "DoclingService",  # alias for DoclingRemoteClient
     "FileService",
     "LLMService",
     "AzureLLMClient",

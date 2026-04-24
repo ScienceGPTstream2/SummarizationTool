@@ -202,6 +202,9 @@ async def get_available_models():
                     )
 
                     supports_temp = model_name not in AZURE_NO_TEMP_MODELS
+                    # GPT-4o and GPT-4 variants support vision; reasoning/nano models do not
+                    AZURE_VISION_MODELS = {"gpt-4o", "gpt-4", "gpt-4-turbo"}
+                    vision_capable = any(v in model_name for v in AZURE_VISION_MODELS)
                     model_data = {
                         "id": f"azure-{deployment}",
                         "name": model_name,
@@ -211,6 +214,7 @@ async def get_available_models():
                         "api_version": api_version,
                         "supports_temperature": supports_temp,
                         "default_temperature": 0.5 if supports_temp else 1.0,
+                        "vision_capable": vision_capable,
                     }
                     # Only include endpoint and api_key if they're model-specific (not in response, but for reference)
                     models.append(model_data)
@@ -285,6 +289,7 @@ async def get_available_models():
                 "location": gemini_location,
                 "supports_temperature": True,
                 "default_temperature": 0.5,
+                "vision_capable": True,
             },
             {
                 "id": "publishers/google/models/gemini-2.5-flash-lite",
@@ -295,6 +300,7 @@ async def get_available_models():
                 "location": gemini_location,
                 "supports_temperature": True,
                 "default_temperature": 0.5,
+                "vision_capable": True,
             },
             {
                 "id": "publishers/google/models/gemini-2.5-flash",
@@ -305,6 +311,7 @@ async def get_available_models():
                 "location": gemini_location,
                 "supports_temperature": True,
                 "default_temperature": 0.5,
+                "vision_capable": True,
             },
             {
                 "id": "publishers/google/models/gemini-3-pro-preview",
@@ -315,6 +322,7 @@ async def get_available_models():
                 "location": gemini_location,
                 "supports_temperature": True,
                 "default_temperature": 0.5,
+                "vision_capable": True,
             },
         ]
         models.extend(gemini_models)
@@ -482,6 +490,32 @@ async def get_available_models():
                     )
             else:
                 print("[MacbookLLM] No models returned; skipping Macbook models")
+
+    # Add VLLM models if configured
+    vllm_base_url = os.getenv("VLLM_BASE_URL")
+    if vllm_base_url:
+        try:
+            from services.llm.vllm import VLLMClient
+
+            vllm_client = VLLMClient()
+            vllm_models = await vllm_client.fetch_available_models()
+            if vllm_models:
+                for model in vllm_models:
+                    models.append(
+                        {
+                            "id": model["id"],
+                            "name": model.get("name", model["id"]),
+                            "provider": "VLLM",
+                            "description": "Self-hosted model (VLLM)",
+                            "supports_temperature": True,
+                            "default_temperature": 0.5,
+                        }
+                    )
+                print(f"✅ Loaded {len(vllm_models)} VLLM model(s)")
+            else:
+                print("[VLLM] No models returned from VLLM server")
+        except Exception as e:
+            print(f"[VLLM] Failed to fetch models: {e}")
 
     return JSONResponse(status_code=200, content=models)
 

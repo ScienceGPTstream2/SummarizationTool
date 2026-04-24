@@ -7,6 +7,7 @@ Better Auth 'session' table in Postgres via SQLAlchemy.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -40,27 +41,9 @@ async def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="No auth token provided")
 
-    # Debug: log token prefix and DB URL
-    from models.base import DATABASE_URL as _db_url
-
-    logger.info(f"[AUTH] Token prefix: {token[:20]}... | DB: {_db_url[:60]}...")
-
     # Query session + user in one go
     db: SASession = get_db_session()
     try:
-        # First check if token exists at all
-        token_check = db.execute(
-            select(AuthSession).where(AuthSession.token == token)
-        ).first()
-        logger.info(f"[AUTH] Token lookup result: {token_check is not None}")
-
-        if not token_check:
-            # Count total sessions for debugging
-            from sqlalchemy import func
-
-            total = db.execute(select(func.count()).select_from(AuthSession)).scalar()
-            logger.info(f"[AUTH] Total sessions in DB: {total}")
-
         stmt = (
             select(AuthSession, User)
             .join(User, AuthSession.user_id == User.id)
@@ -82,6 +65,12 @@ async def get_current_user(request: Request) -> dict:
         if now > expires:
             raise HTTPException(status_code=401, detail="Session expired")
 
+        allowed = _get_allowed_emails()
+        if allowed and user.email.lower() not in allowed:
+            raise HTTPException(
+                status_code=403, detail="Access denied: email not authorized"
+            )
+
         return {
             "id": user.id,
             "email": user.email,
@@ -96,6 +85,14 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Authentication failed")
     finally:
         db.close()
+
+
+def _get_allowed_emails() -> set:
+    """Return lowercased allowed email set. Empty set = allow all (dev mode)."""
+    raw = os.environ.get("ALLOWED_EMAILS", "")
+    if not raw.strip():
+        return set()
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
 def _extract_token(request: Request) -> Optional[str]:

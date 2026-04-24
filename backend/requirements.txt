@@ -4,7 +4,8 @@ python-multipart==0.0.20
 aiofiles==24.1.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-docling==2.75.0
+# docling removed — runs as a separate Container App (docling-service)
+# Configure via DOCLING_SERVICE_URL env var
 requests>=2.32.2,<3.0.0
 bcrypt
 PyJWT

@@ -41,15 +41,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Run with Gunicorn + a single UvicornWorker.
 #
-# Why 1 worker?  This app loads heavy Docling ML models (~1-2 GB) per process
-# and relies on in-process asyncio semaphores for LLM rate-limit control.
-# Multiple workers would duplicate model memory (→ OOM on 2 Gi) and fragment
-# the semaphores (→ 4× the intended concurrent LLM calls).
+# Docling has been extracted to a separate Container App (docling-service)
+# so this image is lightweight (~500 MB, no PyTorch/ONNX).
+# The backend calls docling-service over HTTP via DOCLING_SERVICE_URL.
 #
 # Horizontal scaling is handled by Azure Container Apps replicas (1-5).
-# Each replica is one independent worker with its own semaphore and model copy.
-# Gunicorn is kept (not bare uvicorn) for process supervision: it enforces
-# --timeout on stuck requests and performs graceful shutdown on SIGTERM.
+# Each replica is one independent worker with its own semaphore.
+# Gunicorn is kept for process supervision: it enforces --timeout on stuck
+# requests and performs graceful shutdown on SIGTERM.
 CMD ["sh", "-c", "gunicorn main:app \
     --worker-class uvicorn.workers.UvicornWorker \
     --workers ${WORKERS:-1} \

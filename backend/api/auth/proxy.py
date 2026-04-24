@@ -12,10 +12,19 @@ same container-app pod, we forward rather than running nginx.
 import os
 import httpx
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["auth-proxy"])
 
 _AUTH_SIDECAR_URL = os.getenv("AUTH_SIDECAR_URL", "http://localhost:3001")
+
+
+def _get_allowed_emails() -> set:
+    raw = os.getenv("ALLOWED_EMAILS", "")
+    if not raw.strip():
+        return set()
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
 
 # Headers that must not be forwarded (hop-by-hop or would break the proxy).
 _HOP_BY_HOP = frozenset(
@@ -60,6 +69,27 @@ async def proxy_auth(path: str, request: Request) -> Response:
             params=dict(request.query_params),
             follow_redirects=False,
         )
+
+    # Enforce email allowlist: intercept get-session before returning to browser.
+    # This is the call the frontend makes to determine auth state on every page load.
+    if (
+        path == "get-session"
+        and request.method.upper() == "GET"
+        and upstream.status_code == 200
+    ):
+        allowed = _get_allowed_emails()
+        if allowed:
+            try:
+                data = upstream.json()
+                if isinstance(data, dict):
+                    email = (data.get("user") or {}).get("email", "")
+                    if email and email.lower() not in allowed:
+                        return JSONResponse(
+                            status_code=403,
+                            content={"error": "Access denied: email not authorized"},
+                        )
+            except Exception:
+                pass
 
     # Build response — handle Set-Cookie specially since there can be multiples
     # and a dict would drop all but the last one.

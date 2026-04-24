@@ -41,10 +41,13 @@ export function RawOutputViewer({
       try {
         setLoading(true);
         const token = await getValidToken();
+        const qs = processorUsed
+          ? `?processor_used=${encodeURIComponent(processorUsed)}`
+          : "";
 
         // Always fetch enhanced content, which includes both base and enhanced versions
         const response = await fetch(
-          `/api/documents/${conversionId}/enhanced-content`,
+          `/api/documents/${conversionId}/enhanced-content${qs}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -56,7 +59,7 @@ export function RawOutputViewer({
           );
           // Fallback to base content
           const baseResponse = await fetch(
-            `/api/documents/${conversionId}/content`,
+            `/api/documents/${conversionId}/content${qs}`,
             {
               headers: { Authorization: `Bearer ${token}` },
             }
@@ -96,7 +99,7 @@ export function RawOutputViewer({
         setLoading(false);
       }
     },
-    [conversionId, onContentUpdate]
+    [conversionId, processorUsed, onContentUpdate]
   );
 
   useEffect(() => {
