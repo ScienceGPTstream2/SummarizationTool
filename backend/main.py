@@ -113,9 +113,11 @@ def _setup_otel(app: FastAPI) -> None:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
             OTLPSpanExporter,
         )
+        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        provider = TracerProvider()
+        resource = Resource(attributes={SERVICE_NAME: "summarization-backend"})
+        provider = TracerProvider(resource=resource)
         provider.add_span_processor(
             BatchSpanProcessor(
                 OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
