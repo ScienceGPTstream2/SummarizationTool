@@ -721,46 +721,75 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       {/* ── Composer ────────────────────────────────────────────────────────── */}
       <div className="shrink-0 px-4 pb-4 pt-2 bg-background">
         <div className="max-w-3xl mx-auto space-y-2">
-          {/* Document badge */}
-          {(attachedDoc || docLoading || docError) && (
-            <div className="flex items-center gap-2 px-1">
-              {docLoading && (
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Processing document…
-                </div>
-              )}
-              {docError && !docLoading && (
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate max-w-[260px]">{docError}</span>
-                  <button
-                    onClick={() => {
-                      setAttachedDoc(null);
-                      setDocError(null);
-                    }}
-                    className="ml-0.5 hover:opacity-70"
+          {/* Document badges */}
+          {docs.size > 0 && (
+            <div className="flex flex-wrap gap-2 px-1">
+              {Array.from(docs.values()).map(entry => {
+                if (entry.status === "loading") {
+                  return (
+                    <div
+                      key={entry.tempId}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground"
+                    >
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <span className="truncate max-w-[200px]">{entry.file.name}</span>
+                    </div>
+                  );
+                }
+                if (entry.status === "error") {
+                  return (
+                    <div
+                      key={entry.tempId}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs"
+                    >
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate max-w-[200px]">{entry.file.name}</span>
+                      <button
+                        onClick={() => removeDoc(entry.tempId)}
+                        className="ml-0.5 hover:opacity-70"
+                        aria-label="Remove"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                }
+                // ready
+                return (
+                  <div
+                    key={entry.tempId}
+                    className="inline-flex items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs"
                   >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-              {attachedDoc && !docLoading && (
-                <div className="inline-flex items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs">
-                  <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <span className="font-medium truncate max-w-[220px]">
-                    {attachedDoc.file.name}
-                  </span>
-                  <span className="text-muted-foreground">· in context</span>
-                  <button
-                    onClick={() => setAttachedDoc(null)}
-                    className="ml-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Remove document"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
+                    <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="font-medium truncate max-w-[180px]">{entry.file.name}</span>
+                    <span className="text-muted-foreground">· in context</span>
+                    <button
+                      onClick={() => removeDoc(entry.tempId)}
+                      className="ml-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="Remove document"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Context window error banner */}
+          {contextError && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-destructive/10 text-destructive text-xs">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">
+                Context window exceeded — your documents are too large. Remove a document and try again.
+              </span>
+              <button
+                onClick={() => setContextError(false)}
+                className="ml-0.5 hover:opacity-70"
+                aria-label="Dismiss"
+              >
+                <X className="h-3 w-3" />
+              </button>
             </div>
           )}
 
