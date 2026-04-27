@@ -64,7 +64,9 @@ async def chat_query(request: ChatQueryRequest):
             status_code=500,
             content={
                 "success": False,
-                "error": result.get("error", "The model call failed. Please try again."),
+                "error": result.get(
+                    "error", "The model call failed. Please try again."
+                ),
             },
         )
 

@@ -437,6 +437,11 @@ async def process_uploaded_file(
                 status_code=500, detail=f"Conversion failed: {result['error']}"
             )
 
+        # Sync local /tmp output to blob storage so the content endpoint can read it
+        await file_service.sync_processing_output_to_blob(
+            file_hash, processor_name, output_dir
+        )
+
         processor_used = result.get("processor_used", processor_name)
         print(f"[PROCESS] ✅ Saved directly to organized structure: {output_dir}")
 
