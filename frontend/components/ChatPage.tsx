@@ -346,6 +346,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     const tempId = crypto.randomUUID();
 
     setDocs(prev => {
+      const active = Array.from(prev.values()).filter(d => d.status !== "error").length;
+      if (active >= MAX_DOCS) return prev;
       const next = new Map(prev);
       next.set(tempId, { status: "loading", file, tempId });
       return next;
@@ -391,6 +393,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       const { markdown_content: markdown = "" } = await contentRes.json();
 
       setDocs(prev => {
+        if (!prev.has(tempId)) return prev; // user removed mid-flight; honour it
         const next = new Map(prev);
         next.set(tempId, { status: "ready", file, tempId, fileHash, markdown, processorUsed });
         return next;
@@ -399,6 +402,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to process document";
       setDocs(prev => {
+        if (!prev.has(tempId)) return prev; // user removed mid-flight; honour it
         const next = new Map(prev);
         next.set(tempId, { status: "error", file, tempId, error: msg });
         return next;
