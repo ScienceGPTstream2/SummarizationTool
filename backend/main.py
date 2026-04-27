@@ -117,7 +117,9 @@ def _setup_otel(app: FastAPI) -> None:
 
         provider = TracerProvider()
         provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces"))
+            BatchSpanProcessor(
+                OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
+            )
         )
         trace.set_tracer_provider(provider)
         FastAPIInstrumentor.instrument_app(app)
@@ -152,7 +154,9 @@ def create_app() -> FastAPI:
     try:
         from prometheus_fastapi_instrumentator import Instrumentator
 
-        Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+        Instrumentator().instrument(app).expose(
+            app, endpoint="/metrics", include_in_schema=False
+        )
         logger.info("Prometheus metrics enabled at /metrics")
     except Exception as exc:
         logger.warning("Prometheus instrumentator unavailable (non-fatal): %s", exc)
@@ -190,15 +194,27 @@ def create_app() -> FastAPI:
 
         if status >= 500:
             logger.error(
-                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
+                "%s %s → %d (%.0fms)",
+                request.method,
+                request.url.path,
+                status,
+                duration_ms,
             )
         elif status >= 400:
             logger.warning(
-                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
+                "%s %s → %d (%.0fms)",
+                request.method,
+                request.url.path,
+                status,
+                duration_ms,
             )
         else:
             logger.info(
-                "%s %s → %d (%.0fms)", request.method, request.url.path, status, duration_ms
+                "%s %s → %d (%.0fms)",
+                request.method,
+                request.url.path,
+                status,
+                duration_ms,
             )
 
         response.headers["X-Request-Id"] = request_id

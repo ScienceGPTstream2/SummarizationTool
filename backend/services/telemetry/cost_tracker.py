@@ -279,8 +279,12 @@ class CostTracker:
         # Export to Prometheus
         if _PROMETHEUS_AVAILABLE:
             try:
-                _llm_tokens.labels(provider=provider, model=model, token_type="prompt").inc(prompt_tokens_int)
-                _llm_tokens.labels(provider=provider, model=model, token_type="completion").inc(completion_tokens_int)
+                _llm_tokens.labels(
+                    provider=provider, model=model, token_type="prompt"
+                ).inc(prompt_tokens_int)
+                _llm_tokens.labels(
+                    provider=provider, model=model, token_type="completion"
+                ).inc(completion_tokens_int)
                 _llm_cost_cents.labels(provider=provider, model=model).inc(cost * 100)
                 _llm_duration.labels(provider=provider, model=model).observe(duration)
             except Exception:
