@@ -343,9 +343,13 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
   // ── Document processing ─────────────────────────────────────────────────────
   const processFile = useCallback(async (file: File) => {
-    setDocError(null);
-    setDocLoading(true);
-    setAttachedDoc(null);
+    const tempId = crypto.randomUUID();
+
+    setDocs(prev => {
+      const next = new Map(prev);
+      next.set(tempId, { status: "loading", file, tempId });
+      return next;
+    });
 
     try {
       const token = await getValidToken();
@@ -364,17 +368,14 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       const { file_hash: fileHash } = await uploadRes.json();
 
       // 2. Process via Azure Document Intelligence
-      const processRes = await fetch(
-        `/api/documents/process/file/${fileHash}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ processor: "azure_doc_intelligence" }),
-        }
-      );
+      const processRes = await fetch(`/api/documents/process/file/${fileHash}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ processor: "azure_doc_intelligence" }),
+      });
       if (!processRes.ok)
         throw new Error(`Processing failed: ${await processRes.text()}`);
       const { processor_used: processorUsed = "azure_doc_intelligence" } =
@@ -389,15 +390,20 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         throw new Error(`Content retrieval failed: ${await contentRes.text()}`);
       const { markdown_content: markdown = "" } = await contentRes.json();
 
-      setAttachedDoc({ file, fileHash, markdown, processorUsed });
+      setDocs(prev => {
+        const next = new Map(prev);
+        next.set(tempId, { status: "ready", file, tempId, fileHash, markdown, processorUsed });
+        return next;
+      });
       toast.success(`"${file.name}" attached as context`);
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to process document";
-      setDocError(msg);
+      const msg = err instanceof Error ? err.message : "Failed to process document";
+      setDocs(prev => {
+        const next = new Map(prev);
+        next.set(tempId, { status: "error", file, tempId, error: msg });
+        return next;
+      });
       toast.error(msg);
-    } finally {
-      setDocLoading(false);
     }
   }, []);
 
