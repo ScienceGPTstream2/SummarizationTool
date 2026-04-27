@@ -45,8 +45,15 @@ const MAX_DOCS = 5;
 
 type DocEntry =
   | { status: "loading"; file: File; tempId: string }
-  | { status: "ready";   file: File; tempId: string; fileHash: string; markdown: string; processorUsed: string }
-  | { status: "error";   file: File; tempId: string; error: string };
+  | {
+      status: "ready";
+      file: File;
+      tempId: string;
+      fileHash: string;
+      markdown: string;
+      processorUsed: string;
+    }
+  | { status: "error"; file: File; tempId: string; error: string };
 
 interface ChatPageProps {
   onSwitchToWorkflow?: () => void;
@@ -307,14 +314,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const [contextError, setContextError] = useState(false);
 
   const removeDoc = useCallback((tempId: string) => {
-    setDocs(prev => {
+    setDocs((prev) => {
       const next = new Map(prev);
       next.delete(tempId);
       return next;
     });
   }, []);
 
-  const activeDocCount = Array.from(docs.values()).filter(d => d.status !== "error").length;
+  const activeDocCount = Array.from(docs.values()).filter(
+    (d) => d.status !== "error"
+  ).length;
   const atDocLimit = activeDocCount >= MAX_DOCS;
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -345,8 +354,10 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const processFile = useCallback(async (file: File) => {
     const tempId = crypto.randomUUID();
 
-    setDocs(prev => {
-      const active = Array.from(prev.values()).filter(d => d.status !== "error").length;
+    setDocs((prev) => {
+      const active = Array.from(prev.values()).filter(
+        (d) => d.status !== "error"
+      ).length;
       if (active >= MAX_DOCS) return prev;
       const next = new Map(prev);
       next.set(tempId, { status: "loading", file, tempId });
@@ -370,14 +381,17 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       const { file_hash: fileHash } = await uploadRes.json();
 
       // 2. Process via Azure Document Intelligence
-      const processRes = await fetch(`/api/documents/process/file/${fileHash}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ processor: "azure_doc_intelligence" }),
-      });
+      const processRes = await fetch(
+        `/api/documents/process/file/${fileHash}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ processor: "azure_doc_intelligence" }),
+        }
+      );
       if (!processRes.ok)
         throw new Error(`Processing failed: ${await processRes.text()}`);
       const { processor_used: processorUsed = "azure_doc_intelligence" } =
@@ -392,16 +406,24 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         throw new Error(`Content retrieval failed: ${await contentRes.text()}`);
       const { markdown_content: markdown = "" } = await contentRes.json();
 
-      setDocs(prev => {
+      setDocs((prev) => {
         if (!prev.has(tempId)) return prev; // user removed mid-flight; honour it
         const next = new Map(prev);
-        next.set(tempId, { status: "ready", file, tempId, fileHash, markdown, processorUsed });
+        next.set(tempId, {
+          status: "ready",
+          file,
+          tempId,
+          fileHash,
+          markdown,
+          processorUsed,
+        });
         return next;
       });
       toast.success(`"${file.name}" attached as context`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to process document";
-      setDocs(prev => {
+      const msg =
+        err instanceof Error ? err.message : "Failed to process document";
+      setDocs((prev) => {
         if (!prev.has(tempId)) return prev; // user removed mid-flight; honour it
         const next = new Map(prev);
         next.set(tempId, { status: "error", file, tempId, error: msg });
@@ -415,12 +437,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      const available = MAX_DOCS - Array.from(docs.values()).filter(d => d.status !== "error").length;
+      const available =
+        MAX_DOCS -
+        Array.from(docs.values()).filter((d) => d.status !== "error").length;
       if (available <= 0) return;
       const toProcess = files.slice(0, available);
       if (files.length > available)
-        toast.warning(`Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`);
-      toProcess.forEach(f => processFile(f));
+        toast.warning(
+          `Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`
+        );
+      toProcess.forEach((f) => processFile(f));
     },
     [docs, processFile]
   );
@@ -448,15 +474,19 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       dragCounter.current = 0;
       setIsDragOver(false);
       const files = Array.from(e.dataTransfer.files);
-      const available = MAX_DOCS - Array.from(docs.values()).filter(d => d.status !== "error").length;
+      const available =
+        MAX_DOCS -
+        Array.from(docs.values()).filter((d) => d.status !== "error").length;
       if (available <= 0) {
         toast.error(`Maximum ${MAX_DOCS} documents already attached`);
         return;
       }
       const toProcess = files.slice(0, available);
       if (files.length > available)
-        toast.warning(`Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`);
-      toProcess.forEach(f => processFile(f));
+        toast.warning(
+          `Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`
+        );
+      toProcess.forEach((f) => processFile(f));
     },
     [docs, processFile]
   );
@@ -513,7 +543,10 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       const documentMarkdown =
         readyDocs.length > 0
           ? readyDocs
-              .map(d => `<document name="${d.file.name}">\n${d.markdown}\n</document>`)
+              .map(
+                (d) =>
+                  `<document name="${d.file.name}">\n${d.markdown}\n</document>`
+              )
               .join("\n\n")
           : null;
 
@@ -541,18 +574,26 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         if (!res.ok || !data.success)
           throw new Error(data.error || "Request failed");
 
-        setMessages(prev => [
+        setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: data.response },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: data.response,
+          },
         ]);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Something went wrong";
         if (isContextWindowError(msg)) {
           setContextError(true);
         } else {
-          setMessages(prev => [
+          setMessages((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), role: "assistant", content: `Error: ${msg}` },
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: `Error: ${msg}`,
+            },
           ]);
         }
       } finally {
@@ -747,63 +788,75 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           {/* Document badges */}
           {docs.size > 0 && (
             <div className="flex flex-col gap-1 px-1">
-            <div
-              className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              onWheel={e => { e.preventDefault(); e.currentTarget.scrollLeft += e.deltaY; }}
-            >
-              {Array.from(docs.values()).map(entry => {
-                if (entry.status === "loading") {
+              <div
+                className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                onWheel={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.scrollLeft += e.deltaY;
+                }}
+              >
+                {Array.from(docs.values()).map((entry) => {
+                  if (entry.status === "loading") {
+                    return (
+                      <div
+                        key={entry.tempId}
+                        className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground"
+                      >
+                        <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                        <span className="truncate max-w-[200px]">
+                          {entry.file.name}
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (entry.status === "error") {
+                    return (
+                      <div
+                        key={entry.tempId}
+                        className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs"
+                      >
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate max-w-[200px]">
+                          {entry.file.name}
+                        </span>
+                        <button
+                          onClick={() => removeDoc(entry.tempId)}
+                          className="ml-0.5 hover:opacity-70"
+                          aria-label="Remove"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  }
+                  // ready
                   return (
                     <div
                       key={entry.tempId}
-                      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground"
+                      className="inline-flex shrink-0 items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs"
                     >
-                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                      <span className="truncate max-w-[200px]">{entry.file.name}</span>
-                    </div>
-                  );
-                }
-                if (entry.status === "error") {
-                  return (
-                    <div
-                      key={entry.tempId}
-                      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs"
-                    >
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate max-w-[200px]">{entry.file.name}</span>
+                      <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span className="font-medium truncate max-w-[180px]">
+                        {entry.file.name}
+                      </span>
+                      <span className="text-muted-foreground">
+                        · in context
+                      </span>
                       <button
                         onClick={() => removeDoc(entry.tempId)}
-                        className="ml-0.5 hover:opacity-70"
-                        aria-label="Remove"
+                        className="ml-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Remove document"
                       >
-                        <X className="h-3 w-3" />
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   );
-                }
-                // ready
-                return (
-                  <div
-                    key={entry.tempId}
-                    className="inline-flex shrink-0 items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs"
-                  >
-                    <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="font-medium truncate max-w-[180px]">{entry.file.name}</span>
-                    <span className="text-muted-foreground">· in context</span>
-                    <button
-                      onClick={() => removeDoc(entry.tempId)}
-                      className="ml-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Remove document"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-[11px] text-muted-foreground/60 px-0.5">
-              Up to 5 docs supported — recommend uploading one at a time per chat.
-            </p>
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground/60 px-0.5">
+                Up to 5 docs supported — recommend uploading one at a time per
+                chat.
+              </p>
             </div>
           )}
 
@@ -812,7 +865,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-destructive/10 text-destructive text-xs">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1">
-                Context window exceeded — your documents are too large. Remove a document and try again.
+                Context window exceeded — your documents are too large. Remove a
+                document and try again.
               </span>
               <button
                 onClick={() => setContextError(false)}
