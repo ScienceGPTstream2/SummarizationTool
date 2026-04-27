@@ -481,6 +481,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   }, [availableModels, selectedModelId]);
 
   // ── Send ─────────────────────────────────────────────────────────────────────
+  const isContextWindowError = (msg: string) => {
+    const lower = msg.toLowerCase();
+    return (
+      lower.includes("context_length_exceeded") ||
+      lower.includes("maximum context length") ||
+      lower.includes("context window") ||
+      (lower.includes("token") && lower.includes("limit"))
+    );
+  };
+
   const sendQuery = useCallback(
     async (query: string) => {
       const modelConfig = getModelConfig();
@@ -489,7 +499,20 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         return;
       }
 
+      setContextError(false);
       setIsLoading(true);
+
+      // Build combined document markdown from all ready docs
+      const readyDocs = Array.from(docs.values()).filter(
+        (d): d is Extract<DocEntry, { status: "ready" }> => d.status === "ready"
+      );
+      const documentMarkdown =
+        readyDocs.length > 0
+          ? readyDocs
+              .map(d => `<document name="${d.file.name}">\n${d.markdown}\n</document>`)
+              .join("\n\n")
+          : null;
+
       try {
         const token = await getValidToken();
         if (!token) throw new Error("Not authenticated");
@@ -502,7 +525,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           },
           body: JSON.stringify({
             query,
-            document_markdown: attachedDoc?.markdown ?? null,
+            document_markdown: documentMarkdown,
             model_type: modelConfig.modelType,
             model_id: modelConfig.modelId,
             deployment: modelConfig.deployment ?? null,
@@ -514,29 +537,25 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         if (!res.ok || !data.success)
           throw new Error(data.error || "Request failed");
 
-        setMessages((prev) => [
+        setMessages(prev => [
           ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: data.response,
-          },
+          { id: crypto.randomUUID(), role: "assistant", content: data.response },
         ]);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Something went wrong";
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: `Error: ${msg}`,
-          },
-        ]);
+        if (isContextWindowError(msg)) {
+          setContextError(true);
+        } else {
+          setMessages(prev => [
+            ...prev,
+            { id: crypto.randomUUID(), role: "assistant", content: `Error: ${msg}` },
+          ]);
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [attachedDoc, getModelConfig]
+    [docs, getModelConfig]
   );
 
   const handleSend = useCallback(async () => {
