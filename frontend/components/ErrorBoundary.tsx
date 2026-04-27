@@ -52,7 +52,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </div>
             <h2 className="text-xl font-semibold">Something went wrong</h2>
             <p className="text-muted-foreground text-sm max-w-sm">
-              An unexpected error occurred. The error has been reported automatically.
+              An unexpected error occurred. The error has been reported
+              automatically.
             </p>
             <button
               onClick={() => window.location.reload()}

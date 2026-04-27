@@ -20,9 +20,7 @@ function initObservability() {
                       url: "/api/telemetry/traces",
                     });
                     const provider = new WebTracerProvider();
-                    provider.addSpanProcessor(
-                      new BatchSpanProcessor(exporter)
-                    );
+                    provider.addSpanProcessor(new BatchSpanProcessor(exporter));
                     provider.register();
                     registerInstrumentations({
                       instrumentations: [new FetchInstrumentation()],
