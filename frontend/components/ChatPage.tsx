@@ -41,12 +41,12 @@ interface Message {
   content: string;
 }
 
-interface AttachedDocument {
-  file: File;
-  fileHash: string;
-  markdown: string;
-  processorUsed: string;
-}
+const MAX_DOCS = 5;
+
+type DocEntry =
+  | { status: "loading"; file: File; tempId: string }
+  | { status: "ready";   file: File; tempId: string; fileHash: string; markdown: string; processorUsed: string }
+  | { status: "error";   file: File; tempId: string; error: string };
 
 interface ChatPageProps {
   onSwitchToWorkflow?: () => void;
@@ -303,9 +303,19 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [modelsLoading, setModelsLoading] = useState(true);
 
-  const [attachedDoc, setAttachedDoc] = useState<AttachedDocument | null>(null);
-  const [docLoading, setDocLoading] = useState(false);
-  const [docError, setDocError] = useState<string | null>(null);
+  const [docs, setDocs] = useState<Map<string, DocEntry>>(new Map());
+  const [contextError, setContextError] = useState(false);
+
+  const removeDoc = useCallback((tempId: string) => {
+    setDocs(prev => {
+      const next = new Map(prev);
+      next.delete(tempId);
+      return next;
+    });
+  }, []);
+
+  const activeDocCount = Array.from(docs.values()).filter(d => d.status !== "error").length;
+  const atDocLimit = activeDocCount >= MAX_DOCS;
 
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
