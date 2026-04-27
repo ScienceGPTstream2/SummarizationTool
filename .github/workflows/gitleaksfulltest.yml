@@ -1,4 +1,3 @@
-gitleaks-full-test:
 name: Gitleaks Full Test
 
 on:
