@@ -746,13 +746,17 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         <div className="max-w-3xl mx-auto space-y-2">
           {/* Document badges */}
           {docs.size > 0 && (
-            <div className="flex flex-wrap gap-2 px-1">
+            <div className="flex flex-col gap-1 px-1">
+            <div
+              className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              onWheel={e => { e.preventDefault(); e.currentTarget.scrollLeft += e.deltaY; }}
+            >
               {Array.from(docs.values()).map(entry => {
                 if (entry.status === "loading") {
                   return (
                     <div
                       key={entry.tempId}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground"
+                      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-muted text-xs text-muted-foreground"
                     >
                       <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                       <span className="truncate max-w-[200px]">{entry.file.name}</span>
@@ -763,7 +767,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                   return (
                     <div
                       key={entry.tempId}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs"
+                      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl bg-destructive/10 text-destructive text-xs"
                     >
                       <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span className="truncate max-w-[200px]">{entry.file.name}</span>
@@ -781,7 +785,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                 return (
                   <div
                     key={entry.tempId}
-                    className="inline-flex items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs"
+                    className="inline-flex shrink-0 items-center gap-2 pl-2.5 pr-2 py-1.5 rounded-xl border border-border bg-muted/50 text-xs"
                   >
                     <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="font-medium truncate max-w-[180px]">{entry.file.name}</span>
@@ -796,6 +800,10 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                   </div>
                 );
               })}
+            </div>
+            <p className="text-[11px] text-muted-foreground/60 px-0.5">
+              Up to 5 docs supported — recommend uploading one at a time per chat.
+            </p>
             </div>
           )}
 
