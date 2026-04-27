@@ -29,7 +29,7 @@ alembic>=1.13.0
 psycopg2-binary>=2.9.0
 # Observability
 structlog==24.4.0
-logging-loki==0.3.1
+python-logging-loki>=0.3.1
 prometheus-client==0.20.0
 prometheus-fastapi-instrumentator==7.0.0
 opentelemetry-api>=1.25.0
