@@ -409,11 +409,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
+      const files = Array.from(e.target.files ?? []);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      if (file) processFile(file);
+      const available = MAX_DOCS - Array.from(docs.values()).filter(d => d.status !== "error").length;
+      if (available <= 0) return;
+      const toProcess = files.slice(0, available);
+      if (files.length > available)
+        toast.warning(`Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`);
+      toProcess.forEach(f => processFile(f));
     },
-    [processFile]
+    [docs, processFile]
   );
 
   // ── Drag and drop ───────────────────────────────────────────────────────────
@@ -438,10 +443,18 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       e.preventDefault();
       dragCounter.current = 0;
       setIsDragOver(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file) processFile(file);
+      const files = Array.from(e.dataTransfer.files);
+      const available = MAX_DOCS - Array.from(docs.values()).filter(d => d.status !== "error").length;
+      if (available <= 0) {
+        toast.error(`Maximum ${MAX_DOCS} documents already attached`);
+        return;
+      }
+      const toProcess = files.slice(0, available);
+      if (files.length > available)
+        toast.warning(`Maximum ${MAX_DOCS} documents — ${files.length - available} file(s) skipped`);
+      toProcess.forEach(f => processFile(f));
     },
-    [processFile]
+    [docs, processFile]
   );
 
   // ── Model config ─────────────────────────────────────────────────────────────
@@ -775,13 +788,14 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept=".pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt"
                   className="hidden"
                   onChange={handleFileInputChange}
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={docLoading}
+                  disabled={atDocLimit}
                   title="Attach document (or drag & drop)"
                   className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
