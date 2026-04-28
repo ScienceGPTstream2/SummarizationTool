@@ -37,3 +37,15 @@ datasources:
         datasourceUid: prometheus
       nodeGraph:
         enabled: true
+
+  - name: Azure Monitor
+    type: grafana-azure-monitor-datasource
+    uid: azure-monitor
+    jsonData:
+      azureAuthType: clientsecret
+      cloudName: azuremonitor
+      tenantId: AZURE_TENANT_ID
+      clientId: AZURE_CLIENT_ID
+      subscriptionId: 9c673b89-f870-4b2e-ac72-fb91ac4fdd12
+    secureJsonData:
+      clientSecret: AZURE_CLIENT_SECRET
