@@ -32,6 +32,7 @@ function getAllowedEmails(): Set<string> {
   return new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean));
 }
 
+
 // ---------- Better Auth Configuration ----------
 
 // Support comma-separated FRONTEND_URL for multiple trusted origins

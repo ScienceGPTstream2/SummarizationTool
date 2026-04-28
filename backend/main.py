@@ -98,6 +98,7 @@ from api import (
     groups,
     templates,
 )
+from api.chat import router as chat_router
 from api.auth.proxy import router as auth_proxy_router
 
 
@@ -237,6 +238,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(groups.router)
     app.include_router(templates.router)
+    app.include_router(chat_router)
 
     return app
 
