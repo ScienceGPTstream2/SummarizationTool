@@ -19,6 +19,20 @@ import { betterAuth } from "better-auth";
 import { toNodeHandler } from "better-auth/node";
 import { Pool } from "pg";
 
+// ---------- Shared DB Pool ----------
+
+const dbPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+function getAllowedEmails(): Set<string> {
+  const raw = process.env.ALLOWED_EMAILS || "";
+  if (!raw.trim()) return new Set();
+  return new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean));
+}
+
+
 // ---------- Better Auth Configuration ----------
 
 // Support comma-separated FRONTEND_URL for multiple trusted origins
@@ -27,7 +41,6 @@ const frontendURLs = (process.env.FRONTEND_URL || "http://localhost:3000")
   .split(",")
   .map((u) => u.trim())
   .filter(Boolean);
-const primaryFrontendURL = frontendURLs[0];
 
 const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3001",
@@ -35,10 +48,7 @@ const auth = betterAuth({
   // Trust all configured frontend origins (production FQDN + dev port-forward)
   trustedOrigins: frontendURLs,
 
-  database: new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-  }),
+  database: dbPool,
 
   // Session configuration
   session: {
@@ -66,6 +76,28 @@ const auth = betterAuth({
         }
       : {}),
   },
+
+  // Block session creation for non-allowlisted emails.
+  // Empty ALLOWED_EMAILS = allow all (dev mode).
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const allowed = getAllowedEmails();
+          if (allowed.size === 0) return;
+          const result = await dbPool.query(
+            'SELECT email FROM "user" WHERE id = $1',
+            [session.userId]
+          );
+          const email = (result.rows[0]?.email as string | undefined)?.toLowerCase();
+          if (!email || !allowed.has(email)) {
+            console.log(`[Allowlist] Blocked session creation for userId=${session.userId}`);
+            return false;
+          }
+        },
+      },
+    },
+  },
 });
 
 // ---------- Express Server ----------
@@ -78,6 +110,25 @@ app.use(
     credentials: true,
   })
 );
+
+// Allowlist enforcement: intercept get-session before Better Auth handles it.
+// This is the call the frontend makes on every page load to check auth state.
+// Returning 403 causes authUtils._fetchSession() to return null → user treated as logged out.
+app.get("/api/auth/get-session", async (req, res, next) => {
+  const allowed = getAllowedEmails();
+  if (allowed.size === 0) return next();
+  try {
+    const session = await auth.api.getSession({ headers: req.headers as any });
+    if (!session?.user?.email) return next();
+    if (!allowed.has(session.user.email.toLowerCase())) {
+      console.log("[Allowlist] Blocked get-session: email not on allowlist");
+      return res.status(403).json({ error: "Access denied: email not authorized" });
+    }
+  } catch (err) {
+    console.error("[Allowlist] Error in get-session check:", err);
+  }
+  return next();
+});
 
 // Mount Better Auth handler at /api/auth/*
 app.all("/api/auth/*", toNodeHandler(auth));

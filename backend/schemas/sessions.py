@@ -44,6 +44,8 @@ class SessionDocument(BaseModel):
     parse_cost: Optional[float] = None
     page_count: Optional[int] = None
     parse_duration_seconds: Optional[float] = None
+    figure_count: Optional[int] = None
+    table_count: Optional[int] = None
 
 
 class ExtractionResult(BaseModel):
@@ -149,7 +151,7 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionRequest(BaseModel):
     """Request to update an existing session"""
 
-    user_id: str
+    user_id: Optional[str] = None
     name: Optional[str] = None
     status: Optional[Literal["in_progress", "completed"]] = None
     last_step: Optional[str] = None

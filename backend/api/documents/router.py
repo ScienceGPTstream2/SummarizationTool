@@ -21,6 +21,50 @@ document_service = DocumentService()
 llm_service = LLMService()
 
 
+@router.get("/{document_id}/view", dependencies=[Depends(get_current_user)])
+async def get_document_view(document_id: str, processor_used: str = None):
+    """Return canonical backend-owned file/viewer state for a processed document."""
+    try:
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
+        )
+        if not resolved_processor:
+            raise HTTPException(status_code=404, detail="Processed document not found")
+
+        metadata = await file_service.get_processed_metadata(
+            document_id, resolved_processor
+        )
+        file_metadata = await file_service.get_file_metadata(document_id)
+
+        document_view = await file_service.build_document_view(
+            file_hash=document_id,
+            preferred_processor=resolved_processor,
+            filename=(file_metadata or {}).get("original_filename"),
+            parse_cost=(metadata or {}).get("parse_cost"),
+            parse_duration_seconds=(metadata or {}).get("parse_duration_seconds"),
+            page_count=(metadata or {}).get("page_count"),
+            figure_count=(metadata or {}).get("figures_found"),
+            table_count=(metadata or {}).get("tables_found"),
+            status="completed",
+            selected_parser=resolved_processor,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "document_id": document_id,
+                "processor": resolved_processor,
+                "document_view": document_view,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving document view: {str(e)}"
+        )
+
+
 def camel_to_snake_case(name: str) -> str:
     """Convert camelCase to snake_case"""
     import re
@@ -260,6 +304,26 @@ async def process_uploaded_file(
             except Exception as e:
                 print(f"[COST_TRACKER] Failed to record cached document metrics: {e}")
 
+            processor_used = (
+                await document_service.resolve_processor_used(file_hash, processor_name)
+                or processor_name
+            )
+            canonical_view = await file_service.build_document_view(
+                file_hash=file_hash,
+                preferred_processor=processor_used,
+                filename=_cached_doc_filename or file_path.name,
+                parse_cost=parse_cost,
+                parse_duration_seconds=float(
+                    cached_metadata.get("parse_duration_seconds") or 0
+                )
+                or None,
+                page_count=cached_metadata.get("page_count"),
+                figure_count=cached_metadata.get("figures_found"),
+                table_count=cached_metadata.get("tables_found"),
+                status="completed",
+                selected_parser=processor_name,
+            )
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -269,17 +333,20 @@ async def process_uploaded_file(
                     "markdown_path": str(output_dir / "document.md"),
                     "content_length": markdown_content_length,
                     "conversion_time": cached_metadata.get("conversion_time", "cached"),
-                    "processor_used": processor_name,
+                    "processor_used": canonical_view["processingResult"][
+                        "processorUsed"
+                    ],
                     "cached": True,
-                    "figures_found": cached_metadata.get("figures_found", 0),
-                    "figures": cached_metadata.get("figures", []),
-                    "tables_found": cached_metadata.get("tables_found", 0),
+                    "figures_found": canonical_view["processingResult"]["figuresCount"],
+                    "figures": canonical_view["processingResult"]["figures"],
+                    "tables_found": canonical_view["processingResult"]["tablesCount"],
                     "parse_cost": parse_cost,
-                    "page_count": cached_metadata.get("page_count"),
+                    "page_count": canonical_view["processingResult"]["pageCount"],
                     "parse_duration_seconds": float(
                         cached_metadata.get("parse_duration_seconds") or 0
                     )
                     or None,
+                    "document_view": canonical_view,
                 },
             )
 
@@ -375,6 +442,23 @@ async def process_uploaded_file(
         except Exception as e:
             print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
 
+        # Record to Prometheus + session aggregates (same data, fire-and-forget safe)
+        try:
+            cost_tracker.record_call(
+                session_id=session_id,
+                provider="azure",
+                model=result.get("processor_used", processor_name),
+                prompt_tokens=0,
+                completion_tokens=0,
+                duration=actual_duration,
+                page_count=metadata.get("page_count") or 0,
+                document_name=_original_filename,
+                figure_count=metadata.get("figures_found") or 0,
+                table_count=metadata.get("tables_found") or 0,
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to record doc processing metrics: {e}")
+
         # Write parse_cost and parse_duration_seconds into processor metadata.json so cached
         # access later can return the real value (blob-safe via service).
         try:
@@ -443,7 +527,33 @@ async def process_uploaded_file(
         )
 
         processor_used = result.get("processor_used", processor_name)
+
+        # Sync the full output directory to blob so artifacts are durable across
+        # container restarts and available to restore-view, analysis, and figure routes.
+        try:
+            await file_service.sync_processing_output_to_blob(
+                file_hash, processor_used, output_dir
+            )
+            print(f"[PROCESS] ✅ Synced {output_dir} to blob for {file_hash}")
+        except Exception as _sync_err:
+            print(
+                f"[PROCESS] ⚠️  Blob sync failed (artifacts only in /tmp): {_sync_err}"
+            )
+
         print(f"[PROCESS] ✅ Saved directly to organized structure: {output_dir}")
+
+        canonical_view = await file_service.build_document_view(
+            file_hash=file_hash,
+            preferred_processor=processor_used,
+            filename=_original_filename or _metadata_filename or file_path.name,
+            parse_cost=parse_cost,
+            parse_duration_seconds=actual_duration,
+            page_count=metadata.get("page_count"),
+            figure_count=metadata.get("figures_found"),
+            table_count=metadata.get("tables_found"),
+            status="completed",
+            selected_parser=processor_name,
+        )
 
         # Build response with available metadata
         response_content = {
@@ -453,26 +563,28 @@ async def process_uploaded_file(
             "markdown_path": result["markdown_path"],
             "content_length": result["metadata"]["content_length"],
             "conversion_time": result["metadata"]["conversion_time"],
-            "processor_used": processor_used,
+            "processor_used": canonical_view["processingResult"]["processorUsed"],
             "processor_fallback": result.get("processor_fallback", False),
             "fallback_reason": result.get("fallback_reason"),
             "cached": False,
             "parse_cost": parse_cost,
             "parse_duration_seconds": actual_duration,
+            "document_view": canonical_view,
         }
 
         # Include figures information if available
-        if "figures_found" in result["metadata"]:
-            response_content["figures_found"] = result["metadata"]["figures_found"]
-            response_content["figures"] = result["metadata"].get("figures", [])
+        response_content["figures_found"] = canonical_view["processingResult"][
+            "figuresCount"
+        ]
+        response_content["figures"] = canonical_view["processingResult"]["figures"]
 
         # Include tables information if available
-        if "tables_found" in result["metadata"]:
-            response_content["tables_found"] = result["metadata"]["tables_found"]
+        response_content["tables_found"] = canonical_view["processingResult"][
+            "tablesCount"
+        ]
 
         # Include page_count for parse cost recompute on history reload
-        if "page_count" in result["metadata"]:
-            response_content["page_count"] = result["metadata"]["page_count"]
+        response_content["page_count"] = canonical_view["processingResult"]["pageCount"]
 
         return JSONResponse(status_code=200, content=response_content)
 
@@ -492,29 +604,23 @@ async def get_document_content(document_id: str, processor_used: str = None):
         processor_used: Optional processor that was used (improves efficiency)
     """
     try:
-        # Check organized file structure
-        processors_to_check = (
-            [processor_used]
-            if processor_used
-            else ["azure_doc_intelligence", "docling"]
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
         )
+        markdown_content = await document_service.get_markdown_content(
+            document_id, resolved_processor
+        )
+        if markdown_content is None:
+            raise HTTPException(status_code=404, detail="Document processing not found")
 
-        for proc in processors_to_check:
-            if proc is None:
-                continue
-            markdown_content = await file_service.get_processed_content(
-                document_id, proc
-            )
-            if markdown_content is not None:
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "document_id": document_id,
-                        "markdown_content": markdown_content,
-                    },
-                )
-
-        raise HTTPException(status_code=404, detail="Document processing not found")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "document_id": document_id,
+                "processor": resolved_processor,
+                "markdown_content": markdown_content,
+            },
+        )
 
     except HTTPException:
         raise
@@ -818,18 +924,20 @@ async def get_document_figures(document_id: str):
         List of figure metadata including captions, bounding regions, and image paths
     """
     try:
+        resolved_processor = await document_service.resolve_processor_used(document_id)
         figures = await document_service.get_figures_for_conversion(document_id)
 
         if figures is None:
             raise HTTPException(
                 status_code=404,
-                detail="No figures found. Document may not exist or was not processed with Azure Document Intelligence.",
+                detail="No figures found. Document may not exist or was not processed yet.",
             )
 
         return JSONResponse(
             status_code=200,
             content={
                 "document_id": document_id,
+                "processor": resolved_processor,
                 "figures_count": len(figures),
                 "figures": figures,
             },
@@ -844,7 +952,7 @@ async def get_document_figures(document_id: str):
 
 
 @router.get("/{document_id}/analysis", dependencies=[Depends(get_current_user)])
-async def get_document_analysis(document_id: str):
+async def get_document_analysis(document_id: str, processor_used: str = None):
     """
     Get the complete raw analysis result with ALL bounding boxes
 
@@ -879,16 +987,12 @@ async def get_document_analysis(document_id: str):
         import json
 
         # Read raw_analysis.json via service (blob-safe)
-        processors_to_check = ["azure_doc_intelligence", "docling"]
-        analysis_result = None
-
-        for proc in processors_to_check:
-            raw_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, "raw_analysis.json"
-            )
-            if raw_bytes:
-                analysis_result = json.loads(raw_bytes.decode("utf-8"))
-                break
+        resolved_processor = await document_service.resolve_processor_used(
+            document_id, processor_used
+        )
+        analysis_result = await document_service.get_raw_analysis_result(
+            document_id, resolved_processor
+        )
 
         if analysis_result is None:
             raise HTTPException(
@@ -951,13 +1055,9 @@ async def get_figure_image(document_id: str, figure_filename: str):
 
         print(f"[FIGURE] Attempting to serve figure: {document_id}/{figure_filename}")
 
-        figure_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            figure_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"figures/{figure_filename}"
-            )
-            if figure_bytes:
-                break
+        figure_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"figures/{figure_filename}"
+        )
 
         if not figure_bytes:
             print(f"[FIGURE] File not found")
@@ -1032,13 +1132,9 @@ async def generate_figure_summary(
         # because the vision model requires a filesystem path.
         figure_filename = Path(figure["image_path"]).name
 
-        figure_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            figure_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"figures/{figure_filename}"
-            )
-            if figure_bytes:
-                break
+        figure_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"figures/{figure_filename}"
+        )
 
         if not figure_bytes:
             print(f"[FIGURE SUMMARY] Image not found for figure {figure_id}")
@@ -1166,24 +1262,24 @@ async def generate_figure_summary(
         try:
             import json as _json_sum
 
-            for proc in ("azure_doc_intelligence", "docling"):
+            resolved_processor = await document_service.resolve_processor_used(
+                document_id
+            )
+            if resolved_processor:
                 _proc_meta = await file_service.get_processed_metadata(
-                    document_id, proc
+                    document_id, resolved_processor
                 )
                 if _proc_meta and "figures" in _proc_meta:
                     for fig in _proc_meta["figures"]:
                         if fig.get("id") == figure_id:
                             fig["scientific_summary"] = summary_data
                             await file_service.update_processed_metadata(
-                                document_id, proc, _proc_meta
+                                document_id, resolved_processor, _proc_meta
                             )
                             print(
-                                f"[SUMMARY] ✅ Stored summary for figure {figure_id} ({proc})"
+                                f"[SUMMARY] ✅ Stored summary for figure {figure_id} ({resolved_processor})"
                             )
                             break
-                    else:
-                        continue
-                    break
         except Exception as e:
             print(f"[SUMMARY] Warning: Could not persist summary to metadata: {e}")
             # Continue anyway - the summary is still returned to the UI
@@ -1274,13 +1370,9 @@ async def get_table_html(document_id: str, table_filename: str):
 
         print(f"[TABLE] Attempting to serve table: {document_id}/{table_filename}")
 
-        table_bytes = None
-        for proc in ("azure_doc_intelligence", "docling"):
-            table_bytes = await file_service.get_processing_file_bytes(
-                document_id, proc, f"tables/{table_filename}"
-            )
-            if table_bytes:
-                break
+        table_bytes = await document_service.get_processing_file_bytes(
+            document_id, f"tables/{table_filename}"
+        )
 
         if not table_bytes:
             print(f"[TABLE] File not found")

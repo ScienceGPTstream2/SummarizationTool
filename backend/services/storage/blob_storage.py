@@ -16,7 +16,7 @@ Container structure:
 import asyncio
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 
 class BlobStorageClient:
@@ -84,6 +84,21 @@ class BlobStorageClient:
                 tasks.append(self.upload_bytes(blob_path, local_file.read_bytes()))
         if tasks:
             await asyncio.gather(*tasks)
+
+    async def list_blobs_with_prefix(
+        self, blob_prefix: str, limit: int = 20
+    ) -> List[str]:
+        """List blob names under a prefix, up to a small limit."""
+        results: List[str] = []
+        try:
+            container = self._service.get_container_client(self._container)
+            async for blob in container.list_blobs(name_starts_with=blob_prefix):
+                results.append(blob.name)
+                if len(results) >= limit:
+                    break
+        except Exception:
+            return []
+        return results
 
     @classmethod
     def from_env(cls) -> Optional["BlobStorageClient"]:

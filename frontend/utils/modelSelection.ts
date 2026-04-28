@@ -109,6 +109,27 @@ export async function selectBestModel(): Promise<ModelSelectionResult> {
 }
 
 /**
+ * Pick the best vision-capable model from the available model list.
+ * Falls back to any Gemini model if no model has vision_capable: true.
+ */
+export async function selectBestVisionModel(): Promise<ModelSelectionResult | null> {
+  const models = await fetchAllModels();
+  if (!models.length) return null;
+
+  const visionModels = models.filter((m) => (m as any).vision_capable === true);
+  if (visionModels.length)
+    return (
+      pickBestFromList(visionModels) ?? modelConfigToSelection(visionModels[0])
+    );
+
+  // Fallback: any Gemini model supports vision even if flag not set
+  const geminiModels = models.filter((m) => m.provider === "Google Gemini");
+  if (geminiModels.length) return modelConfigToSelection(geminiModels[0]);
+
+  return null;
+}
+
+/**
  * Given a pre-fetched list of models, pick the best one using MODEL_PRIORITY.
  * Returns null only if the list is empty.
  */

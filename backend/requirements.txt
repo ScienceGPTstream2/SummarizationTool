@@ -4,7 +4,8 @@ python-multipart==0.0.20
 aiofiles==24.1.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-docling==2.75.0
+# docling removed — runs as a separate Container App (docling-service)
+# Configure via DOCLING_SERVICE_URL env var
 requests>=2.32.2,<3.0.0
 bcrypt
 PyJWT
@@ -26,3 +27,12 @@ black==26.1.0
 sqlalchemy>=2.0.0
 alembic>=1.13.0
 psycopg2-binary>=2.9.0
+# Observability
+structlog==24.4.0
+python-logging-loki>=0.3.1
+prometheus-client==0.20.0
+prometheus-fastapi-instrumentator==7.0.0
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-exporter-otlp-proto-http>=1.25.0

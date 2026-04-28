@@ -10,6 +10,7 @@ The key change is:
 """
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 import json
@@ -19,7 +20,6 @@ from services.document.organized_file_service import get_organized_file_service
 from services.document.processors.azure_doc_intelligence.azure_doc_intelligence_service import (
     AzureDocIntelligenceService,
 )
-from services.document.processors.docling.docling_service import DoclingService
 
 
 class OrganizedDocumentProcessor:
@@ -33,7 +33,16 @@ class OrganizedDocumentProcessor:
     def __init__(self):
         self.file_service = get_organized_file_service()
         self.azure_service = AzureDocIntelligenceService()
-        self.docling_service = DoclingService()
+
+        # Docling runs as a separate Container App — always remote.
+        # DOCLING_SERVICE_URL must be set (e.g. http://docling-service.internal.<env>.azurecontainerapps.io).
+        from services.document.processors.docling.docling_remote_client import (
+            DoclingRemoteClient,
+        )
+
+        docling_url = os.environ.get("DOCLING_SERVICE_URL", "")
+        self.docling_service = DoclingRemoteClient(base_url=docling_url)
+        print(f"[OrganizedProcessor] Using REMOTE docling-service → {docling_url}")
 
     async def process_document(
         self,
@@ -197,53 +206,23 @@ class OrganizedDocumentProcessor:
     async def _process_with_docling(
         self, file_path: str, output_path: Path
     ) -> Dict[str, Any]:
-        """Process document with Docling and save to output_path."""
+        """Process document with remote docling-service and save to output_path."""
         try:
-            # Use the existing service
-            result = await self.docling_service.convert_document_to_markdown(file_path)
-
+            # Remote mode: pass output_dir so the client writes
+            # document.md and metadata.json directly there.
+            result = await self.docling_service.convert_document_to_markdown(
+                file_path, output_dir=output_path
+            )
             if not result["success"]:
                 return result
 
-            # Copy files to new location
-            old_conversion_dir = (
-                self.docling_service.output_base_dir / result["conversion_id"]
-            )
-
-            import shutil
-
-            # Copy markdown
-            old_md = old_conversion_dir / "document.md"
-            new_md = output_path / "document.md"
-            if old_md.exists():
-                shutil.copy2(old_md, new_md)
-
-            # Copy metadata
-            old_meta = old_conversion_dir / "metadata.json"
-            new_meta = output_path / "metadata.json"
-            if old_meta.exists():
-                shutil.copy2(old_meta, new_meta)
-
-            # Copy figures directory
-            old_figures = old_conversion_dir / "figures"
-            new_figures = output_path / "figures"
-            if old_figures.exists():
-                if new_figures.exists():
-                    shutil.rmtree(new_figures)
-                shutil.copytree(old_figures, new_figures)
-
-            # Read markdown content
-            markdown_content = ""
-            if new_md.exists():
-                async with aiofiles.open(new_md, "r") as f:
-                    markdown_content = await f.read()
-
+            markdown_content = result.get("markdown_content", "")
             return {
                 "success": True,
                 "processor_used": "docling",
                 "markdown_content": markdown_content,
                 "metadata": result.get("metadata", {}),
-                "original_conversion_id": result["conversion_id"],
+                "original_conversion_id": result.get("conversion_id", ""),
             }
 
         except Exception as e:
