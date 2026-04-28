@@ -38,6 +38,7 @@ _EXTRACTION_PROVIDER_MAP = {
     "llama": "gcp",
     "azure-llama": "azure",
     "macbook": "macbook",
+    "vllm": "vllm",
 }
 
 # Timeout logging setup

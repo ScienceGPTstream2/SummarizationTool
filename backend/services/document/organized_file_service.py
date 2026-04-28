@@ -197,13 +197,207 @@ class OrganizedFileService:
             tmp_file.write_bytes(data)
         return data
 
+    async def processing_file_exists(
+        self, file_hash: str, processor: Any, relative_path: str
+    ) -> bool:
+        """Check whether a specific processor output file exists in blob storage."""
+        proc_str = self._get_processor_str(processor)
+        norm_path = relative_path.replace("\\", "/")
+        return await self._blob.exists(
+            f"global/{file_hash}/processed/{proc_str}/{norm_path}"
+        )
+
+    async def resolve_processed_processor(
+        self, file_hash: str, preferred_processor: Optional[Any] = None
+    ) -> Optional[str]:
+        """Resolve the processor that actually has persisted artifacts for a file."""
+        candidates: List[str] = []
+        if preferred_processor is not None:
+            candidates.append(self._get_processor_str(preferred_processor))
+        for proc in ("azure_doc_intelligence", "docling"):
+            if proc not in candidates:
+                candidates.append(proc)
+
+        for proc in candidates:
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/metadata.json"
+            ):
+                return proc
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/document.md"
+            ):
+                return proc
+            if await self._blob.exists(
+                f"global/{file_hash}/processed/{proc}/raw_analysis.json"
+            ):
+                return proc
+            # Last fallback: if *any* blob exists under the processor subtree,
+            # treat that processor as valid. This avoids false 404s when a
+            # document has tables/figures/raw analysis but no document.md.
+            prefix_hits = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{proc}/", limit=1
+            )
+            if prefix_hits:
+                return proc
+        return None
+
+    async def build_document_view(
+        self,
+        file_hash: str,
+        preferred_processor: Optional[Any] = None,
+        filename: Optional[str] = None,
+        parse_cost: Optional[float] = None,
+        parse_duration_seconds: Optional[float] = None,
+        page_count: Optional[int] = None,
+        figure_count: Optional[int] = None,
+        table_count: Optional[int] = None,
+        status: str = "completed",
+        selected_parser: Optional[str] = None,
+        extra_file_fields: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build a canonical backend-owned document/viewer state model."""
+        processor_used = await self.resolve_processed_processor(
+            file_hash, preferred_processor
+        )
+        file_metadata = await self.get_file_metadata(file_hash) or {}
+        processed_metadata = (
+            await self.get_processed_metadata(file_hash, processor_used)
+            if processor_used
+            else {}
+        ) or {}
+
+        resolved_filename = (
+            filename or file_metadata.get("original_filename") or f"{file_hash}.pdf"
+        )
+
+        resolved_parse_cost = (
+            parse_cost
+            if parse_cost is not None
+            else processed_metadata.get("parse_cost")
+        )
+        resolved_parse_duration = (
+            parse_duration_seconds
+            if parse_duration_seconds is not None
+            else processed_metadata.get("parse_duration_seconds")
+        )
+        resolved_page_count = (
+            page_count
+            if page_count is not None
+            else processed_metadata.get("page_count")
+        )
+        resolved_figures = processed_metadata.get("figures", []) or []
+        resolved_figure_count = (
+            figure_count
+            if figure_count is not None
+            else processed_metadata.get("figures_found")
+        )
+        resolved_table_count = (
+            table_count
+            if table_count is not None
+            else processed_metadata.get("tables_found")
+        )
+
+        # Fallback: if metadata.json had no figures data, enumerate blob prefix
+        if not resolved_figures and not resolved_figure_count and processor_used:
+            figure_blobs = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{processor_used}/figures/", limit=50
+            )
+            image_blobs = [
+                b for b in figure_blobs if b.lower().endswith((".png", ".jpg", ".jpeg"))
+            ]
+            if image_blobs:
+                from pathlib import Path as _Path
+
+                resolved_figures = [
+                    {
+                        "id": _Path(b).stem,
+                        "image_path": f"figures/{_Path(b).name}",
+                        "caption": None,
+                        "page": None,
+                    }
+                    for b in sorted(image_blobs)
+                ]
+                resolved_figure_count = len(resolved_figures)
+
+        # markdown_available checks document.md directly (honest UI flag, independent of
+        # the strict is_file_processed cache gate)
+        markdown_available = (
+            await self._blob.exists(
+                f"global/{file_hash}/processed/{self._get_processor_str(processor_used)}/document.md"
+            )
+            if processor_used
+            else False
+        )
+        analysis_available = (
+            await self.processing_file_exists(
+                file_hash, processor_used, "raw_analysis.json"
+            )
+            if processor_used
+            else False
+        )
+        # Fallback: if metadata.json had no tables count, enumerate blob prefix
+        if not resolved_table_count and processor_used:
+            table_blobs = await self._blob.list_blobs_with_prefix(
+                f"global/{file_hash}/processed/{processor_used}/tables/", limit=50
+            )
+            html_blobs = [b for b in table_blobs if b.lower().endswith(".html")]
+            if html_blobs:
+                resolved_table_count = len(html_blobs)
+
+        tables_available = bool(resolved_table_count) or (
+            await self.processing_file_exists(
+                file_hash, processor_used, "tables/table-1.html"
+            )
+            if processor_used
+            else False
+        )
+        figures_available = bool(resolved_figures) or bool(resolved_figure_count)
+
+        result = {
+            "fileName": resolved_filename,
+            "fileId": file_hash,
+            "status": status,
+            "selectedParser": selected_parser or processor_used,
+            "processorUsed": processor_used,
+            "processingResult": {
+                "conversionId": file_hash,
+                "fileHash": file_hash,
+                "processorUsed": processor_used,
+                "markdownPath": None,
+                "parseCost": resolved_parse_cost,
+                "parse_cost": resolved_parse_cost,
+                "parseDuration": resolved_parse_duration,
+                "parse_duration_seconds": resolved_parse_duration,
+                "pageCount": resolved_page_count,
+                "page_count": resolved_page_count,
+                "figures": resolved_figures,
+                "figuresCount": resolved_figure_count or 0,
+                "tablesCount": resolved_table_count or 0,
+                "artifactAvailability": {
+                    "original": bool(file_metadata),
+                    "markdown": markdown_available,
+                    "analysis": analysis_available,
+                    "figures": figures_available,
+                    "tables": tables_available,
+                },
+            },
+        }
+        if extra_file_fields:
+            result.update(extra_file_fields)
+        return result
+
     def _get_processor_str(self, processor: Any) -> str:
         if hasattr(processor, "value"):
             return str(processor.value)
         return str(processor)
 
     async def is_file_processed(self, file_hash: str, processor: Any) -> bool:
-        """Check if a file has already been processed by a specific processor."""
+        """True if the canonical markdown artifact exists for this processor.
+
+        This method is used as the process-endpoint cache gate, so it must stay
+        strict: metadata-only or partial artifact subtrees should trigger a
+        fresh processing run that can repopulate blob storage.
+        """
         proc_str = self._get_processor_str(processor)
         return await self._blob.exists(
             f"global/{file_hash}/processed/{proc_str}/document.md"

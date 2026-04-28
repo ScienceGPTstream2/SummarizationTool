@@ -1,9 +1,34 @@
 import asyncio
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List
+
+# Prometheus metrics — created once at module level, no-op if package absent
+try:
+    from prometheus_client import Counter, Histogram
+
+    _llm_tokens = Counter(
+        "llm_tokens_total",
+        "LLM tokens consumed",
+        ["provider", "model", "token_type"],
+    )
+    _llm_cost_cents = Counter(
+        "llm_cost_cents_total",
+        "LLM cost in USD cents",
+        ["provider", "model"],
+    )
+    _llm_duration = Histogram(
+        "llm_request_duration_seconds",
+        "LLM call duration",
+        ["provider", "model"],
+        buckets=[1, 5, 10, 30, 60, 120, 300, 600],
+    )
+    _PROMETHEUS_AVAILABLE = True
+except ImportError:
+    _PROMETHEUS_AVAILABLE = False
 
 
 @dataclass
@@ -57,11 +82,32 @@ class CostTracker:
         return self._db_service
 
     def _load_pricing(self) -> Dict[str, Dict[str, float]]:
+        # Load baked-in defaults from config/pricing.json
         pricing_path = Path(__file__).resolve().parents[2] / "config" / "pricing.json"
-        if not pricing_path.exists():
-            return {}
-        with open(pricing_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("models", {})
+        models: Dict[str, Dict[str, float]] = {}
+        if pricing_path.exists():
+            with open(pricing_path, "r", encoding="utf-8") as f:
+                models = json.load(f).get("models", {})
+
+        # Merge overrides from env var (JSON string).
+        # This allows adding/updating model pricing without rebuilding the
+        # Docker image — set PRICING_JSON_OVERRIDE as a Key Vault secret or
+        # container app env var containing a JSON object like:
+        #   {"azure:gpt-5.4-nano": {"input_per_million": 0.05, ...}}
+        override_raw = os.environ.get("PRICING_JSON_OVERRIDE")
+        if override_raw:
+            try:
+                overrides = json.loads(override_raw)
+                if isinstance(overrides, dict):
+                    models.update(overrides)
+                    print(
+                        f"[COST_TRACKER] Applied pricing overrides for: "
+                        f"{list(overrides.keys())}"
+                    )
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"[COST_TRACKER] Failed to parse PRICING_JSON_OVERRIDE: {e}")
+
+        return models
 
     def _compute_cost(
         self,
@@ -230,6 +276,20 @@ class CostTracker:
             )
         )
 
+        # Export to Prometheus
+        if _PROMETHEUS_AVAILABLE:
+            try:
+                _llm_tokens.labels(
+                    provider=provider, model=model, token_type="prompt"
+                ).inc(prompt_tokens_int)
+                _llm_tokens.labels(
+                    provider=provider, model=model, token_type="completion"
+                ).inc(completion_tokens_int)
+                _llm_cost_cents.labels(provider=provider, model=model).inc(cost * 100)
+                _llm_duration.labels(provider=provider, model=model).observe(duration)
+            except Exception:
+                pass
+
         # Update session metrics in database — fire and forget so it never blocks
         # the asyncio event loop. Previously this was a synchronous HTTP call
         # inside an async coroutine, stalling all other concurrent tasks.
@@ -341,6 +401,8 @@ def infer_provider_from_model_id(model_id: str) -> str:
         return "gcp"
     if "macbook" in m:
         return "macbook"
+    if m.startswith("vllm-") or "vllm" in m:
+        return "vllm"
     return "azure"  # safe default — azure is most common deployment
 
 

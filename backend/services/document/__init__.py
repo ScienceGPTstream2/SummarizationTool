@@ -2,7 +2,7 @@
 
 from .file_service import FileService
 from .document_service import DocumentService
-from .processors.docling import DoclingService
+from .processors.docling import DoclingRemoteClient, DoclingService
 from .processors.azure_doc_intelligence.azure_doc_intelligence_service import (
     AzureDocIntelligenceService,
 )
@@ -12,7 +12,8 @@ from .organized_processor import OrganizedDocumentProcessor, get_organized_proce
 __all__ = [
     "FileService",
     "DocumentService",
-    "DoclingService",
+    "DoclingRemoteClient",
+    "DoclingService",  # alias for DoclingRemoteClient
     "AzureDocIntelligenceService",
     "OrganizedFileService",
     "get_organized_file_service",

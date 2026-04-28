@@ -1,5 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
+  selectBestVisionModel,
+  fetchAllModels,
+  ModelSelectionResult,
+} from "../utils/modelSelection";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -149,9 +154,22 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
     null
   );
 
-  // Model selection state
-  const [selectedModel, setSelectedModel] =
-    useState<string>("gemini-2.5-flash");
+  // Vision model selection — populated from /api/models filtered by vision_capable
+  const [selectedVisionModel, setSelectedVisionModel] =
+    useState<ModelSelectionResult | null>(null);
+  const [visionModels, setVisionModels] = useState<ModelSelectionResult[]>([]);
+
+  useEffect(() => {
+    selectBestVisionModel().then((best) => {
+      if (best) setSelectedVisionModel(best);
+    });
+    fetchAllModels().then((all) => {
+      const vision = all.filter((m) => (m as any).vision_capable === true);
+      import("../utils/modelSelection").then(({ modelConfigToSelection }) => {
+        setVisionModels(vision.map(modelConfigToSelection));
+      });
+    });
+  }, []);
 
   if (!figures || figures.length === 0) {
     return null;
@@ -269,8 +287,10 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model_type: "gemini",
-          model_id: selectedModel,
+          model_type: selectedVisionModel?.modelType ?? "gemini",
+          model_id:
+            selectedVisionModel?.modelId ??
+            "publishers/google/models/gemini-2.5-flash",
           max_tokens: 2048,
           temperature: 0.0,
         }),
@@ -508,19 +528,27 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                     AI Model for Analysis
                   </label>
                   <Select
-                    value={selectedModel}
-                    onValueChange={setSelectedModel}
+                    value={selectedVisionModel?.modelId ?? ""}
+                    onValueChange={(id) => {
+                      const m = visionModels.find((v) => v.modelId === id);
+                      if (m) setSelectedVisionModel(m);
+                    }}
                   >
                     <SelectTrigger className="w-full max-w-xs">
                       <SelectValue placeholder="Select a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gemini-2.5-flash">
-                        Gemini 2.5 Flash (Fast)
-                      </SelectItem>
-                      <SelectItem value="gemini-2.5-pro">
-                        Gemini 2.5 Pro (Most Capable)
-                      </SelectItem>
+                      {visionModels.length > 0 ? (
+                        visionModels.map((m) => (
+                          <SelectItem key={m.modelId} value={m.modelId}>
+                            {m.model.name} ({m.model.provider})
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="publishers/google/models/gemini-2.5-flash">
+                          Gemini 2.5 Flash
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -535,7 +563,7 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                           selectedFigure.scientific_summary.generated_at
                         ).toLocaleString()}
                         • Model: {selectedFigure.scientific_summary.model_used}{" "}
-                        (Selected: {selectedModel})
+                        (Selected: {selectedVisionModel?.model.name ?? ""})
                       </div>
                       <Button
                         size="sm"

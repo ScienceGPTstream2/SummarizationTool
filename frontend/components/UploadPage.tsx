@@ -37,6 +37,7 @@ export function UploadPage({
   onInvalidateDownstream,
 }: UploadPageProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>(
     documentData.uploadedFiles?.map((f) => f.file) ||
       (documentData.file ? [documentData.file] : [])
@@ -165,6 +166,8 @@ export function UploadPage({
     }
 
     if (newFiles.length > 0) {
+      setIsDirty(true);
+      onInvalidateDownstream?.();
       setSelectedFiles((prev) => [...prev, ...newFiles]);
       // Automatically start upload for new files
       for (const file of newFiles) {
@@ -218,6 +221,8 @@ export function UploadPage({
     const fileId = result?.file_id;
 
     // Remove from UI state immediately
+    setIsDirty(true);
+    onInvalidateDownstream?.();
     setSelectedFiles((prev) => prev.filter((f) => f.name !== fileName));
     setUploadResults((prev) => {
       const newResults = { ...prev };
@@ -384,17 +389,36 @@ export function UploadPage({
 
           // Store processing result with camelCase mapping
           // Use file_hash as the primary identifier for document API calls (not UUID conversion_id)
+          const canonicalView = result.document_view;
           setProcessedFiles((prev) => ({
             ...prev,
             [file.name]: {
               ...result,
+              ...(canonicalView?.processingResult || {}),
               // Use file_hash as conversionId for document API calls
-              conversionId: result.file_hash || result.conversion_id,
-              fileHash: result.file_hash,
+              conversionId:
+                canonicalView?.processingResult?.conversionId ||
+                result.file_hash ||
+                result.conversion_id,
+              fileHash:
+                canonicalView?.processingResult?.fileHash || result.file_hash,
               markdownPath: result.markdown_path,
-              processorUsed: result.processor_used,
-              figuresCount: result.figures_found,
-              tablesCount: result.tables_found,
+              processorUsed:
+                canonicalView?.processingResult?.processorUsed ||
+                result.processor_used,
+              figures:
+                (Array.isArray(canonicalView?.processingResult?.figures) &&
+                canonicalView.processingResult.figures.length > 0
+                  ? canonicalView.processingResult.figures
+                  : undefined) ||
+                result.figures ||
+                [],
+              figuresCount:
+                canonicalView?.processingResult?.figuresCount ||
+                result.figures_found,
+              tablesCount:
+                canonicalView?.processingResult?.tablesCount ||
+                result.tables_found,
               parseCost: result.parse_cost,
               parseDuration: result.parse_duration_seconds,
               parser,
@@ -472,19 +496,26 @@ export function UploadPage({
     const uploadedFilesData = selectedFiles.map((f) => {
       const existing = existingFileMap[f.name] || {};
       const uploadResult = uploadResults[f.name];
+      const processingResult =
+        processedFilesRef.current[f.name] || existing.processingResult;
+      const canonicalFileId =
+        processingResult?.fileHash ||
+        processingResult?.conversionId ||
+        uploadResult?.file_hash ||
+        uploadResult?.file_id ||
+        existing.fileId;
       return {
         // Spread existing fields first so downstream data (entities, studyType,
         // summaries, etc.) is preserved.
         ...existing,
         file: f,
-        // Only overwrite fileId/uploadResult when we actually have fresh values.
-        ...(uploadResult?.file_id ? { fileId: uploadResult.file_id } : {}),
+        // Normalize all downstream viewers/API calls to canonical file_hash.
+        ...(canonicalFileId ? { fileId: canonicalFileId } : {}),
         ...(uploadResult ? { uploadResult } : {}),
         status: "completed" as const,
         selectedParser: fileParsers[f.name] || defaultParser,
         // processingResult from local state takes precedence over existing.
-        processingResult:
-          processedFilesRef.current[f.name] || existing.processingResult,
+        processingResult: processingResult,
       };
     });
 
@@ -492,6 +523,15 @@ export function UploadPage({
     const firstFile = selectedFiles[0];
     const firstResult = uploadResults[firstFile.name];
     const firstExisting = existingFileMap[firstFile.name] || {};
+    const firstProcessed =
+      processedFilesRef.current[firstFile.name] ||
+      firstExisting.processingResult;
+    const firstCanonicalFileId =
+      firstProcessed?.fileHash ||
+      firstProcessed?.conversionId ||
+      firstResult?.file_hash ||
+      firstResult?.file_id ||
+      firstExisting.fileId;
 
     console.log(
       "Proceeding to processing page with processed files:",
@@ -500,9 +540,10 @@ export function UploadPage({
 
     onComplete({
       file: firstFile,
-      fileId: firstResult?.file_id || firstExisting.fileId,
+      fileId: firstCanonicalFileId,
       uploadResult: firstResult || firstExisting.uploadResult,
       uploadedFiles: uploadedFilesData,
+      documentsChanged: isDirty,
     });
   };
 
