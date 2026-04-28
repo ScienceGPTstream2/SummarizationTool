@@ -1,4 +1,4 @@
-name: Gitleaks Full Test1
+name: Gitleaks Full Test
 
 on:
   workflow_dispatch:
