@@ -19,7 +19,6 @@ router = APIRouter(tags=["auth-proxy"])
 _AUTH_SIDECAR_URL = os.getenv("AUTH_SIDECAR_URL", "http://localhost:3001")
 
 
-
 def _get_allowed_emails() -> set:
     raw = os.getenv("ALLOWED_EMAILS", "")
     if not raw.strip():
