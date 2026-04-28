@@ -155,12 +155,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(llm_cost_cents_total[24h])) / 100",
+          "expr": "sum(rate(llm_cost_cents_total[1h])) * 3600 / 100",
           "legendFormat": "USD",
           "refId": "A"
         }
       ],
-      "title": "LLM Cost Today",
+      "title": "LLM Cost (last hour)",
       "type": "stat"
     },
     {

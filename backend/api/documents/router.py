@@ -442,6 +442,23 @@ async def process_uploaded_file(
         except Exception as e:
             print(f"[COST_TRACKER] Failed to persist parse cost: {e}")
 
+        # Record to Prometheus + session aggregates (same data, fire-and-forget safe)
+        try:
+            cost_tracker.record_call(
+                session_id=session_id,
+                provider="azure",
+                model=result.get("processor_used", processor_name),
+                prompt_tokens=0,
+                completion_tokens=0,
+                duration=actual_duration,
+                page_count=metadata.get("page_count") or 0,
+                document_name=_original_filename,
+                figure_count=metadata.get("figures_found") or 0,
+                table_count=metadata.get("tables_found") or 0,
+            )
+        except Exception as e:
+            print(f"[COST_TRACKER] Failed to record doc processing metrics: {e}")
+
         # Write parse_cost and parse_duration_seconds into processor metadata.json so cached
         # access later can return the real value (blob-safe via service).
         try:
