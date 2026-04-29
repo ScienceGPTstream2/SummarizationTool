@@ -79,7 +79,7 @@ jobs:
               --name "$ACR" \
               --repository "$REPO" \
               --query "[?@=='${TARGET}']" \
-              -o tsv 2>/dev/null || true)
+              -o tsv 2>&1) || { echo "ERROR querying ACR for ${REPO}: ${FOUND}"; FAILED=true; continue; }
             if [ "$FOUND" = "$TARGET" ]; then
               echo "✅ ${REPO}:${TARGET}"
             else
@@ -90,7 +90,7 @@ jobs:
 
           if $FAILED; then
             echo ""
-            echo "Promotion blocked: one or more images are missing for SHA ${TARGET}."
+            echo "Promotion blocked: one or more images are missing or unreachable for SHA ${TARGET}."
             echo "Verify the build-and-staging workflow completed successfully for this commit."
             exit 1
           fi
@@ -144,5 +144,9 @@ jobs:
             echo "| backend  | \`${PREV_BE}\` | \`${TARGET}\` |"
             echo "| auth     | \`${PREV_AU}\` | \`${TARGET}\` |"
             echo ""
-            echo "**To roll back:** run this workflow again with SHA \`${PREV_FE}\`"
+            if [ "${PREV_FE}" = "unknown" ]; then
+              echo "> First deployment to production — no rollback target available."
+            else
+              echo "**To roll back:** run this workflow again with SHA \`${PREV_FE}\`"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
