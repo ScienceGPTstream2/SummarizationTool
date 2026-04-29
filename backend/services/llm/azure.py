@@ -794,16 +794,24 @@ Prompt:
     ) -> Dict[str, Any]:
         import base64, time
 
-        used_deployment = deployment or self.default_deployment or self.default_model_name
+        used_deployment = (
+            deployment or self.default_deployment or self.default_model_name
+        )
         if not used_deployment:
             return {"success": False, "error": "Azure deployment name missing."}
 
-        used_endpoint = endpoint_override or self._get_endpoint_for_deployment(used_deployment)
-        used_api_key = api_key_override or self._get_api_key_for_deployment(used_deployment)
+        used_endpoint = endpoint_override or self._get_endpoint_for_deployment(
+            used_deployment
+        )
+        used_api_key = api_key_override or self._get_api_key_for_deployment(
+            used_deployment
+        )
         if not used_endpoint or not used_api_key:
             return {"success": False, "error": "Azure endpoint or api key missing."}
 
-        used_api_version = self._get_api_version_for_deployment(used_deployment, api_version)
+        used_api_version = self._get_api_version_for_deployment(
+            used_deployment, api_version
+        )
         is_foundry = self._is_foundry_endpoint(used_endpoint)
         if is_foundry:
             url = f"{used_endpoint.rstrip('/')}/models/chat/completions?api-version={used_api_version}"
@@ -819,13 +827,18 @@ Prompt:
         messages = []
         if system_message:
             messages.append({"role": "system", "content": system_message})
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": extraction_prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-            ],
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": extraction_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    },
+                ],
+            }
+        )
 
         payload = {
             "messages": messages,
@@ -840,14 +853,23 @@ Prompt:
         }
 
         import aiohttp, json as _json
+
         t0 = time.time()
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as resp:
                     duration = time.time() - t0
                     raw = await resp.text()
                     if resp.status != 200:
-                        return {"success": False, "error": f"Azure API error {resp.status}: {raw}"}
+                        return {
+                            "success": False,
+                            "error": f"Azure API error {resp.status}: {raw}",
+                        }
                     data = _json.loads(raw)
                     content = data["choices"][0]["message"]["content"]
                     usage = data.get("usage", {})
