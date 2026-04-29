@@ -12,7 +12,8 @@ on:
 # GitHub Actions Secrets required (in addition to those in deploy.yml):
 #
 #   PROD_CONTAINER_APP_NAME        Container App name for production
-#   PROD_FRONTEND_APP_NAME         Container App name for production frontend
+#   PROD_FRONTEND_APP_NAME         App Service name for production frontend
+#   FRONTEND_RESOURCE_GROUP        Resource group for the frontend App Service
 # ---------------------------------------------------------------------------
 
 permissions:
@@ -34,12 +35,12 @@ jobs:
       - name: Read current production SHAs
         id: current
         run: |
-          # Frontend: Container App template container image
-          FRONTEND_IMAGE=$(az containerapp show \
+          # Frontend: App Service container image
+          FRONTEND_IMAGE=$(az webapp config container show \
             --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "${{ secrets.FRONTEND_RESOURCE_GROUP }}" \
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            --query "properties.template.containers[?name=='summarization-frontend'].image | [0]" \
+            --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
             -o tsv 2>/dev/null || echo "unknown")
           FRONTEND_SHA="${FRONTEND_IMAGE##*:}"
 
@@ -96,15 +97,18 @@ jobs:
             exit 1
           fi
 
-      # ── Deploy frontend to production Container App ───────────────────────
-      - name: Deploy frontend to production Container App
+      # ── Deploy frontend to production App Service ───────────────────────
+      - name: Deploy frontend to production App Service
         run: |
-          az containerapp update \
+          az webapp config container set \
             --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --resource-group "${{ secrets.FRONTEND_RESOURCE_GROUP }}" \
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            --container-name summarization-frontend \
-            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ inputs.sha }}"
+            --docker-custom-image-name \
+              "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ inputs.sha }}" \
+            --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
+            --docker-registry-server-user "${{ secrets.ACR_USERNAME }}" \
+            --docker-registry-server-password "${{ secrets.ACR_PASSWORD }}"
 
       # ── Deploy backend to production Container App ───────────────────────
       - name: Deploy backend to production Container App

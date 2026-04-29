@@ -11,13 +11,15 @@
 # Required environment variables (or edit defaults below):
 #   AZURE_RESOURCE_GROUP
 #   AZURE_SUBSCRIPTION_ID
+#   FRONTEND_RESOURCE_GROUP        Resource group for the frontend App Service
 #   STAGING_CONTAINER_APP_NAME     Container App name for staging
-#   STAGING_FRONTEND_APP_NAME      Container App name for frontend (staging)
+#   STAGING_FRONTEND_APP_NAME      App Service name for frontend (staging)
 #   PROD_CONTAINER_APP_NAME        Container App name for production
-#   PROD_FRONTEND_APP_NAME         Container App name for frontend (production)
+#   PROD_FRONTEND_APP_NAME         App Service name for frontend (production)
 set -euo pipefail
 
 RG="${AZURE_RESOURCE_GROUP:-HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg}"
+FRONTEND_RG="${FRONTEND_RESOURCE_GROUP:-sciencegptv3_group}"
 SUB="${AZURE_SUBSCRIPTION_ID:-9c673b89-f870-4b2e-ac72-fb91ac4fdd12}"
 STAGING_APP="${STAGING_CONTAINER_APP_NAME:-}"
 STAGING_FE="${STAGING_FRONTEND_APP_NAME:-}"
@@ -35,9 +37,20 @@ get_containerapp_sha() {
   echo "${image##*:}"
 }
 
+get_webapp_sha() {
+  local app="$1" image
+  image=$(az webapp config container show \
+    --name "$app" \
+    --resource-group "$FRONTEND_RG" \
+    --subscription "$SUB" \
+    --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
+    -o tsv 2>/dev/null || true)
+  echo "${image##*:}"
+}
+
 echo "=== Staging ==="
 if [ -n "$STAGING_APP" ] && [ -n "$STAGING_FE" ]; then
-  FE_SHA=$(get_containerapp_sha "$STAGING_FE" summarization-frontend)
+  FE_SHA=$(get_webapp_sha "$STAGING_FE")
   BE_SHA=$(get_containerapp_sha "$STAGING_APP" backend)
   AU_SHA=$(get_containerapp_sha "$STAGING_APP" auth-sidecar)
   echo "  frontend:  ${FE_SHA}"
@@ -57,7 +70,7 @@ fi
 echo ""
 echo "=== Production ==="
 if [ -n "$PROD_APP" ] && [ -n "$PROD_FE" ]; then
-  FE_SHA=$(get_containerapp_sha "$PROD_FE" summarization-frontend)
+  FE_SHA=$(get_webapp_sha "$PROD_FE")
   BE_SHA=$(get_containerapp_sha "$PROD_APP" backend)
   AU_SHA=$(get_containerapp_sha "$PROD_APP" auth-sidecar)
   echo "  frontend:  ${FE_SHA}"
