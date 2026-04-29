@@ -119,42 +119,8 @@ interface MetricOption {
   requiresGroundTruth: boolean;
 }
 
-// Static providers (Vertex AI and Anthropic) — availability set at runtime from /api/models
-const STATIC_EVAL_PROVIDERS: EvalProvider[] = [
-  {
-    id: "vertex_ai_pro",
-    name: "Gemini 2.5 Pro",
-    model: "gemini-2.5-pro",
-    description: "More powerful, slower - comprehensive analysis",
-    available: false, // set to true at runtime if Gemini is configured
-    provider: "vertex_ai",
-  },
-  {
-    id: "vertex_ai_lite",
-    name: "Gemini 2.5 Flash Lite",
-    model: "gemini-2.5-flash-lite",
-    description: "Faster, lightweight - quick evaluation",
-    available: false,
-    provider: "vertex_ai",
-  },
-  {
-    id: "anthropic_sonnet_4_5",
-    name: "Claude Sonnet 4.5",
-    model: "claude-sonnet-4-5@20250929",
-    description: "Balanced performance and speed - high quality evaluation",
-    available: false, // set to true at runtime if Anthropic is configured
-    provider: "anthropic",
-  },
-  {
-    id: "anthropic_opus_4_1",
-    name: "Claude Opus 4.1",
-    model: "claude-opus-4-1@20250805",
-    description:
-      "Most capable - highest quality evaluation (supports structured outputs)",
-    available: false,
-    provider: "anthropic",
-  },
-];
+// Eval providers are loaded dynamically from the backend /api/models endpoint.
+const STATIC_EVAL_PROVIDERS: EvalProvider[] = [];
 
 // Helper function to get display-friendly model name
 const getDisplayModelName = (model: string): string => {
@@ -359,49 +325,55 @@ export function EvaluationPage({
 
         if (response.ok) {
           const backendModels = await response.json();
-          // Filter for Azure models only
+
+          // Azure providers — dynamic from backend
           const azureProviders: EvalProvider[] = backendModels
             .filter((m: any) => m.provider?.toLowerCase().includes("azure"))
             .map((m: any) => ({
-              id: m.id, // e.g., "azure-gpt-4o"
+              id: m.id,
               name: m.name,
-              model: m.name,
+              model: m.deployment || m.name,
               description: m.description || `${m.name} for evaluation`,
               available: true,
               deployment: m.deployment,
               provider: "azure_openai",
             }));
 
-          setAzureModels(azureProviders);
+          // Gemini providers — dynamic from backend
+          const geminiProviders: EvalProvider[] = backendModels
+            .filter((m: any) => m.provider === "Google Gemini")
+            .map((m: any) => ({
+              id: m.id,
+              name: m.name,
+              model: m.id.replace("publishers/google/models/", ""),
+              description: m.description || `${m.name} for evaluation`,
+              available: true,
+              provider: "vertex_ai",
+            }));
 
-          // Derive Gemini/Anthropic availability from /api/models response
-          const hasGemini = backendModels.some(
-            (m: any) => m.provider === "Google Gemini"
-          );
-          const hasAnthropic = backendModels.some(
-            (m: any) => m.provider === "Anthropic"
-          );
-          setStaticProviders(
-            STATIC_EVAL_PROVIDERS.map((p) => ({
-              ...p,
-              available:
-                p.provider === "vertex_ai"
-                  ? hasGemini
-                  : p.provider === "anthropic"
-                    ? hasAnthropic
-                    : p.available,
-            }))
-          );
+          // Anthropic providers — dynamic from backend
+          const anthropicProviders: EvalProvider[] = backendModels
+            .filter((m: any) => m.provider === "Anthropic")
+            .map((m: any) => ({
+              id: m.id,
+              name: m.name,
+              model: m.id,
+              description: m.description || `${m.name} for evaluation`,
+              available: true,
+              provider: "anthropic",
+            }));
 
-          // If no selected providers yet (from documentData), select only gpt-4o by default
+          const allDynamic = [
+            ...azureProviders,
+            ...geminiProviders,
+            ...anthropicProviders,
+          ];
+          setAzureModels(allDynamic);
+          setStaticProviders([]);
+
           setSelectedProviders((prev) => {
-            if (prev.length === 0) {
-              // Find gpt-4o model ID
-              const gpt4oId = azureProviders.find(
-                (p) => p.deployment === "gpt-4o" || p.model === "gpt-4o"
-              )?.id;
-              // Return only gpt-4o if found, otherwise empty array
-              return gpt4oId ? [gpt4oId] : [];
+            if (prev.length === 0 && allDynamic.length > 0) {
+              return [allDynamic[0].id];
             }
             return prev;
           });
