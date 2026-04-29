@@ -257,6 +257,7 @@ export class SettingsManager {
           location?: string;
           supports_temperature?: boolean;
           default_temperature?: number;
+          vision_capable?: boolean;
         }> = await response.json();
         // Convert backend model format to ModelConfig format
         return backendModels.map((model) => ({
@@ -283,6 +284,9 @@ export class SettingsManager {
           location: model.location,
           supports_temperature: model.supports_temperature ?? true,
           default_temperature: model.default_temperature ?? 0.5,
+          ...(model.vision_capable !== undefined
+            ? { vision_capable: model.vision_capable }
+            : {}),
         }));
       }
     } catch (error) {
