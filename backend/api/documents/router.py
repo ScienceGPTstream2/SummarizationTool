@@ -698,6 +698,7 @@ async def _generate_figure_summary_with_retry(
     figure_id: str,
     model_type: str,
     model_id: str = None,
+    deployment: str = None,
     max_tokens: int = 4096,
     temperature: float = 0.0,
     max_retries: int = 2,
@@ -763,6 +764,7 @@ Include sample sizes, p-values, time points if visible. Keep total response unde
                 extraction_prompt=summary_prompt,
                 model_type=model_type,
                 model_id=model_id,
+                deployment=deployment,
                 max_tokens=max_tokens,
                 temperature=current_temperature,
                 system_message=system_message,
@@ -1158,6 +1160,10 @@ async def generate_figure_summary(
         model_id = request.get("model_id")
         max_tokens = request.get("max_tokens", 4096)
         temperature = request.get("temperature", 0.0)
+        # For Azure models, model_id is "azure-<deployment>"; strip prefix to get deployment name
+        deployment = None
+        if model_type == "azure" and model_id:
+            deployment = model_id.removeprefix("azure-")
 
         # Generate structured summary with retry logic for truncation
         session_id = http_request.headers.get("X-Session-Id") if http_request else None
@@ -1166,6 +1172,7 @@ async def generate_figure_summary(
             figure_id=figure_id,
             model_type=model_type,
             model_id=model_id,
+            deployment=deployment,
             max_tokens=max_tokens,
             temperature=temperature,
         )

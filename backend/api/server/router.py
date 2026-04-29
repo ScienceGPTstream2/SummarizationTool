@@ -264,9 +264,7 @@ async def get_available_models():
                     )
 
                     supports_temp = model_name not in AZURE_NO_TEMP_MODELS
-                    # GPT-4o and GPT-4 variants support vision; reasoning/nano models do not
-                    AZURE_VISION_MODELS = {"gpt-4o", "gpt-4", "gpt-4-turbo"}
-                    vision_capable = any(v in model_name for v in AZURE_VISION_MODELS)
+                    vision_capable = bool(model.get("vision_capable", False))
                     model_data = {
                         "id": f"azure-{deployment}",
                         "name": model_name,

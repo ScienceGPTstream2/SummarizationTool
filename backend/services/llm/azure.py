@@ -779,3 +779,87 @@ Prompt:
                     "completion_tokens": completion_tokens,
                 },
             }
+
+    async def extract_content_from_image(
+        self,
+        image_path: str,
+        extraction_prompt: str,
+        deployment: Optional[str] = None,
+        api_version: Optional[str] = None,
+        endpoint_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        system_message: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        import base64, time
+
+        used_deployment = deployment or self.default_deployment or self.default_model_name
+        if not used_deployment:
+            return {"success": False, "error": "Azure deployment name missing."}
+
+        used_endpoint = endpoint_override or self._get_endpoint_for_deployment(used_deployment)
+        used_api_key = api_key_override or self._get_api_key_for_deployment(used_deployment)
+        if not used_endpoint or not used_api_key:
+            return {"success": False, "error": "Azure endpoint or api key missing."}
+
+        used_api_version = self._get_api_version_for_deployment(used_deployment, api_version)
+        is_foundry = self._is_foundry_endpoint(used_endpoint)
+        if is_foundry:
+            url = f"{used_endpoint.rstrip('/')}/models/chat/completions?api-version={used_api_version}"
+        else:
+            url = f"{used_endpoint.rstrip('/')}/openai/deployments/{used_deployment}/chat/completions?api-version={used_api_version}"
+
+        try:
+            with open(image_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read image: {e}"}
+
+        messages = []
+        if system_message:
+            messages.append({"role": "system", "content": system_message})
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": extraction_prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            ],
+        })
+
+        payload = {
+            "messages": messages,
+            "max_completion_tokens": max_tokens,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": used_api_key,
+        }
+
+        import aiohttp, json as _json
+        t0 = time.time()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    duration = time.time() - t0
+                    raw = await resp.text()
+                    if resp.status != 200:
+                        return {"success": False, "error": f"Azure API error {resp.status}: {raw}"}
+                    data = _json.loads(raw)
+                    content = data["choices"][0]["message"]["content"]
+                    usage = data.get("usage", {})
+                    return {
+                        "success": True,
+                        "content": content,
+                        "meta": {
+                            "model": used_deployment,
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                            "duration": duration,
+                        },
+                    }
+        except Exception as e:
+            return {"success": False, "error": f"Azure vision request failed: {e}"}
