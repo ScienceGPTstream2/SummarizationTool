@@ -288,9 +288,9 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
         },
         body: JSON.stringify({
           model_type: selectedVisionModel?.modelType ?? "gemini",
-          model_id:
-            selectedVisionModel?.modelId ??
-            "publishers/google/models/gemini-2.5-flash",
+          ...(selectedVisionModel?.modelId
+            ? { model_id: selectedVisionModel.modelId }
+            : {}),
           max_tokens: 2048,
           temperature: 0.0,
         }),
@@ -545,8 +545,8 @@ export function FigureGallery({ conversionId, figures }: FigureGalleryProps) {
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="publishers/google/models/gemini-2.5-flash">
-                          Gemini 2.5 Flash
+                        <SelectItem value="none" disabled>
+                          No vision models configured
                         </SelectItem>
                       )}
                     </SelectContent>
