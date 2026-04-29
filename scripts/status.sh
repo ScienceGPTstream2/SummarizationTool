@@ -11,10 +11,10 @@
 # Required environment variables (or edit defaults below):
 #   AZURE_RESOURCE_GROUP
 #   AZURE_SUBSCRIPTION_ID
-#   STAGING_CONTAINER_APP_NAME
-#   STAGING_FRONTEND_APP_NAME
-#   PROD_CONTAINER_APP_NAME
-#   PROD_FRONTEND_APP_NAME
+#   STAGING_CONTAINER_APP_NAME     Container App name for staging
+#   STAGING_FRONTEND_APP_NAME      Container App name for frontend (staging)
+#   PROD_CONTAINER_APP_NAME        Container App name for production
+#   PROD_FRONTEND_APP_NAME         Container App name for frontend (production)
 set -euo pipefail
 
 RG="${AZURE_RESOURCE_GROUP:-HcSx-ScienceGPT3-XerographicMockingbird-vNet-rg}"
@@ -35,20 +35,9 @@ get_containerapp_sha() {
   echo "${image##*:}"
 }
 
-get_webapp_sha() {
-  local app="$1" image
-  image=$(az webapp config container show \
-    --name "$app" \
-    --resource-group "$RG" \
-    --subscription "$SUB" \
-    --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
-    -o tsv 2>/dev/null || true)
-  echo "${image##*:}"
-}
-
 echo "=== Staging ==="
 if [ -n "$STAGING_APP" ] && [ -n "$STAGING_FE" ]; then
-  FE_SHA=$(get_webapp_sha "$STAGING_FE")
+  FE_SHA=$(get_containerapp_sha "$STAGING_FE" summarization-frontend)
   BE_SHA=$(get_containerapp_sha "$STAGING_APP" backend)
   AU_SHA=$(get_containerapp_sha "$STAGING_APP" auth-sidecar)
   echo "  frontend:  ${FE_SHA}"
@@ -68,7 +57,7 @@ fi
 echo ""
 echo "=== Production ==="
 if [ -n "$PROD_APP" ] && [ -n "$PROD_FE" ]; then
-  FE_SHA=$(get_webapp_sha "$PROD_FE")
+  FE_SHA=$(get_containerapp_sha "$PROD_FE" summarization-frontend)
   BE_SHA=$(get_containerapp_sha "$PROD_APP" backend)
   AU_SHA=$(get_containerapp_sha "$PROD_APP" auth-sidecar)
   echo "  frontend:  ${FE_SHA}"
