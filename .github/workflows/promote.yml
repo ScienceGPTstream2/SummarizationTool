@@ -38,6 +38,7 @@ jobs:
           FRONTEND_IMAGE=$(az webapp config container show \
             --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
             -o tsv 2>/dev/null || echo "unknown")
           FRONTEND_SHA="${FRONTEND_IMAGE##*:}"
@@ -101,6 +102,7 @@ jobs:
           az webapp config container set \
             --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --docker-custom-image-name \
               "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ inputs.sha }}" \
             --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
@@ -144,9 +146,17 @@ jobs:
             echo "| backend  | \`${PREV_BE}\` | \`${TARGET}\` |"
             echo "| auth     | \`${PREV_AU}\` | \`${TARGET}\` |"
             echo ""
-            if [ "${PREV_FE}" = "unknown" ]; then
-              echo "> First deployment to production — no rollback target available."
+            if [ "${{ job.status }}" = "Success" ]; then
+              echo "**Result:** All three components promoted successfully."
+              echo ""
+              if [ "${PREV_FE}" = "unknown" ]; then
+                echo "> First deployment to production — no rollback target available."
+              else
+                echo "**To roll back:** run this workflow again with SHA \`${PREV_FE}\`"
+              fi
             else
-              echo "**To roll back:** run this workflow again with SHA \`${PREV_FE}\`"
+              echo "**Result:** Promotion FAILED — check step logs above. Production may be in a partial state."
+              echo ""
+              echo "> To recover: run this workflow again with SHA \`${TARGET}\` to retry, or with SHA \`${PREV_FE}\` to roll back."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

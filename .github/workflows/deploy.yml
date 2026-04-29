@@ -130,6 +130,7 @@ jobs:
           az webapp config container set \
             --name "${{ secrets.STAGING_FRONTEND_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --docker-custom-image-name \
               "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ github.sha }}" \
             --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
@@ -142,6 +143,7 @@ jobs:
           az webapp config appsettings set \
             --name "${{ secrets.STAGING_FRONTEND_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --settings \
               BACKEND_URL="https://${{ secrets.STAGING_CONTAINER_APP_HOSTNAME }}" \
               WEBSITES_PORT=80
