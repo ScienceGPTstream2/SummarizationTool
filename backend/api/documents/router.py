@@ -1156,7 +1156,7 @@ async def generate_figure_summary(
         print(f"[FIGURE SUMMARY] ✅ Image written to temp: {_tmp_path}")
 
         # Extract parameters from request
-        model_type = request.get("model_type", "gemini")
+        model_type = request.get("model_type") or os.getenv("FIGURE_MODEL_TYPE", "azure")
         model_id = request.get("model_id")
         max_tokens = request.get("max_tokens", 4096)
         temperature = request.get("temperature", 0.0)

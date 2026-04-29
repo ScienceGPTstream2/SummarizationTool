@@ -264,7 +264,7 @@ async def get_available_models():
                     )
 
                     supports_temp = model_name not in AZURE_NO_TEMP_MODELS
-                    vision_capable = bool(model.get("vision_capable", False))
+                    vision_capable = bool(model_cfg.get("vision_capable", False))
                     model_data = {
                         "id": f"azure-{deployment}",
                         "name": model_name,
