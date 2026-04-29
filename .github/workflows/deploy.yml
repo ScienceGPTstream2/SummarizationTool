@@ -162,9 +162,9 @@ jobs:
             echo "| \`${ACR}/summarization-backend\` | \`${SHA}\` |"
             echo "| \`${ACR}/summarization-auth\` | \`${SHA}\` |"
             echo ""
-            if [ "${{ steps.oidc_login.outcome }}" = "success" ]; then
+            if [ "${{ job.status }}" = "success" ]; then
               echo "**Staging deployment:** succeeded"
-            else
+            elif [ "${{ steps.oidc_login.outcome }}" != "success" ]; then
               echo "**Staging deployment:** skipped — OIDC credentials not configured"
               echo ""
               echo "### Manual staging deploy (run from Cloud Shell)"
@@ -172,7 +172,9 @@ jobs:
               echo "SHA=${SHA}"
               echo "az containerapp update --name ${{ secrets.STAGING_CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name backend --image ${ACR}/summarization-backend:\${SHA}"
               echo "az containerapp update --name ${{ secrets.STAGING_CONTAINER_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --container-name auth-sidecar --image ${ACR}/summarization-auth:\${SHA}"
-              echo "az webapp config container set --name ${{ secrets.STAGING_FRONTEND_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --docker-custom-image-name ${ACR}/summarization-frontend:\${SHA} --docker-registry-server-url https://${{ secrets.ACR_NAME }}.azurecr.io --docker-registry-server-user ${{ secrets.ACR_USERNAME }} --docker-registry-server-password ${{ secrets.ACR_PASSWORD }}"
+              echo "az webapp config container set --name ${{ secrets.STAGING_FRONTEND_APP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --docker-custom-image-name ${ACR}/summarization-frontend:\${SHA} --docker-registry-server-url https://${{ secrets.ACR_NAME }}.azurecr.io --docker-registry-server-user ${{ secrets.ACR_USERNAME }} --docker-registry-server-password \$(az acr credential show --name ${{ secrets.ACR_NAME }} --query passwords[0].value -o tsv)"
               echo '```'
+            else
+              echo "**Staging deployment:** FAILED — check step logs above"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
