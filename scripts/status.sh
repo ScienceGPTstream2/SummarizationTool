@@ -29,6 +29,7 @@ get_containerapp_sha() {
   image=$(az containerapp show \
     --name "$app" \
     --resource-group "$RG" \
+    --subscription "$SUB" \
     --query "properties.template.containers[?name=='${container}'].image | [0]" \
     -o tsv 2>/dev/null || echo "unknown")
   echo "${image##*:}"
@@ -52,7 +53,9 @@ if [ -n "$STAGING_APP" ] && [ -n "$STAGING_FE" ]; then
   echo "  frontend:  ${FE_SHA}"
   echo "  backend:   ${BE_SHA}"
   echo "  auth:      ${AU_SHA}"
-  if [ "$FE_SHA" = "$BE_SHA" ] && [ "$BE_SHA" = "$AU_SHA" ]; then
+  if [ -z "$FE_SHA" ] || [ -z "$BE_SHA" ] || [ -z "$AU_SHA" ]; then
+    echo "  ⚠️  Could not retrieve one or more SHAs — check az login and app names"
+  elif [ "$FE_SHA" = "$BE_SHA" ] && [ "$BE_SHA" = "$AU_SHA" ]; then
     echo "  ✅ All three on the same SHA"
   else
     echo "  ⚠️  Mixed SHAs — staging may be partially deployed"
@@ -70,7 +73,9 @@ if [ -n "$PROD_APP" ] && [ -n "$PROD_FE" ]; then
   echo "  frontend:  ${FE_SHA}"
   echo "  backend:   ${BE_SHA}"
   echo "  auth:      ${AU_SHA}"
-  if [ "$FE_SHA" = "$BE_SHA" ] && [ "$BE_SHA" = "$AU_SHA" ]; then
+  if [ -z "$FE_SHA" ] || [ -z "$BE_SHA" ] || [ -z "$AU_SHA" ]; then
+    echo "  ⚠️  Could not retrieve one or more SHAs — check az login and app names"
+  elif [ "$FE_SHA" = "$BE_SHA" ] && [ "$BE_SHA" = "$AU_SHA" ]; then
     echo "  ✅ All three on the same SHA"
   else
     echo "  ⚠️  Mixed SHAs — production may be in a bad state"
