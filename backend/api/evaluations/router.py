@@ -376,11 +376,15 @@ def _build_eval_providers() -> dict:
     # Vertex AI (Gemini) — only available if project is configured
     gemini_project = os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_PROJECT")
     gemini_eval_models_env = os.getenv("GEMINI_EVAL_MODELS", "")
-    gemini_eval_models = [m.strip() for m in gemini_eval_models_env.split(",") if m.strip()] if gemini_eval_models_env else [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
-    ]
+    gemini_eval_models = (
+        [m.strip() for m in gemini_eval_models_env.split(",") if m.strip()]
+        if gemini_eval_models_env
+        else [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+        ]
+    )
     providers["vertex_ai"] = {
         "name": "Google Vertex AI",
         "models": gemini_eval_models,
