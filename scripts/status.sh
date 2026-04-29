@@ -31,7 +31,7 @@ get_containerapp_sha() {
     --resource-group "$RG" \
     --subscription "$SUB" \
     --query "properties.template.containers[?name=='${container}'].image | [0]" \
-    -o tsv 2>/dev/null || echo "unknown")
+    -o tsv 2>/dev/null || true)
   echo "${image##*:}"
 }
 
@@ -40,8 +40,9 @@ get_webapp_sha() {
   image=$(az webapp config container show \
     --name "$app" \
     --resource-group "$RG" \
+    --subscription "$SUB" \
     --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
-    -o tsv 2>/dev/null || echo "unknown")
+    -o tsv 2>/dev/null || true)
   echo "${image##*:}"
 }
 
