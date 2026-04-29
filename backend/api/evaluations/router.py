@@ -368,21 +368,26 @@ def _build_eval_providers() -> dict:
             azure_models = [single]
     providers["azure_openai"] = {
         "name": "Azure OpenAI",
-        "models": azure_models or ["gpt-4o"],
+        "models": azure_models,
         "configured": bool(azure_models),
         "required_config": ["azure_deployment", "azure_endpoint", "azure_api_key"],
     }
 
     # Vertex AI (Gemini) — only available if project is configured
     gemini_project = os.getenv("GEMINI_PROJECT_ID") or os.getenv("GEMINI_PROJECT")
-    GEMINI_EVAL_MODELS = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
-    ]
+    gemini_eval_models_env = os.getenv("GEMINI_EVAL_MODELS", "")
+    gemini_eval_models = (
+        [m.strip() for m in gemini_eval_models_env.split(",") if m.strip()]
+        if gemini_eval_models_env
+        else [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+        ]
+    )
     providers["vertex_ai"] = {
         "name": "Google Vertex AI",
-        "models": GEMINI_EVAL_MODELS,
+        "models": gemini_eval_models,
         "configured": bool(gemini_project),
         "required_config": ["vertex_project", "vertex_model_name"],
     }

@@ -43,109 +43,9 @@ export interface CustomModelConfig {
   location?: string; // Added for Gemini
 }
 
-// Available models configuration (built-in)
-// Only supporting Azure OpenAI GPT-5 Mini for entity extraction
-export const allModels: ModelConfig[] = [
-  // Azure OpenAI Models
-  {
-    id: "azure-gpt-5-mini",
-    name: "GPT-5 Mini",
-    provider: "Azure OpenAI",
-    description: "Azure OpenAI GPT-5 Mini model for entity extraction",
-    requiredApiKey: "azure_openai_api_key",
-    category: "azure",
-    deployment: "gpt-5-mini",
-    api_version: "2024-12-01-preview",
-    supports_temperature: false,
-    default_temperature: 1.0,
-  },
-  // Gemini Models (using service account authentication - no user API key required)
-  {
-    id: "publishers/google/models/gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    provider: "Google Gemini",
-    description: "Google Gemini 2.5 Pro model for entity extraction",
-    requiredApiKey: "", // No API key required - uses service account from secrets.toml
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-    supports_temperature: true,
-    default_temperature: 0.0,
-  },
-  {
-    id: "publishers/google/models/gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash Lite",
-    provider: "Google Gemini",
-    description: "Google Gemini 2.5 Flash Lite model for entity extraction",
-    requiredApiKey: "", // No API key required - uses service account from secrets.toml
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-    supports_temperature: true,
-    default_temperature: 0.0,
-  },
-  {
-    id: "publishers/google/models/gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    provider: "Google Gemini",
-    description: "Google Gemini 2.5 Flash model for entity extraction",
-    requiredApiKey: "", // No API key required - uses service account from secrets.toml
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-    supports_temperature: true,
-    default_temperature: 0.0,
-  },
-  {
-    id: "publishers/google/models/gemini-3-pro-preview",
-    name: "Gemini 3 Pro Preview",
-    provider: "Google Gemini",
-    description: "Google Gemini 3 Pro Preview model for entity extraction",
-    requiredApiKey: "", // No API key required - uses service account from secrets.toml
-    category: "google",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "us-central1",
-    supports_temperature: true,
-    default_temperature: 0.0,
-  },
-  {
-    id: "claude-opus-4-1@20250805",
-    name: "Claude Opus 4.1",
-    provider: "Anthropic",
-    description: "Anthropic Claude Opus 4.1 - Most capable model via Vertex AI",
-    requiredApiKey: "none", // Uses server-side service account
-    category: "anthropic",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "global",
-    supports_temperature: true,
-    default_temperature: 1.0,
-  },
-  {
-    id: "claude-sonnet-4@20250514",
-    name: "Claude Sonnet 4",
-    provider: "Anthropic",
-    description: "Anthropic Claude Sonnet 4 model via Vertex AI",
-    requiredApiKey: "none", // Uses server-side service account
-    category: "anthropic",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "global",
-    supports_temperature: true,
-    default_temperature: 1.0,
-  },
-  {
-    id: "claude-haiku-4-5@20251001",
-    name: "Claude Haiku 4.5",
-    provider: "Anthropic",
-    description:
-      "Anthropic Claude Haiku 4.5 - Fast and efficient via Vertex AI",
-    requiredApiKey: "none", // Uses server-side service account
-    category: "anthropic",
-    project_id: "hcsx-scigpt2-innocentrhino-acm",
-    location: "global",
-    supports_temperature: true,
-    default_temperature: 1.0,
-  },
-];
+// All models come from the backend /api/models endpoint (secrets.toml).
+// This array is intentionally empty — no hardcoded models in the frontend.
+export const allModels: ModelConfig[] = [];
 
 // API Key configurations - Informational template only
 // All actual configuration is read from backend secrets.toml
@@ -257,6 +157,7 @@ export class SettingsManager {
           location?: string;
           supports_temperature?: boolean;
           default_temperature?: number;
+          vision_capable?: boolean;
         }> = await response.json();
         // Convert backend model format to ModelConfig format
         return backendModels.map((model) => ({
@@ -283,6 +184,9 @@ export class SettingsManager {
           location: model.location,
           supports_temperature: model.supports_temperature ?? true,
           default_temperature: model.default_temperature ?? 0.5,
+          ...(model.vision_capable !== undefined
+            ? { vision_capable: model.vision_capable }
+            : {}),
         }));
       }
     } catch (error) {

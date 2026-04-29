@@ -1,0 +1,163 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to promote (e.g. abc1234ef). All three images must exist in ACR for this SHA."
+        required: true
+        type: string
+
+# ---------------------------------------------------------------------------
+# GitHub Actions Secrets required (in addition to those in deploy.yml):
+#
+#   PROD_CONTAINER_APP_NAME        Container App name for production
+#   PROD_FRONTEND_APP_NAME         App Service name for production frontend
+#   FRONTEND_RESOURCE_GROUP        Resource group for the frontend App Service
+# ---------------------------------------------------------------------------
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ── Read current production SHAs ────────────────────────────────────
+      - name: Read current production SHAs
+        id: current
+        run: |
+          # Frontend: App Service container image
+          FRONTEND_IMAGE=$(az webapp config container show \
+            --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.FRONTEND_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
+            -o tsv 2>/dev/null || echo "unknown")
+          FRONTEND_SHA="${FRONTEND_IMAGE##*:}"
+
+          # Backend: Container App template container image
+          BACKEND_IMAGE=$(az containerapp show \
+            --name "${{ secrets.PROD_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.template.containers[?name=='backend'].image | [0]" \
+            -o tsv 2>/dev/null || echo "unknown")
+          BACKEND_SHA="${BACKEND_IMAGE##*:}"
+
+          # Auth: Container App template container image
+          AUTH_IMAGE=$(az containerapp show \
+            --name "${{ secrets.PROD_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.template.containers[?name=='auth-sidecar'].image | [0]" \
+            -o tsv 2>/dev/null || echo "unknown")
+          AUTH_SHA="${AUTH_IMAGE##*:}"
+
+          echo "frontend_sha=${FRONTEND_SHA}" >> "$GITHUB_OUTPUT"
+          echo "backend_sha=${BACKEND_SHA}"   >> "$GITHUB_OUTPUT"
+          echo "auth_sha=${AUTH_SHA}"         >> "$GITHUB_OUTPUT"
+
+          echo "Current production:"
+          echo "  frontend:  ${FRONTEND_SHA}"
+          echo "  backend:   ${BACKEND_SHA}"
+          echo "  auth:      ${AUTH_SHA}"
+
+      # ── Validate all three images exist in ACR ──────────────────────────
+      - name: Validate images exist in ACR for SHA ${{ inputs.sha }}
+        run: |
+          TARGET="${{ inputs.sha }}"
+          ACR="${{ secrets.ACR_NAME }}"
+          FAILED=false
+
+          for REPO in summarization-frontend summarization-backend summarization-auth; do
+            FOUND=$(az acr repository show-tags \
+              --name "$ACR" \
+              --repository "$REPO" \
+              --query "[?@=='${TARGET}']" \
+              -o tsv 2>&1) || { echo "ERROR querying ACR for ${REPO}: ${FOUND}"; FAILED=true; continue; }
+            if [ "$FOUND" = "$TARGET" ]; then
+              echo "✅ ${REPO}:${TARGET}"
+            else
+              echo "❌ ${REPO}:${TARGET} — NOT FOUND in ACR"
+              FAILED=true
+            fi
+          done
+
+          if $FAILED; then
+            echo ""
+            echo "Promotion blocked: one or more images are missing or unreachable for SHA ${TARGET}."
+            echo "Verify the build-and-staging workflow completed successfully for this commit."
+            exit 1
+          fi
+
+      # ── Deploy frontend to production App Service ───────────────────────
+      - name: Deploy frontend to production App Service
+        run: |
+          az webapp config container set \
+            --name "${{ secrets.PROD_FRONTEND_APP_NAME }}" \
+            --resource-group "${{ secrets.FRONTEND_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --docker-custom-image-name \
+              "${{ secrets.ACR_NAME }}.azurecr.io/summarization-frontend:${{ inputs.sha }}" \
+            --docker-registry-server-url "https://${{ secrets.ACR_NAME }}.azurecr.io" \
+            --docker-registry-server-user "${{ secrets.ACR_USERNAME }}" \
+            --docker-registry-server-password "${{ secrets.ACR_PASSWORD }}"
+
+      # ── Deploy backend to production Container App ───────────────────────
+      - name: Deploy backend to production Container App
+        run: |
+          az containerapp update \
+            --name "${{ secrets.PROD_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --container-name backend \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-backend:${{ inputs.sha }}"
+
+      # ── Deploy auth to production Container App ──────────────────────────
+      - name: Deploy auth to production Container App
+        run: |
+          az containerapp update \
+            --name "${{ secrets.PROD_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --container-name auth-sidecar \
+            --image "${{ secrets.ACR_NAME }}.azurecr.io/summarization-auth:${{ inputs.sha }}"
+
+      # ── Workflow summary ─────────────────────────────────────────────────
+      - name: Workflow summary
+        if: always()
+        run: |
+          PREV_FE="${{ steps.current.outputs.frontend_sha }}"
+          PREV_BE="${{ steps.current.outputs.backend_sha }}"
+          PREV_AU="${{ steps.current.outputs.auth_sha }}"
+          TARGET="${{ inputs.sha }}"
+          {
+            echo "## Production Promotion"
+            echo ""
+            echo "| Component | Before | After |"
+            echo "|-----------|--------|-------|"
+            echo "| frontend | \`${PREV_FE}\` | \`${TARGET}\` |"
+            echo "| backend  | \`${PREV_BE}\` | \`${TARGET}\` |"
+            echo "| auth     | \`${PREV_AU}\` | \`${TARGET}\` |"
+            echo ""
+            if [ "${{ job.status }}" = "Success" ]; then
+              echo "**Result:** All three components promoted successfully."
+              echo ""
+              if [ "${PREV_FE}" = "unknown" ]; then
+                echo "> First deployment to production — no rollback target available."
+              else
+                echo "**To roll back:** run this workflow again with SHA \`${PREV_FE}\`"
+              fi
+            else
+              echo "**Result:** Promotion FAILED — check step logs above. Production may be in a partial state."
+              echo ""
+              echo "> To recover: run this workflow again with SHA \`${TARGET}\` to retry, or with SHA \`${PREV_FE}\` to roll back."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

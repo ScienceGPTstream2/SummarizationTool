@@ -717,7 +717,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
               className="h-8 text-xs text-muted-foreground"
               onClick={onSwitchToWorkflow}
             >
-              Advanced Mode
+              Simplified Mode
             </Button>
           )}
           {onSignOut && (

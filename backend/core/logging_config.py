@@ -8,6 +8,7 @@ Optionally ships logs to Loki when LOKI_URL is set.
 
 import logging
 import os
+import queue
 import sys
 from pathlib import Path
 
@@ -56,7 +57,8 @@ def setup_logging(level: int = logging.INFO) -> None:
         try:
             import logging_loki
 
-            loki_handler = logging_loki.LokiHandler(
+            loki_handler = logging_loki.LokiQueueHandler(
+                queue.Queue(-1),
                 url=f"{loki_url.rstrip('/')}/loki/api/v1/push",
                 tags={"app": "summarization-backend"},
                 version="1",

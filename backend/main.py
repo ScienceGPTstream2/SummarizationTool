@@ -121,7 +121,9 @@ def _setup_otel(app: FastAPI) -> None:
         provider = TracerProvider(resource=resource)
         provider.add_span_processor(
             BatchSpanProcessor(
-                OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
+                OTLPSpanExporter(
+                    endpoint=f"{endpoint.rstrip('/')}/v1/traces", timeout=5
+                )
             )
         )
         trace.set_tracer_provider(provider)
