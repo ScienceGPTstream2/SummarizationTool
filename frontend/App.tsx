@@ -26,6 +26,7 @@ import {
   Loader2,
   Zap,
   Settings2,
+  MessageSquare,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -2008,25 +2009,45 @@ export default function App() {
               </h1>
               <div className="flex items-center gap-2">
                 {isSimplifiedMode ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentStep("upload")}
-                  >
-                    <Settings2 className="h-4 w-4 mr-2" />
-                    Advanced Mode
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentStep("chat")}
+                    >
+                      <MessageSquare className="h-4 w-4 mr-2" />
+                      Chat
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentStep("upload")}
+                    >
+                      <Settings2 className="h-4 w-4 mr-2" />
+                      Advanced Mode
+                    </Button>
+                  </>
                 ) : (
                   <>
                     {!isSimplifiedMode && currentStep !== "executive" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentStep("simplified")}
-                      >
-                        <Zap className="h-4 w-4 mr-2" />
-                        Simplified
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentStep("chat")}
+                        >
+                          <MessageSquare className="h-4 w-4 mr-2" />
+                          Chat
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentStep("simplified")}
+                        >
+                          <Zap className="h-4 w-4 mr-2" />
+                          Simplified
+                        </Button>
+                      </>
                     )}
 
                     {/* Executive Mode button hidden for demo — logic preserved in ExecutiveModePage.tsx
