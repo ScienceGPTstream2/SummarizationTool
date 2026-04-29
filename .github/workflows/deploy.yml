@@ -162,7 +162,7 @@ jobs:
             echo "| \`${ACR}/summarization-backend\` | \`${SHA}\` |"
             echo "| \`${ACR}/summarization-auth\` | \`${SHA}\` |"
             echo ""
-            if [ "${{ job.status }}" = "success" ]; then
+            if [ "${{ steps.oidc_login.outcome }}" = "success" ] && [ "${{ job.status }}" = "success" ]; then
               echo "**Staging deployment:** succeeded"
             elif [ "${{ steps.oidc_login.outcome }}" != "success" ]; then
               echo "**Staging deployment:** skipped — OIDC credentials not configured"
