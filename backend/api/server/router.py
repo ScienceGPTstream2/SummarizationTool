@@ -281,6 +281,21 @@ async def get_available_models():
         except (json.JSONDecodeError, TypeError) as e:
             print(f"⚠️  Warning: Failed to parse AZURE_OPENAI_MODELS: {e}")
 
+    # Add Cohere models if configured (Azure AI Foundry)
+    if os.getenv("COHERE_AZURE_ENDPOINT") and os.getenv("COHERE_AZURE_KEY"):
+        models.append(
+            {
+                "id": "cohere-command-a",
+                "name": os.getenv("COHERE_DISPLAY_NAME", "Cohere Command A"),
+                "provider": "Cohere",
+                "model_type": "cohere",
+                "description": "Azure AI Foundry",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
+                "vision_capable": False,
+            }
+        )
+
     # Backward compatibility: support old single model format
     if not azure_models_json:
         deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")

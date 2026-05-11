@@ -34,6 +34,14 @@ set -euo pipefail
 : "${GITHUB_CLIENT_SECRET:?Need GITHUB_CLIENT_SECRET}"
 : "${BETTER_AUTH_SECRET:?Need BETTER_AUTH_SECRET}"
 : "${AZURE_STORAGE_CONNECTION_STRING:?Need AZURE_STORAGE_CONNECTION_STRING}"
+: "${ALLOWED_EMAILS:?Need ALLOWED_EMAILS (comma-separated list of authorized emails)}"
+
+# Cohere (optional — set to empty string to skip)
+COHERE_AZURE_ENDPOINT="${COHERE_AZURE_ENDPOINT:-}"
+COHERE_AZURE_KEY="${COHERE_AZURE_KEY:-}"
+COHERE_AZURE_API_VERSION="${COHERE_AZURE_API_VERSION:-2024-05-01-preview}"
+COHERE_MODEL_NAME="${COHERE_MODEL_NAME:-cohere-command-a}"
+COHERE_DISPLAY_NAME="${COHERE_DISPLAY_NAME:-Cohere Command A}"
 
 # ---------------------------------------------------------------------------
 # Substitute placeholders → generate ephemeral YAML, never written to disk
