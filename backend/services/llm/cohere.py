@@ -191,7 +191,7 @@ class CohereLLMClient:
 
         return {
             "success": True,
-            "extracted_text": parsed["extracted_text"],
+            "content": parsed["extracted_text"],
             "model": self.model_name,
             "meta": {
                 "model_name": self.model_name,
@@ -230,7 +230,7 @@ class CohereLLMClient:
         meta = result["meta"]
         return {
             "success": True,
-            "generated_text": result["content"],
+            "content": result["content"],
             "model": self.model_name,
             "meta": {
                 "model_name": self.model_name,
