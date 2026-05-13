@@ -816,9 +816,9 @@ export function EntityExtractionPage({
       },
     }));
 
-    // Filter entities that need extraction (skip already-extracted unless error)
+    // Filter entities that need extraction (skip already-extracted unless error or placeholder)
     const entitiesToExtract = updatedEntities.filter(
-      (e) => !e.extracted || e.extracted.startsWith("Error:")
+      (e) => !e.extracted || e.extracted.startsWith("Error:") || e.extracted === "No result"
     );
 
     if (entitiesToExtract.length === 0) {
@@ -1034,8 +1034,8 @@ export function EntityExtractionPage({
       // Merge results from all models into each entity's extractionsByModel
       for (let i = 0; i < updatedEntities.length; i++) {
         const entity = updatedEntities[i];
-        // Skip entities that were already successfully extracted
-        if (entity.extracted && !entity.extracted.startsWith("Error:"))
+        // Skip entities that were already successfully extracted (but not "No result" placeholders)
+        if (entity.extracted && !entity.extracted.startsWith("Error:") && entity.extracted !== "No result")
           continue;
 
         const extractionsByModel: Record<string, any> = {
@@ -2085,12 +2085,12 @@ export function EntityExtractionPage({
       // Only rerun models that failed or have no result for this entity.
       // If the entity looks healthy (deliberate re-run), use all models.
       const isEntityFailed =
-        !entity.extracted || entity.extracted.startsWith("Error:");
+        !entity.extracted || entity.extracted.startsWith("Error:") || entity.extracted === "No result";
       let modelsToUse = allModels;
       if (isEntityFailed) {
         const failedModels = allModels.filter((modelId: string) => {
           const result = entity.extractionsByModel?.[modelId];
-          return !result?.extracted || result.extracted.startsWith("Error:");
+          return !result?.extracted || result.extracted.startsWith("Error:") || result.extracted === "No result";
         });
         if (failedModels.length > 0) modelsToUse = failedModels;
       }
@@ -2187,7 +2187,7 @@ export function EntityExtractionPage({
     const failedEntities = entities.filter((e) =>
       modelsToUse.some((modelId: string) => {
         const result = e.extractionsByModel?.[modelId];
-        return !result?.extracted || result.extracted.startsWith("Error:");
+        return !result?.extracted || result.extracted.startsWith("Error:") || result.extracted === "No result";
       })
     );
 
@@ -2237,7 +2237,7 @@ export function EntityExtractionPage({
             const entitiesForModel = failedEntities.filter((e) => {
               const result = e.extractionsByModel?.[modelId];
               return (
-                !result?.extracted || result.extracted.startsWith("Error:")
+                !result?.extracted || result.extracted.startsWith("Error:") || result.extracted === "No result"
               );
             });
             if (entitiesForModel.length === 0) {
@@ -2268,7 +2268,7 @@ export function EntityExtractionPage({
         const resultsByEntity: Record<string, any> = {};
         const entitiesForModel = failedEntities.filter((e) => {
           const result = e.extractionsByModel?.[modelId];
-          return !result?.extracted || result.extracted.startsWith("Error:");
+          return !result?.extracted || result.extracted.startsWith("Error:") || result.extracted === "No result";
         });
         for (const entity of entitiesForModel) {
           try {
@@ -2307,7 +2307,7 @@ export function EntityExtractionPage({
       let completed = 0;
       const mergedEntities = entities.map((entity) => {
         const wasFailed =
-          !entity.extracted || entity.extracted.startsWith("Error:");
+          !entity.extracted || entity.extracted.startsWith("Error:") || entity.extracted === "No result";
         if (!wasFailed) return entity;
 
         const newExtractionsByModel: Record<string, any> = {
