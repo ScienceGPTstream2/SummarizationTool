@@ -17,6 +17,7 @@ Configuration (from secrets.toml [cohere] section, loaded into env vars):
     COHERE_MODEL_NAME       — deployment/model name, e.g. "cohere-command-a"
 """
 
+import asyncio
 import json
 import os
 import time
@@ -61,7 +62,7 @@ class CohereLLMClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _call_api(
+    async def _call_api(
         self,
         messages: List[Dict[str, str]],
         max_tokens: int = 8048,
@@ -89,7 +90,9 @@ class CohereLLMClient:
         for attempt in range(max_retries):
             try:
                 t0 = time.perf_counter()
-                resp = requests.post(url, json=payload, headers=headers, timeout=120)
+                resp = await asyncio.to_thread(
+                    lambda: requests.post(url, json=payload, headers=headers, timeout=120)
+                )
                 duration = time.perf_counter() - t0
 
                 if resp.status_code == 200:
@@ -181,7 +184,7 @@ class CohereLLMClient:
             messages.append({"role": "system", "content": system_message})
         messages.append({"role": "user", "content": f"{extraction_prompt}\n\n---\n\n{markdown}"})
 
-        result = self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
+        result = await self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
         if not result["success"]:
             return result
 
@@ -223,7 +226,7 @@ class CohereLLMClient:
             {"role": "user", "content": user_prompt},
         ]
 
-        result = self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
+        result = await self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
         if not result["success"]:
             return result
 
