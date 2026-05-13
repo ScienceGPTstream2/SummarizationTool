@@ -1796,6 +1796,8 @@ export function EntityExtractionPage({
       modelType = "azure";
     } else if (provider.includes("meta") || provider.includes("llama")) {
       modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
+    } else if (provider.includes("cohere")) {
+      modelType = "cohere";
     } else if (provider.includes("macbook")) {
       modelType = "macbook";
     }
@@ -2382,6 +2384,7 @@ export function EntityExtractionPage({
     if (p.includes("anthropic")) return "anthropic";
     if (p.includes("meta") || p.includes("llama"))
       return modelId?.startsWith("azure-") ? "azure-llama" : "llama";
+    if (p.includes("cohere")) return "cohere";
     if (p.includes("macbook")) return "macbook";
     return "azure";
   };
