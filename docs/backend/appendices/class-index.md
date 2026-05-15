@@ -1,6 +1,6 @@
 # Backend Class Index
 
-Compact index of backend classes, dataclasses, and schema classes. For detailed behavior, follow the linked module docs from [../README.md](../README.md).
+Compact index of backend classes, dataclasses, and schema classes. For field-level details, see the generated [class reference](class-reference.md). For detailed behavior, follow the linked module docs from [../README.md](../README.md).
 
 ## Core app/config/auth
 

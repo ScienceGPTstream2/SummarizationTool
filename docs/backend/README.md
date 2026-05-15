@@ -127,6 +127,7 @@ The current architecture replaced an earlier Supabase-based implementation with 
 
 - [API endpoint index](appendices/api-endpoint-index.md) — compact endpoint list by router.
 - [Class index](appendices/class-index.md) — backend classes, dataclasses, and schema classes by package.
+- [Class reference](appendices/class-reference.md) — field-level reference for ORM models, Pydantic schemas, dataclasses, service attributes, and provider classes.
 - [Data-flow diagrams](appendices/data-flow-diagrams.md) — text diagrams for upload, processing, extraction, evaluation, and restore flows.
 - [Risks, assumptions, and testing](appendices/risks-assumptions-testing.md) — risks, assumptions, and recommended test coverage.
 
@@ -171,7 +172,8 @@ When backend code changes, update the smallest relevant module document first, t
 
 Good update examples:
 
-- Adding a new SQLAlchemy table: update [03-data-models.md](03-data-models.md) and [appendices/class-index.md](appendices/class-index.md).
+- Adding a new SQLAlchemy table or class field: update [03-data-models.md](03-data-models.md), [appendices/class-index.md](appendices/class-index.md), and [appendices/class-reference.md](appendices/class-reference.md).
 - Adding a new route: update [02-api-surface.md](02-api-surface.md) and [appendices/api-endpoint-index.md](appendices/api-endpoint-index.md).
+- Adding or changing a Pydantic schema field: update [04-schemas.md](04-schemas.md) and [appendices/class-reference.md](appendices/class-reference.md).
 - Adding a new model provider: update [06-llm-layer.md](06-llm-layer.md), [11-auth-security-observability.md](11-auth-security-observability.md) if new secrets are needed, and the risk/testing appendix.
 - Changing extraction result shape: update [04-schemas.md](04-schemas.md), [07-extraction-flow.md](07-extraction-flow.md), and data-flow diagrams.
