@@ -23,6 +23,12 @@ Out of scope:
 - external DeepEval library implementation;
 - provider account setup.
 
+## Visual workflow
+
+![Evaluation workflow](images/evaluation-workflow.png)
+
+Evaluation has a synchronous path and a background-job path, but both converge on `EvaluationService.evaluate_extraction()`. The service creates a judge adapter, selects built-in or custom metrics, prefers a combined JSON scoring prompt to reduce judge-call cost, and falls back to per-metric GEval scoring if parsing fails. Background jobs flatten `tasks x providers`, then use both global and per-job semaphores so multiple users can make progress without one job taking every judge slot. Job status is kept in memory for active work and synced to `eval_jobs` so polling can recover across workers.
+
 ## 2. Main classes and files
 
 | Component | File | Responsibility |

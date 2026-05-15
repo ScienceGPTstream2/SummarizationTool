@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
+  <title id="title">Backend runtime architecture</title>
+  <desc id="desc">Layered architecture of the Summarization Tool backend from browser requests through FastAPI routers, services, persistence, external providers, and observability.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .lane-label { font: 700 14px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 16px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .node { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .pill { stroke: #cbd5e1; stroke-width: 1.2; rx: 16; }
+      .client { fill: #dbeafe; }
+      .app { fill: #ede9fe; }
+      .core { fill: #fef3c7; }
+      .api { fill: #e0f2fe; }
+      .service { fill: #dcfce7; }
+      .data { fill: #fae8ff; }
+      .provider { fill: #fee2e2; }
+      .observe { fill: #e2e8f0; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft-arrow { stroke: #94a3b8; stroke-width: 1.6; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="820" />
+  <text class="title" x="44" y="48">Backend Runtime Architecture</text>
+  <text class="subtitle" x="44" y="74">FastAPI coordinates authenticated workflows, hash-addressed document artifacts, provider calls, persistence, and telemetry.</text>
+
+  <rect class="lane" x="32" y="108" width="1216" height="96" />
+  <text class="lane-label" x="52" y="136">ENTRY AND AUTH EDGE</text>
+  <rect class="node client" x="64" y="152" width="185" height="36" />
+  <text class="box-title" x="82" y="175">Frontend browser</text>
+  <rect class="node app" x="324" y="136" width="240" height="56" />
+  <text class="box-title" x="346" y="158">FastAPI app</text>
+  <text class="box-text" x="346" y="176">backend/main.py create_app()</text>
+  <rect class="node core" x="642" y="136" width="240" height="56" />
+  <text class="box-title" x="664" y="158">Core boundary</text>
+  <text class="box-text" x="664" y="176">auth, CORS, config, logging</text>
+  <rect class="node provider" x="960" y="136" width="220" height="56" />
+  <text class="box-title" x="982" y="158">Better Auth sidecar</text>
+  <text class="box-text" x="982" y="176">proxied /api/auth/* traffic</text>
+  <path class="arrow" d="M249 170 H324" />
+  <path class="arrow" d="M564 164 H642" />
+  <path class="soft-arrow" d="M882 164 H960" />
+
+  <rect class="lane" x="32" y="228" width="1216" height="148" />
+  <text class="lane-label" x="52" y="256">API ROUTERS</text>
+  <rect class="pill api" x="64" y="280" width="130" height="36" />
+  <text class="box-text" x="88" y="303">files</text>
+  <rect class="pill api" x="210" y="280" width="150" height="36" />
+  <text class="box-text" x="238" y="303">documents</text>
+  <rect class="pill api" x="376" y="280" width="150" height="36" />
+  <text class="box-text" x="405" y="303">extractions</text>
+  <rect class="pill api" x="542" y="280" width="150" height="36" />
+  <text class="box-text" x="574" y="303">evaluations</text>
+  <rect class="pill api" x="708" y="280" width="130" height="36" />
+  <text class="box-text" x="742" y="303">sessions</text>
+  <rect class="pill api" x="854" y="280" width="130" height="36" />
+  <text class="box-text" x="895" y="303">groups</text>
+  <rect class="pill api" x="1000" y="280" width="150" height="36" />
+  <text class="box-text" x="1032" y="303">templates</text>
+  <rect class="pill api" x="410" y="324" width="120" height="34" />
+  <text class="box-text" x="449" y="346">chat</text>
+  <rect class="pill api" x="550" y="324" width="160" height="34" />
+  <text class="box-text" x="577" y="346">server metrics</text>
+  <rect class="pill api" x="730" y="324" width="170" height="34" />
+  <text class="box-text" x="755" y="346">paragraph APIs</text>
+  <path class="arrow" d="M444 192 V228" />
+
+  <rect class="lane" x="32" y="400" width="1216" height="200" />
+  <text class="lane-label" x="52" y="428">SERVICE LAYER</text>
+  <rect class="node service" x="64" y="456" width="205" height="80" />
+  <text class="box-title" x="86" y="478">Document services</text>
+  <text class="box-text" x="86" y="499">organized files, processors</text>
+  <text class="box-text" x="86" y="518">bbox normalization</text>
+  <rect class="node service" x="298" y="456" width="205" height="80" />
+  <text class="box-title" x="320" y="478">LLMService</text>
+  <text class="box-text" x="320" y="499">provider dispatch</text>
+  <text class="box-text" x="320" y="518">timeouts, metrics</text>
+  <rect class="node service" x="532" y="456" width="205" height="80" />
+  <text class="box-title" x="554" y="478">Evaluation service</text>
+  <text class="box-text" x="554" y="499">DeepEval adapters</text>
+  <text class="box-text" x="554" y="518">job queue and scoring</text>
+  <rect class="node service" x="766" y="456" width="205" height="80" />
+  <text class="box-title" x="788" y="478">Workflow services</text>
+  <text class="box-text" x="788" y="499">sessions, groups</text>
+  <text class="box-text" x="788" y="518">templates and folders</text>
+  <rect class="node service" x="1000" y="456" width="190" height="80" />
+  <text class="box-title" x="1022" y="478">Telemetry</text>
+  <text class="box-text" x="1022" y="499">CostTracker</text>
+  <text class="box-text" x="1022" y="518">session metrics</text>
+  <path class="arrow" d="M640 376 V400" />
+  <path class="soft-arrow" d="M194 316 C190 380 166 390 166 456" />
+  <path class="soft-arrow" d="M451 316 C436 380 400 390 400 456" />
+  <path class="soft-arrow" d="M617 316 C625 380 634 390 634 456" />
+  <path class="soft-arrow" d="M773 316 C820 375 868 390 868 456" />
+
+  <rect class="lane" x="32" y="624" width="1216" height="148" />
+  <text class="lane-label" x="52" y="652">PERSISTENCE, PROVIDERS, AND OPERATIONS</text>
+  <rect class="node data" x="64" y="680" width="205" height="58" />
+  <text class="box-title" x="86" y="702">PostgreSQL</text>
+  <text class="box-text" x="86" y="722">ORM models and Alembic</text>
+  <rect class="node data" x="300" y="680" width="205" height="58" />
+  <text class="box-title" x="322" y="702">Azure Blob Storage</text>
+  <text class="box-text" x="322" y="722">global/{hash}/ artifacts</text>
+  <rect class="node provider" x="536" y="680" width="205" height="58" />
+  <text class="box-title" x="558" y="702">Document parsers</text>
+  <text class="box-text" x="558" y="722">Azure DI and Docling</text>
+  <rect class="node provider" x="772" y="680" width="205" height="58" />
+  <text class="box-title" x="794" y="702">Model providers</text>
+  <text class="box-text" x="794" y="722">Azure, Vertex, vLLM, local</text>
+  <rect class="node observe" x="1008" y="680" width="205" height="58" />
+  <text class="box-title" x="1030" y="702">Observability</text>
+  <text class="box-text" x="1030" y="722">Prometheus, OTLP, Loki</text>
+  <path class="arrow" d="M166 536 V680" />
+  <path class="arrow" d="M400 536 V680" />
+  <path class="arrow" d="M634 536 V680" />
+  <path class="arrow" d="M868 536 V680" />
+  <path class="arrow" d="M1095 536 V680" />
+  <path class="soft-arrow" d="M166 536 C166 590 166 620 166 680" />
+  <path class="soft-arrow" d="M400 536 C400 590 402 620 402 680" />
+  <path class="soft-arrow" d="M634 536 C634 590 638 620 638 680" />
+  <path class="soft-arrow" d="M868 536 C868 590 874 620 874 680" />
+
+  <rect x="44" y="784" width="14" height="14" rx="4" fill="#ede9fe" stroke="#cbd5e1" />
+  <text class="small" x="66" y="795">Runtime app</text>
+  <rect x="166" y="784" width="14" height="14" rx="4" fill="#e0f2fe" stroke="#cbd5e1" />
+  <text class="small" x="188" y="795">Routers</text>
+  <rect x="276" y="784" width="14" height="14" rx="4" fill="#dcfce7" stroke="#cbd5e1" />
+  <text class="small" x="298" y="795">Services</text>
+  <rect x="392" y="784" width="14" height="14" rx="4" fill="#fae8ff" stroke="#cbd5e1" />
+  <text class="small" x="414" y="795">Persistence</text>
+  <rect x="532" y="784" width="14" height="14" rx="4" fill="#fee2e2" stroke="#cbd5e1" />
+  <text class="small" x="554" y="795">External providers</text>
+</svg>

@@ -2,6 +2,8 @@
 
 Text diagrams for major backend flows. See the module docs for field-level details.
 
+For visual architecture diagrams, start with the [visual workflow map](../README.md#visual-workflow-map). The SVG diagrams under [`../images/`](../images/) are the primary visual companion to this appendix; the text flows below remain useful for exact request-by-request sequencing.
+
 ## 1. Authenticated API request
 
 ```text

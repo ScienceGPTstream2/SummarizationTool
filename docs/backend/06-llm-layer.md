@@ -20,6 +20,12 @@ Out of scope:
 - provider account provisioning;
 - exact model availability at runtime.
 
+## Visual workflow
+
+![LLM provider routing workflow](images/llm-provider-routing.png)
+
+All text and vision model use goes through `LLMService`. The routers provide the operation-specific context, while `LLMService` selects the provider client from `model_type`, applies timeout logging, normalizes the provider dictionary, and records session metrics on successful responses. Provider clients own SDK or REST details, including retries, model-name translation, structured output support, local Macbook serialization, and OpenAI-compatible vLLM calls. Downstream code should rely on the common result keys rather than provider-specific raw payloads whenever possible.
+
 ## 2. Main classes
 
 | Class | File | Responsibility |

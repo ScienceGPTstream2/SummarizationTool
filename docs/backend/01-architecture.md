@@ -20,6 +20,10 @@ Router registration happens in `create_app()` and is intentionally ordered. The 
 
 ## 2. Runtime layers
 
+![Backend runtime architecture](images/backend-runtime-architecture.png)
+
+Read the diagram from top to bottom. `backend/main.py` creates the FastAPI runtime and installs cross-cutting middleware before requests reach routers. Routers stay thin: they validate HTTP inputs, call service objects, and translate service errors into API responses. The service layer owns orchestration across SQLAlchemy persistence, Azure Blob Storage, document parsers, LLM clients, evaluation jobs, sessions/groups/templates, and telemetry. External systems sit at the bottom because the backend treats them as replaceable infrastructure boundaries, not as dependencies that routers call directly.
+
 ```text
 Browser / frontend
         |

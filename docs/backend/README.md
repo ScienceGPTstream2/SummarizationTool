@@ -4,6 +4,58 @@ This documentation set is a layered Technical Design Document (TDD) for the Fast
 
 The backend is not documented as one long README because the codebase contains several distinct subsystems: authentication, document processing, LLM routing, entity extraction, evaluation, sessions, groups, templates, storage, telemetry, and deployment hooks. Start here, then follow the module links for details.
 
+## Visual workflow map
+
+The backend diagrams are stored under [`images/`](images/) and are embedded below in the same order as the detailed module documents. They are intentionally implementation-oriented: boxes map to routers, services, tables, providers, or storage paths that exist in `backend/`.
+
+### Backend Runtime Architecture
+
+![Backend runtime architecture](images/backend-runtime-architecture.png)
+
+Runtime layers from browser/API edge to routers, services, persistence, external providers, and observability. Details: [01-architecture.md](01-architecture.md).
+
+### Backend Data Model Relationships
+
+![Backend data model relationships](images/data-model-relationships.png)
+
+How Better Auth tables, workflow tables, evaluation jobs, groups, and templates relate. Details: [03-data-models.md](03-data-models.md).
+
+### Document Upload and Processing Workflow
+
+![Document upload and processing workflow](images/document-processing-workflow.png)
+
+Upload validation, SHA-256 deduplication, parser selection, artifact generation, blob sync, and document-view output. Details: [05-document-processing.md](05-document-processing.md).
+
+### LLM Provider Routing Workflow
+
+![LLM provider routing workflow](images/llm-provider-routing.png)
+
+`LLMService` dispatch, timeout handling, provider clients, response normalization, and cost tracking. Details: [06-llm-layer.md](06-llm-layer.md).
+
+### Entity Extraction and Grounding Workflow
+
+![Entity extraction and grounding workflow](images/extraction-grounding-workflow.png)
+
+Per-entity LLM fan-out, figure context, reference extraction, bbox matching, and extraction persistence. Details: [07-extraction-flow.md](07-extraction-flow.md).
+
+### Evaluation Workflow
+
+![Evaluation workflow](images/evaluation-workflow.png)
+
+Synchronous and background LLM-as-a-judge evaluation, metric factories, job concurrency, cancellation, and result storage. Details: [08-evaluation-flow.md](08-evaluation-flow.md).
+
+### Session Sharing and Template Workflow
+
+![Session sharing and template workflow](images/session-sharing-template-workflow.png)
+
+Session restore, group sharing, template scopes, permissions, folders, and version snapshots. Details: [09-session-sharing-groups.md](09-session-sharing-groups.md) and [10-template-system.md](10-template-system.md).
+
+### Auth, Security, and Observability Workflow
+
+![Auth, security, and observability workflow](images/auth-observability-workflow.png)
+
+Better Auth session lookup, auth proxy, service authorization, request logs, metrics, traces, and session telemetry. Details: [11-auth-security-observability.md](11-auth-security-observability.md).
+
 ## 1. Introduction
 
 ### 1.1 Problem

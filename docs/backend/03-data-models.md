@@ -2,6 +2,12 @@
 
 This document describes the backend physical data model implemented with SQLAlchemy models in `backend/models/` and Alembic migrations in `backend/alembic/`.
 
+## Visual overview
+
+![Backend data model relationships](images/data-model-relationships.png)
+
+The diagram separates the database into five operational areas. Better Auth owns login identity through `user`, `session`, `account`, and `verification`. Application workflow state starts at `app_sessions`, flows to `documents`, then to `extraction_results`, and finally to `evaluation_results`. `eval_jobs` is intentionally separate from normalized evaluation scores because it tracks background execution status and polling state. Collaboration is handled through `groups` and `user_groups`, while templates use their own scoped records, version snapshots, and optional per-user permission overrides.
+
 ## 1. Database infrastructure
 
 ### `backend/models/base.py`

@@ -20,6 +20,12 @@ Out of scope:
 - cloud provisioning for blob storage;
 - internals of the remote Docling service outside this repository.
 
+## Visual workflow
+
+![Document upload and processing workflow](images/document-processing-workflow.png)
+
+The workflow is content-addressed. `POST /api/upload` validates the PDF, computes a SHA-256 hash, and writes only one global original artifact per hash. Processing then uses that hash as the stable document id. A strict cache hit requires `processed/{processor}/document.md`; metadata-only or partial artifact trees are readable for inspection but do not satisfy the processing cache gate. On a cache miss, the service hydrates the original file into `/tmp/summarization/{hash}`, writes parser outputs locally, syncs the full processor tree to Azure Blob Storage, updates DB metadata when a session document exists, and returns a canonical `document_view` object for restore/viewer workflows.
+
 ## 2. Main classes and files
 
 | Class/function | File | Responsibility |

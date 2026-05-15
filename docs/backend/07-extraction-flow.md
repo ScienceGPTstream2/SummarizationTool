@@ -21,6 +21,12 @@ Out of scope:
 - model-provider provisioning;
 - evaluation of extracted answers, which is covered in [08-evaluation-flow.md](08-evaluation-flow.md).
 
+## Visual workflow
+
+![Entity extraction and grounding workflow](images/extraction-grounding-workflow.png)
+
+The extraction path has two distinct technical phases. First, the router builds an enhanced markdown context from processed document content and available figure summaries, then fans out one provider call per entity. Cloud models run concurrently behind a semaphore; Macbook-backed models are submitted sequentially because the local runtime is already serialized by a FIFO queue. Second, structured references from the provider are matched back to parser raw analysis. Azure matching can use paragraph, line, and figure metadata; Docling matching uses paragraph/page structures and polygons. Persistence upserts by `(document_id, entity_name, model_id)` so reruns replace the same entity/model result instead of duplicating it.
+
 ## 2. Main files and classes
 
 | Component | File | Responsibility |

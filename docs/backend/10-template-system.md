@@ -19,6 +19,12 @@ Out of scope:
 - frontend template editor UI;
 - prompt quality/content strategy.
 
+## Visual workflow
+
+![Session sharing and template workflow](images/session-sharing-template-workflow.png)
+
+Read the bottom half of the diagram for template behavior. Template APIs call `TemplateService` and `FolderService`, which enforce user, group, and global scopes before touching `prompt_templates` or `template_folders`. Updates snapshot the current prompt fields into `template_versions` before mutation, so revert creates a new current version rather than rolling the row back in place. Explicit `template_permissions` can grant user-level read/write access, but `is_immutable` is evaluated first and always blocks edits.
+
 ## 2. Main classes and files
 
 | Component | File | Responsibility |

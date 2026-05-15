@@ -32,6 +32,14 @@ It supports:
 
 ## 🏗 Architecture overview
 
+### Global system architecture
+
+![Global system architecture](docs/images/summarization-tool-global-architecture.png)
+
+*Architecture overview. The platform connects document ingestion, the React user interface, FastAPI orchestration, parser outputs, LLM workflows, evaluation, collaboration, persistence, authentication, and observability.*
+
+Detailed backend diagrams: [Backend visual workflow map](docs/backend/README.md).
+
 The application is organized around a small set of core services:
 
 | Service | Port | Purpose |

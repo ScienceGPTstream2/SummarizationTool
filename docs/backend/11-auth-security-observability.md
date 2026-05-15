@@ -21,6 +21,12 @@ Out of scope:
 - OAuth provider setup details;
 - cloud IAM policy design.
 
+## Visual workflow
+
+![Auth, security, and observability workflow](images/auth-observability-workflow.png)
+
+The diagram shows the cross-cutting path that every protected request follows. FastAPI dependencies extract the Better Auth session token, prefer the `Authorization` header, join `AuthSession` to `User`, check expiry and optional email allowlist, then pass a compact user dict into the route. Authorization is deliberately service-owned: session ownership, group roles, template scope, and artifact path safety are enforced after authentication. Observability is attached at two places: request middleware logs request id, status, and duration; provider/parser paths record model, token, duration, and cost telemetry into in-memory metrics, Prometheus metrics when available, and session totals in PostgreSQL.
+
 ## 2. Authentication model
 
 The backend does not validate JWTs. It validates Better Auth sessions by looking up session tokens in PostgreSQL.

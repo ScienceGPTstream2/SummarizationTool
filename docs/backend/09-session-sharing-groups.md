@@ -18,6 +18,12 @@ Out of scope:
 - frontend session-history UI;
 - template-specific group sharing, covered in [10-template-system.md](10-template-system.md).
 
+## Visual workflow
+
+![Session sharing and template workflow](images/session-sharing-template-workflow.png)
+
+Read the top half of the diagram for sessions and groups. Session APIs call `SessionService`, which converts DB rows into the Pydantic session aggregate and builds restore payloads by asking `OrganizedFileService` for each document view. Sharing does not copy session data. It sets share metadata on the owned `app_sessions` row and allows reads only when the requesting user has a `user_groups` membership for the target group. Group role checks protect group administration, while shared-session viewing only requires membership.
+
 ## 2. Main classes and files
 
 | Component | File | Responsibility |
