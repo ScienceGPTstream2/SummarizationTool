@@ -252,11 +252,14 @@ SummarizationTool-dev/
 
 ## 📚 Additional documentation
 
+- [Documentation index](docs/INDEX.md) — **start here** — full navigation map for all backend, frontend, and deployment docs
+- [Frontend technical design docs](docs/frontend/README.md) — frontend architecture, page-by-page docs, component index, hooks, and TypeScript interfaces
+- [Glossary](docs/glossary.md) — definitions for all Azure services, tools, and project-specific terms
 - [Backend README](backend/README.md) — backend setup and processing details
 - [Backend technical design docs](docs/backend/README.md) — backend architecture, workflows, diagrams, data models, schemas, and appendices
 - [Backend class reference](docs/backend/appendices/class-reference.md) — field-level reference for backend ORM models, schemas, dataclasses, service attributes, and provider classes
-- [Migration guide](docs/migration-guide.md) — architecture migration and platform transition notes
-- [GitHub auth setup](docs/setup-github-auth.md) — Better Auth GitHub OAuth configuration
+- [Migration guide](docs/superpowers/migration-guide.md) — architecture migration and platform transition notes
+- [GitHub auth setup](docs/superpowers/setup-github-auth.md) — Better Auth GitHub OAuth configuration
 - [Dockerize & deploy to Azure](docs/superpowers/plans/dockerize-and-deploy.md) — deployment architecture and implementation notes
 
 ---
