@@ -1,5 +1,7 @@
 # Evaluation Flow Technical Design
 
+> *After entities are extracted, reviewers can ask a second LLM to judge how good the answers are — scoring them for correctness, completeness, relevance, and safety. This document explains how that works: the G-Eval scoring algorithm, how the backend tries to parse scores from the judge's response (with several fallback strategies for malformed output), how long-running evaluation jobs are managed in the background so the frontend can poll for progress, and how individual evaluations are cancelled without losing work already done.*
+
 This document describes LLM-as-a-judge evaluation, DeepEval metric construction, batch evaluation, background job execution, cancellation, persistence, and cost tracking.
 
 ## 1. Scope

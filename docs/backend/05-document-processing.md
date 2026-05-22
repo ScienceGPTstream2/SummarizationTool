@@ -1,5 +1,7 @@
 # Document Processing Technical Design
 
+> *When a reviewer uploads a PDF, the backend needs to convert it into structured text, figures, and tables before an AI model can work with it. This document traces that entire journey — from the moment the file arrives, through SHA-256 deduplication and blob storage, into either the Azure Document Intelligence or Docling parser, and finally into the "document view" that the frontend uses to display results and restore sessions. It also covers bounding boxes: how the coordinates of text passages are preserved so the PDF viewer can highlight exactly where an extracted answer came from.*
+
 This document describes upload, storage, parsing, artifact access, bounding-box normalization, figure/table handling, and document-view construction.
 
 ## 1. Scope

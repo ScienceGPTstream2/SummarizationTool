@@ -1,5 +1,7 @@
 # Sessions, Sharing, and Groups Technical Design
 
+> *A session is a saved record of a reviewer's work — their uploaded files, extracted entities, and evaluation scores. This document covers the full session lifecycle: how sessions are created, updated, and restored; how the "restore view" reconstructs a complete frontend state from the database; and how sessions are shared with colleagues through groups. It also covers group membership rules — who can add members, who can change roles, and what a shared session recipient can and cannot do.*
+
 This document describes workflow sessions, DB-to-API conversion, restore-view generation, shared sessions, group membership, and authorization rules.
 
 ## 1. Scope

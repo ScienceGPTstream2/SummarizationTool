@@ -1,5 +1,7 @@
 # Template System Technical Design
 
+> *Templates are reusable sets of entity prompts that reviewers can save, version, and share. Instead of re-typing the same 20 extraction fields for every toxicology study, a reviewer saves them as a template once and loads it in two clicks. This document explains how templates are stored, how every edit is automatically versioned (with full revert capability), how templates are scoped to an individual, a group, or all users, and how the access-control rules determine who can read or edit a given template.*
+
 This document describes the prompt template workspace: templates, folders, scopes, versions, immutability, forks, and permissions.
 
 ## 1. Scope

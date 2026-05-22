@@ -1,5 +1,7 @@
 # Auth, Security, and Observability Technical Design
 
+> *Three cross-cutting concerns that touch every part of the backend: who is allowed in (authentication via Better Auth and GitHub OAuth), what they're allowed to do (authorization per endpoint and resource), and what the system records about its own behaviour (structured logs, Prometheus metrics, OpenTelemetry traces, and per-session cost tracking). This document covers all three — including the security risks table, CORS configuration, secrets loading, and how the CostTracker updates the database without blocking the request loop.*
+
 This document describes authentication, authorization boundaries, security-sensitive behaviors, logging, metrics, tracing, and cost/session telemetry.
 
 ## 1. Scope

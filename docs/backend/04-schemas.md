@@ -1,5 +1,7 @@
 # Pydantic Schemas Technical Design
 
+> *Pydantic schemas are the typed contracts that sit at the boundary between the frontend and the backend — they define exactly what JSON the API accepts and what it returns. This document lists every schema class used for request bodies and response payloads, with notes on design decisions like why certain fields use free strings instead of enums. If the frontend is sending data that the backend rejects, or you're not sure what shape a response will have, start here.*
+
 This document describes request and response schemas in `backend/schemas/` and local router-level schemas in `backend/api/*`. These schemas define the API-facing data structures separate from SQLAlchemy ORM models.
 
 ## 1. Shared enum schemas

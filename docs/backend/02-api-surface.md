@@ -1,5 +1,7 @@
 # API Surface Technical Design
 
+> *Every action the frontend can take — uploading a file, running an extraction, fetching a session — goes through one of the 14 API routers documented here. This is the contract between the frontend and the backend: what URLs exist, what they expect, what they return, and what can go wrong. If you're building a new frontend feature or debugging an unexpected response, start here.*
+
 This document describes the backend FastAPI API surface by router. It focuses on interface communication: paths, methods, request/response structures, authentication, service dependencies, and important exceptions.
 
 For a compact route-only list, see [appendices/api-endpoint-index.md](appendices/api-endpoint-index.md).

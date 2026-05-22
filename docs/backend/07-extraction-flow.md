@@ -1,5 +1,7 @@
 # Entity Extraction Flow Technical Design
 
+> *Entity extraction is the core operation of Science-GPT: given a document and a list of fields to extract, ask an LLM to find each value and point to where it found it in the document. This document explains how that works end-to-end — how the markdown is loaded, how up to 48 LLM calls run concurrently through a semaphore, how the answers are matched back to bounding boxes on the PDF pages, and how results are persisted to the reviewer's session so nothing is lost if the browser closes.*
+
 This document describes how the backend extracts structured entity answers from processed documents, attaches reference/bounding-box data, records cost, and persists results into sessions.
 
 ## 1. Scope

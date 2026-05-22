@@ -1,5 +1,7 @@
 # LLM Provider Layer Technical Design
 
+> *Science-GPT is not locked to a single AI provider. This document describes how the backend routes extraction and evaluation requests across seven different providers — Azure OpenAI, Gemini, Anthropic, Llama, Macbook (local), and vLLM — through a common interface. It covers how each provider client works, how timeouts and retries are handled, how structured outputs are extracted from different response formats, and how every call's cost and token usage is recorded.*
+
 This document describes the provider-routing layer implemented under `backend/services/llm/`. It covers classes, request/response contracts, timeout/retry behavior, concurrency controls, and cost-tracking integration.
 
 ## 1. Scope

@@ -1,5 +1,7 @@
 # Backend Architecture
 
+> *Science-GPT's backend is a Python FastAPI service that sits between the frontend and everything else — the database, blob storage, document parsers, and AI providers. This document explains how those pieces connect: which packages own which responsibilities, how a request travels from the browser to the database and back, and which infrastructure assumptions the code relies on.*
+
 This document describes the high-level backend architecture, module boundaries, runtime setup, and major control/data flows. Lower-level class, endpoint, and schema details are split into the linked module documents.
 
 ## 1. Application entry point

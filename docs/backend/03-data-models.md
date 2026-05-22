@@ -1,5 +1,7 @@
 # Data Models Technical Design
 
+> *Everything a reviewer does — uploading a file, running an extraction, saving a session, sharing with a group — gets written to PostgreSQL through one of these 13 ORM models. This document describes every table: what each field stores, its type and constraints, and any gotchas between what the ORM assumes and what the database actually enforces. Read this if you're adding a new feature that needs a new table, or if you're debugging unexpected data in the database.*
+
 This document describes the backend physical data model implemented with SQLAlchemy models in `backend/models/` and Alembic migrations in `backend/alembic/`.
 
 ## Visual overview
