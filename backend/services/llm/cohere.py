@@ -26,6 +26,14 @@ from urllib.parse import urlparse
 
 import requests
 
+_DEFAULT_EXTRACTION_SYSTEM = (
+    "You are an expert scientific data extractor. "
+    "Respond ONLY with a valid JSON object in this exact format:\n"
+    '{"answer": "<your extracted answer>", "references": [{"text": "<exact verbatim quote from the document>"}]}\n'
+    "Include one or more reference objects quoting the specific passages you used as evidence. "
+    "No markdown fences, no extra keys."
+)
+
 
 class CohereLLMClient:
     def __init__(self):
@@ -147,26 +155,28 @@ class CohereLLMClient:
 
         return {"success": False, "error": last_error or "Unknown error"}
 
-    def _parse_json_content(self, content: str, extraction_prompt: str) -> Dict[str, Any]:
-        """
-        Parse JSON out of the model's response.
-        Tries fence-stripped JSON first, then raw parse, then returns as plain text.
-        """
-        # Strip markdown fences
+    def _parse_json_content(self, content: str) -> Dict[str, Any]:
+        """Parse JSON from model response, extracting answer and references fields."""
         stripped = content.strip()
         if stripped.startswith("```"):
             lines = stripped.split("\n")
-            inner = "\n".join(lines[1:-1]) if len(lines) > 2 else stripped
-            stripped = inner.strip()
+            stripped = "\n".join(lines[1:-1]).strip() if len(lines) > 2 else stripped
 
         try:
             parsed = json.loads(stripped)
-            return {"success": True, "extracted_text": json.dumps(parsed), "parsed": parsed}
+            if isinstance(parsed, dict):
+                answer = parsed.get("answer") or stripped
+                references = parsed.get("references", [])
+                if isinstance(references, list):
+                    references = [
+                        r if isinstance(r, dict) else {"text": str(r)} for r in references
+                    ]
+                return {"success": True, "extracted_text": answer, "references": references}
+            # json.loads returned a scalar or list — treat as plain text
         except json.JSONDecodeError:
             pass
 
-        # Return raw content — downstream can still use it
-        return {"success": True, "extracted_text": content, "parsed": None}
+        return {"success": True, "extracted_text": content, "references": []}
 
     async def extract_entities_with_cohere(
         self,
@@ -179,22 +189,29 @@ class CohereLLMClient:
         if self.disabled:
             return {"success": False, "error": "Cohere is not configured."}
 
-        messages: List[Dict[str, str]] = []
-        if system_message:
-            messages.append({"role": "system", "content": system_message})
-        messages.append({"role": "user", "content": f"{extraction_prompt}\n\n---\n\n{markdown}"})
+        effective_system = system_message or _DEFAULT_EXTRACTION_SYSTEM
+        user_content = (
+            f"{extraction_prompt}\n\n"
+            'IMPORTANT: Respond ONLY with a valid JSON object: '
+            '{"answer": "...", "references": [{"text": "exact verbatim quote"}]}\n\n'
+            f"---\n\n{markdown}"
+        )
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": effective_system},
+            {"role": "user", "content": user_content},
+        ]
 
         result = await self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
         if not result["success"]:
             return result
 
-        content = result["content"]
         meta = result["meta"]
-        parsed = self._parse_json_content(content, extraction_prompt)
+        parsed = self._parse_json_content(result["content"])
 
         return {
             "success": True,
             "content": parsed["extracted_text"],
+            "references": parsed["references"],
             "model": self.model_name,
             "meta": {
                 "model_name": self.model_name,

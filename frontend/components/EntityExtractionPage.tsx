@@ -1886,6 +1886,8 @@ export function EntityExtractionPage({
       } else if (provider.includes("meta") || provider.includes("llama")) {
         // Azure-hosted Llama has id "azure-{deployment}"; GCP Llama has id "meta/..."
         modelType = modelObj.id?.startsWith("azure-") ? "azure-llama" : "llama";
+      } else if (provider.includes("cohere")) {
+        modelType = "cohere";
       } else if (provider.includes("macbook")) {
         modelType = "macbook";
       }

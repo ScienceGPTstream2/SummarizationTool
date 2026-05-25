@@ -33,6 +33,7 @@ session_service = get_session_service()
 # Maps request.model_type → provider key used by cost_tracker (matches llm_service._record_session_metrics)
 _EXTRACTION_PROVIDER_MAP = {
     "azure": "azure",
+    "cohere": "cohere",
     "gemini": "gcp",
     "anthropic": "gcp",
     "llama": "gcp",

@@ -16,14 +16,16 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { betterAuth } from "better-auth";
+import { getMigrations } from "better-auth/db/migration";
 import { toNodeHandler } from "better-auth/node";
 import { Pool } from "pg";
 
 // ---------- Shared DB Pool ----------
 
+const useSSL = process.env.DATABASE_URL?.includes("azure.com") || process.env.DATABASE_URL?.includes("sslmode=require");
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: useSSL ? { rejectUnauthorized: false } : false,
 });
 
 function getAllowedEmails(): Set<string> {
@@ -155,10 +157,23 @@ app.get("/api/auth/validate", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`✅ Better Auth sidecar running on http://localhost:${PORT}`);
-  console.log(`   Auth endpoints: http://localhost:${PORT}/api/auth/*`);
-  console.log(
-    `   GitHub OAuth: ${process.env.GITHUB_CLIENT_ID ? "ENABLED" : "DISABLED (no credentials)"}`
-  );
+
+async function start() {
+  console.log("[Migration] Running Better Auth database migrations...");
+  const { runMigrations } = await getMigrations((auth as any).options);
+  await runMigrations();
+  console.log("[Migration] Done.");
+
+  app.listen(PORT, () => {
+    console.log(`✅ Better Auth sidecar running on http://localhost:${PORT}`);
+    console.log(`   Auth endpoints: http://localhost:${PORT}/api/auth/*`);
+    console.log(
+      `   GitHub OAuth: ${process.env.GITHUB_CLIENT_ID ? "ENABLED" : "DISABLED (no credentials)"}`
+    );
+  });
+}
+
+start().catch((err) => {
+  console.error("[Startup] Fatal error:", err);
+  process.exit(1);
 });
