@@ -281,10 +281,14 @@ export function TablesGallery({
   // Generate array of table numbers [1, 2, 3, ..., tablesCount]
   const tableNumbers = Array.from({ length: tablesCount }, (_, i) => i + 1);
 
-  const fetchTableHtml = async (tableNumber: number): Promise<string | null> => {
+  const fetchTableHtml = async (
+    tableNumber: number
+  ): Promise<string | null> => {
     const token = await getValidToken();
     const url = `/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!response.ok) return null;
     return response.text();
   };
