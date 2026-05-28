@@ -228,7 +228,7 @@ export default function App() {
     window.location.hash.includes("access_token");
 
   const [currentStep, setCurrentStep] = useState<Step>(
-    isAuthCallback ? "auth_callback" : "chat"
+    isAuthCallback ? "auth_callback" : "upload"
   );
   // Ref that always holds the current step — used in the onAuthStateChange closure
   // (which has [] deps and captures the initial value) to avoid stale closure bugs.
@@ -240,7 +240,7 @@ export default function App() {
   // Tracks the last workflow step before jumping to a tool overlay (templates/groups/history/executive).
   // Used so Back buttons on those pages return to the right place.
   const [previousWorkflowStep, setPreviousWorkflowStep] =
-    useState<Step>("chat");
+    useState<Step>("upload");
 
   // Track which workflow step currently has an in-flight operation
   const [inFlightStep, setInFlightStep] = useState<Step | null>(null);
@@ -409,7 +409,7 @@ export default function App() {
         // If we have a session and we're on callback, redirect to main app
         if (session && isAuthCallback) {
           window.history.replaceState({}, document.title, "/");
-          setCurrentStep("chat");
+          setCurrentStep("upload");
         }
       })
       .catch(() => {
@@ -541,7 +541,7 @@ export default function App() {
   const handleAuthSuccess = useCallback(() => {
     // Clean up URL
     window.history.replaceState({}, document.title, "/");
-    setCurrentStep("chat");
+    setCurrentStep("upload");
   }, []);
 
   const handleAuthError = useCallback((error: string) => {
