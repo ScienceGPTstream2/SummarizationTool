@@ -743,7 +743,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             </div>
             <div className="text-center space-y-1.5">
               <h2 className="text-2xl font-semibold tracking-tight">
-                How can I help??
+                How can I help?
               </h2>
               <p className="text-muted-foreground text-sm max-w-xs leading-relaxed">
                 Ask me anything, or drop a document to chat about its contents.
