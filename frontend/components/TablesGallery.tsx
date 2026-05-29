@@ -11,8 +11,10 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 // import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
-import { Table as TableIcon, ZoomIn, Loader2 } from "lucide-react";
+import { Button } from "./ui/button";
+import { Table as TableIcon, ZoomIn, Loader2, Download } from "lucide-react";
 import { getValidToken } from "../utils/authUtils";
+import { downloadFile } from "./ExportUtils";
 
 // Component to lazy load and display table HTML
 function TablePreview({
@@ -269,6 +271,8 @@ export function TablesGallery({
   tablesCount,
 }: TablesGalleryProps) {
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [isDownloadingSingle, setIsDownloadingSingle] = useState(false);
 
   if (!tablesCount || tablesCount === 0) {
     return null;
@@ -277,14 +281,66 @@ export function TablesGallery({
   // Generate array of table numbers [1, 2, 3, ..., tablesCount]
   const tableNumbers = Array.from({ length: tablesCount }, (_, i) => i + 1);
 
+  const fetchTableHtml = async (
+    tableNumber: number
+  ): Promise<string | null> => {
+    const token = await getValidToken();
+    const url = `/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return null;
+    return response.text();
+  };
+
+  const handleDownloadSingle = async (tableNumber: number) => {
+    setIsDownloadingSingle(true);
+    try {
+      const html = await fetchTableHtml(tableNumber);
+      if (html) downloadFile(html, `table-${tableNumber}.html`, "text/html");
+    } finally {
+      setIsDownloadingSingle(false);
+    }
+  };
+
+  const handleDownloadAll = async () => {
+    setIsDownloadingAll(true);
+    try {
+      const parts: string[] = [];
+      for (let i = 1; i <= tablesCount; i++) {
+        const html = await fetchTableHtml(i);
+        if (html) parts.push(`<h2>Table ${i}</h2>\n${html}`);
+      }
+      const combined = `<!DOCTYPE html>\n<html>\n<head><meta charset="utf-8"><title>Extracted Tables</title></head>\n<body>\n${parts.join("\n\n")}\n</body>\n</html>`;
+      downloadFile(combined, "all-tables.html", "text/html");
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
   return (
     <>
       <Card className="border-gray-200">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TableIcon className="h-5 w-5" />
-            Extracted Tables ({tablesCount})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TableIcon className="h-5 w-5" />
+              Extracted Tables ({tablesCount})
+            </CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadAll}
+              disabled={isDownloadingAll}
+            >
+              {isDownloadingAll ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              Download All Tables
+            </Button>
+          </div>
           <CardDescription>
             Tables detected and extracted from the document in HTML format
           </CardDescription>
@@ -354,17 +410,32 @@ export function TablesGallery({
               </div>
 
               {/* Metadata */}
-              <div className="flex items-center gap-6 text-sm text-muted-foreground border-t pt-3">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Table:</span>
-                  <code className="bg-muted px-2 py-1 rounded">
-                    table-{selectedTable}.html
-                  </code>
+              <div className="flex items-center justify-between border-t pt-3">
+                <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Table:</span>
+                    <code className="bg-muted px-2 py-1 rounded">
+                      table-{selectedTable}.html
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Format:</span>
+                    <span>HTML</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Format:</span>
-                  <span>HTML</span>
-                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownloadSingle(selectedTable)}
+                  disabled={isDownloadingSingle}
+                >
+                  {isDownloadingSingle ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download Table
+                </Button>
               </div>
             </div>
           )}

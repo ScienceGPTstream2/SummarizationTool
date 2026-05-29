@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">LLM provider routing workflow</title>
+  <desc id="desc">LLMService routes extraction, paragraph generation, and figure summary requests to provider clients, wraps calls with timeouts, normalizes responses, and records session metrics.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .section { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .caller { fill: #e0f2fe; }
+      .service { fill: #ede9fe; }
+      .guard { fill: #fef3c7; }
+      .provider { fill: #fee2e2; }
+      .metric { fill: #dcfce7; }
+      .contract { fill: #e2e8f0; }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.7; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="760" />
+  <text class="title" x="44" y="48">LLM Provider Routing</text>
+  <text class="subtitle" x="44" y="74">A single service facade keeps router code stable while provider clients handle model-specific API details.</text>
+
+  <rect class="lane" x="32" y="108" width="1216" height="104" />
+  <text class="section" x="52" y="136">CALLERS</text>
+  <rect class="card caller" x="76" y="158" width="225" height="38" />
+  <text class="box-text" x="104" y="182">entity extraction router</text>
+  <rect class="card caller" x="344" y="158" width="225" height="38" />
+  <text class="box-text" x="371" y="182">paragraph generator</text>
+  <rect class="card caller" x="612" y="158" width="225" height="38" />
+  <text class="box-text" x="641" y="182">figure summary generation</text>
+  <rect class="card caller" x="880" y="158" width="225" height="38" />
+  <text class="box-text" x="907" y="182">chat and future workflows</text>
+
+  <rect class="lane" x="32" y="238" width="1216" height="170" />
+  <text class="section" x="52" y="266">SERVICE FACADE</text>
+  <rect class="card service" x="78" y="294" width="250" height="72" />
+  <text class="box-title" x="100" y="317">LLMService</text>
+  <text class="box-text" x="100" y="337">extract_entities_from_markdown()</text>
+  <text class="box-text" x="100" y="356">generate_paragraph(), image content</text>
+  <rect class="card guard" x="382" y="294" width="250" height="72" />
+  <text class="box-title" x="404" y="317">Timeout wrapper</text>
+  <text class="box-text" x="404" y="337">240s default, provider overrides</text>
+  <text class="box-text" x="404" y="356">timeout log file for diagnostics</text>
+  <rect class="card guard" x="686" y="294" width="250" height="72" />
+  <text class="box-title" x="708" y="317">Response normalization</text>
+  <text class="box-text" x="708" y="337">success, content, answer, references</text>
+  <text class="box-text" x="708" y="356">meta, token usage, raw payload</text>
+  <rect class="card metric" x="990" y="294" width="190" height="72" />
+  <text class="box-title" x="1012" y="317">CostTracker</text>
+  <text class="box-text" x="1012" y="337">records provider/model</text>
+  <text class="box-text" x="1012" y="356">tokens, latency, cost</text>
+  <path class="arrow" d="M604 196 C500 224 300 248 203 294" />
+  <path class="arrow" d="M328 330 H382" />
+  <path class="arrow" d="M632 330 H686" />
+  <path class="soft" d="M936 330 H990" />
+
+  <rect class="lane" x="32" y="434" width="1216" height="190" />
+  <text class="section" x="52" y="462">PROVIDER CLIENTS</text>
+  <rect class="card provider" x="64" y="492" width="170" height="74" />
+  <text class="box-title" x="84" y="515">Azure</text>
+  <text class="box-text" x="84" y="535">OpenAI SDK or REST</text>
+  <text class="box-text" x="84" y="554">3 retry attempts</text>
+  <rect class="card provider" x="258" y="492" width="170" height="74" />
+  <text class="box-title" x="278" y="515">Gemini</text>
+  <text class="box-text" x="278" y="535">Vertex AI endpoint</text>
+  <text class="box-text" x="278" y="554">JSON schema support</text>
+  <rect class="card provider" x="452" y="492" width="170" height="74" />
+  <text class="box-title" x="472" y="515">Anthropic</text>
+  <text class="box-text" x="472" y="535">Claude via Vertex</text>
+  <text class="box-text" x="472" y="554">prompt-enforced JSON</text>
+  <rect class="card provider" x="646" y="492" width="170" height="74" />
+  <text class="box-title" x="666" y="515">Llama</text>
+  <text class="box-text" x="666" y="535">Vertex MaaS</text>
+  <text class="box-text" x="666" y="554">primary plus fallback</text>
+  <rect class="card provider" x="840" y="492" width="170" height="74" />
+  <text class="box-title" x="860" y="515">Macbook</text>
+  <text class="box-text" x="860" y="535">Ollama-compatible</text>
+  <text class="box-text" x="860" y="554">FIFO single worker</text>
+  <rect class="card provider" x="1034" y="492" width="170" height="74" />
+  <text class="box-title" x="1054" y="515">vLLM</text>
+  <text class="box-text" x="1054" y="535">OpenAI-compatible</text>
+  <text class="box-text" x="1054" y="554">600s timeout</text>
+  <path class="arrow" d="M811 366 C811 420 149 430 149 492" />
+  <path class="arrow" d="M811 366 C811 420 343 430 343 492" />
+  <path class="arrow" d="M811 366 C811 420 537 430 537 492" />
+  <path class="arrow" d="M811 366 C811 420 731 430 731 492" />
+  <path class="arrow" d="M811 366 C811 420 925 430 925 492" />
+  <path class="arrow" d="M811 366 C811 420 1119 430 1119 492" />
+
+  <rect class="lane" x="32" y="650" width="1216" height="72" />
+  <text class="section" x="52" y="678">COMMON CONTRACT BACK TO ROUTERS</text>
+  <rect class="card contract" x="224" y="684" width="180" height="28" />
+  <text class="small" x="246" y="703">success / error</text>
+  <rect class="card contract" x="426" y="684" width="180" height="28" />
+  <text class="small" x="448" y="703">answer / content</text>
+  <rect class="card contract" x="628" y="684" width="180" height="28" />
+  <text class="small" x="650" y="703">references / raw</text>
+  <rect class="card contract" x="830" y="684" width="230" height="28" />
+  <text class="small" x="852" y="703">meta: model, tokens, duration</text>
+  <path class="soft" d="M638 566 C638 620 638 650 638 684" />
+</svg>

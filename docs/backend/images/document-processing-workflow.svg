@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">Document upload and processing workflow</title>
+  <desc id="desc">Workflow from PDF upload through validation, SHA-256 deduplication, blob storage, processor selection, artifact generation, synchronization, database updates, and document view creation.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .step-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .step-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .label { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .input { fill: #dbeafe; }
+      .api { fill: #e0f2fe; }
+      .decision { fill: #fef3c7; }
+      .processor { fill: #fee2e2; }
+      .artifact { fill: #dcfce7; }
+      .data { fill: #fae8ff; }
+      .output { fill: #e2e8f0; }
+      .rail { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.7; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="860" />
+  <text class="title" x="44" y="48">Document Upload and Processing Workflow</text>
+  <text class="subtitle" x="44" y="74">Files are content-addressed by SHA-256; parser outputs are persisted to blob storage and cached under /tmp for the current container.</text>
+
+  <rect class="rail" x="32" y="108" width="1216" height="174" />
+  <text class="label" x="52" y="136">UPLOAD AND DEDUPLICATION</text>
+  <rect class="card input" x="64" y="162" width="180" height="72" />
+  <text class="step-title" x="84" y="185">PDF upload</text>
+  <text class="step-text" x="84" y="205">POST /api/upload</text>
+  <text class="step-text" x="84" y="224">multipart file</text>
+  <rect class="card api" x="286" y="162" width="190" height="72" />
+  <text class="step-title" x="306" y="185">Validate file</text>
+  <text class="step-text" x="306" y="205">PDF extension and magic</text>
+  <text class="step-text" x="306" y="224">20 MB body limit</text>
+  <rect class="card decision" x="518" y="162" width="190" height="72" />
+  <text class="step-title" x="538" y="185">Compute hash</text>
+  <text class="step-text" x="538" y="205">SHA-256 digest</text>
+  <text class="step-text" x="538" y="224">stable file id</text>
+  <rect class="card data" x="750" y="142" width="190" height="112" />
+  <text class="step-title" x="770" y="165">Azure Blob</text>
+  <text class="step-text" x="770" y="185">global/{hash}/original.pdf</text>
+  <text class="step-text" x="770" y="204">global/{hash}/metadata.json</text>
+  <text class="step-text" x="770" y="223">dedupe if already present</text>
+  <rect class="card data" x="982" y="162" width="190" height="72" />
+  <text class="step-title" x="1002" y="185">Document row</text>
+  <text class="step-text" x="1002" y="205">best-effort DB register</text>
+  <text class="step-text" x="1002" y="224">when user is known</text>
+  <path class="arrow" d="M244 198 H286" />
+  <path class="arrow" d="M476 198 H518" />
+  <path class="arrow" d="M708 198 H750" />
+  <path class="soft" d="M940 198 H982" />
+
+  <rect class="rail" x="32" y="308" width="1216" height="210" />
+  <text class="label" x="52" y="336">PROCESSING REQUEST</text>
+  <rect class="card api" x="64" y="374" width="220" height="82" />
+  <text class="step-title" x="84" y="397">Process endpoint</text>
+  <text class="step-text" x="84" y="417">POST /api/documents/process</text>
+  <text class="step-text" x="84" y="436">file/{file_hash}</text>
+  <rect class="card decision" x="330" y="374" width="220" height="82" />
+  <text class="step-title" x="350" y="397">Strict cache check</text>
+  <text class="step-text" x="350" y="417">processed/{processor}/document.md</text>
+  <text class="step-text" x="350" y="436">hit returns cached view</text>
+  <rect class="card output" x="598" y="336" width="220" height="82" />
+  <text class="step-title" x="618" y="359">Cache hit path</text>
+  <text class="step-text" x="618" y="379">read metadata and markdown</text>
+  <text class="step-text" x="618" y="398">rebuild document_view</text>
+  <rect class="card api" x="598" y="430" width="220" height="72" />
+  <text class="step-title" x="618" y="453">Cache miss path</text>
+  <text class="step-text" x="618" y="473">download original to /tmp</text>
+  <text class="step-text" x="618" y="492">prepare output directory</text>
+  <rect class="card decision" x="866" y="374" width="260" height="82" />
+  <text class="step-title" x="886" y="397">Processor selection</text>
+  <text class="step-text" x="886" y="417">auto prefers Azure DI when available</text>
+  <text class="step-text" x="886" y="436">otherwise falls back to Docling</text>
+  <path class="arrow" d="M284 415 H330" />
+  <path class="arrow" d="M550 399 C570 380 580 377 598 377" />
+  <path class="arrow" d="M550 431 C570 456 580 466 598 466" />
+  <path class="arrow" d="M818 466 C838 438 846 415 866 415" />
+
+  <rect class="rail" x="32" y="544" width="1216" height="172" />
+  <text class="label" x="52" y="572">PARSER EXECUTION AND ARTIFACT TREE</text>
+  <rect class="card processor" x="72" y="608" width="230" height="74" />
+  <text class="step-title" x="92" y="631">Azure Document Intelligence</text>
+  <text class="step-text" x="92" y="651">markdown, raw analysis</text>
+  <text class="step-text" x="92" y="670">figures and tables</text>
+  <rect class="card processor" x="340" y="608" width="230" height="74" />
+  <text class="step-title" x="360" y="631">Docling</text>
+  <text class="step-text" x="360" y="651">remote client or local worker</text>
+  <text class="step-text" x="360" y="670">VRAM guard on local path</text>
+  <rect class="card artifact" x="626" y="586" width="260" height="118" />
+  <text class="step-title" x="646" y="609">Local output in /tmp</text>
+  <text class="step-text" x="646" y="629">document.md</text>
+  <text class="step-text" x="646" y="648">raw_analysis.json</text>
+  <text class="step-text" x="646" y="667">metadata.json</text>
+  <text class="step-text" x="646" y="686">figures/* and tables/*</text>
+  <rect class="card data" x="944" y="586" width="250" height="118" />
+  <text class="step-title" x="964" y="609">Persist processed tree</text>
+  <text class="step-text" x="964" y="629">sync to blob prefix</text>
+  <text class="step-text" x="964" y="648">global/{hash}/processed/{processor}</text>
+  <text class="step-text" x="964" y="667">warm /tmp cache on reads</text>
+  <text class="step-text" x="964" y="686">cross-replica persistence</text>
+  <path class="arrow" d="M996 456 V545 C996 575 930 608 886 626" />
+  <path class="soft" d="M302 645 H340" />
+  <path class="arrow" d="M570 645 H626" />
+  <path class="arrow" d="M886 645 H944" />
+
+  <rect class="rail" x="32" y="742" width="1216" height="76" />
+  <text class="label" x="52" y="770">BACKEND OUTPUT CONTRACT</text>
+  <rect class="card data" x="264" y="772" width="210" height="34" />
+  <text class="step-text" x="286" y="794">Document DB metadata update</text>
+  <rect class="card output" x="526" y="772" width="240" height="34" />
+  <text class="step-text" x="548" y="794">canonical document_view payload</text>
+  <rect class="card output" x="818" y="772" width="230" height="34" />
+  <text class="step-text" x="840" y="794">restore-ready uploadedFiles state</text>
+  <path class="arrow" d="M1069 704 V742 C1069 770 768 790 766 790" />
+  <path class="soft" d="M944 704 C850 752 620 790 474 790" />
+</svg>

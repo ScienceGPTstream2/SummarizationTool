@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="850" viewBox="0 0 1280 850" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation workflow</title>
+  <desc id="desc">LLM-as-a-judge evaluation workflow showing synchronous evaluation, batch jobs, provider adapters, metrics, concurrency controls, persistence, cancellation, and result storage.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .section { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .api { fill: #e0f2fe; }
+      .service { fill: #ede9fe; }
+      .metric { fill: #dcfce7; }
+      .job { fill: #fef3c7; }
+      .provider { fill: #fee2e2; }
+      .data { fill: #fae8ff; }
+      .out { fill: #e2e8f0; }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.7; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="850" />
+  <text class="title" x="44" y="48">Evaluation Workflow</text>
+  <text class="subtitle" x="44" y="74">Evaluation can run synchronously or as a persisted background job; both paths converge on the same judge-model service and metrics.</text>
+
+  <rect class="lane" x="32" y="108" width="1216" height="122" />
+  <text class="section" x="52" y="136">ENTRYPOINTS</text>
+  <rect class="card api" x="74" y="160" width="240" height="48" />
+  <text class="box-title" x="94" y="183">Synchronous endpoints</text>
+  <text class="box-text" x="94" y="202">evaluate, batch, custom</text>
+  <rect class="card api" x="370" y="160" width="240" height="48" />
+  <text class="box-title" x="390" y="183">Background jobs</text>
+  <text class="box-text" x="390" y="202">POST /api/evaluations/jobs</text>
+  <rect class="card api" x="666" y="160" width="240" height="48" />
+  <text class="box-title" x="686" y="183">Polling and cancel</text>
+  <text class="box-text" x="686" y="202">GET job, POST cancel</text>
+  <rect class="card out" x="962" y="160" width="200" height="48" />
+  <text class="box-title" x="982" y="183">Frontend status</text>
+  <text class="box-text" x="982" y="202">progress, errors, scores</text>
+
+  <rect class="lane" x="32" y="256" width="1216" height="180" />
+  <text class="section" x="52" y="284">SCORING SERVICE</text>
+  <rect class="card service" x="84" y="314" width="230" height="76" />
+  <text class="box-title" x="104" y="337">EvaluationService</text>
+  <text class="box-text" x="104" y="357">create_evaluation_model()</text>
+  <text class="box-text" x="104" y="376">evaluate_extraction()</text>
+  <rect class="card metric" x="370" y="314" width="230" height="76" />
+  <text class="box-title" x="390" y="337">Metric factories</text>
+  <text class="box-text" x="390" y="357">correctness, completeness</text>
+  <text class="box-text" x="390" y="376">relevance, safety, custom</text>
+  <rect class="card metric" x="656" y="314" width="230" height="76" />
+  <text class="box-title" x="676" y="337">Combined scoring</text>
+  <text class="box-text" x="676" y="357">one JSON judge prompt</text>
+  <text class="box-text" x="676" y="376">fallback to per-metric GEval</text>
+  <rect class="card provider" x="942" y="314" width="230" height="76" />
+  <text class="box-title" x="962" y="337">Judge adapters</text>
+  <text class="box-text" x="962" y="357">Azure, Vertex/Gemini</text>
+  <text class="box-text" x="962" y="376">Anthropic Vertex</text>
+  <path class="arrow" d="M194 208 C194 252 199 278 199 314" />
+  <path class="arrow" d="M314 352 H370" />
+  <path class="arrow" d="M600 352 H656" />
+  <path class="arrow" d="M886 352 H942" />
+
+  <rect class="lane" x="32" y="462" width="1216" height="166" />
+  <text class="section" x="52" y="490">BACKGROUND JOB ORCHESTRATION</text>
+  <rect class="card job" x="72" y="518" width="210" height="66" />
+  <text class="box-title" x="92" y="541">EvalJob</text>
+  <text class="box-text" x="92" y="561">tasks x providers flattened</text>
+  <rect class="card job" x="330" y="518" width="210" height="66" />
+  <text class="box-title" x="350" y="541">Concurrency gates</text>
+  <text class="box-text" x="350" y="561">global 30 plus per-job slots</text>
+  <rect class="card job" x="588" y="518" width="210" height="66" />
+  <text class="box-title" x="608" y="541">Durable status</text>
+  <text class="box-text" x="608" y="561">eval_jobs DB record</text>
+  <rect class="card job" x="846" y="518" width="210" height="66" />
+  <text class="box-title" x="866" y="541">Cancellation</text>
+  <text class="box-text" x="866" y="561">cancel live tasks or mark DB</text>
+  <path class="arrow" d="M490 208 C490 354 177 422 177 518" />
+  <path class="arrow" d="M282 551 H330" />
+  <path class="arrow" d="M540 551 H588" />
+  <path class="arrow" d="M798 551 H846" />
+  <path class="soft" d="M693 518 C790 450 950 420 1057 390" />
+
+  <rect class="lane" x="32" y="654" width="1216" height="124" />
+  <text class="section" x="52" y="682">RESULTS, COST, AND SESSION PERSISTENCE</text>
+  <rect class="card data" x="76" y="708" width="230" height="46" />
+  <text class="box-title" x="96" y="731">EvaluationResultStorage</text>
+  <text class="box-text" x="96" y="749">JSON files for batch outputs</text>
+  <rect class="card data" x="356" y="708" width="230" height="46" />
+  <text class="box-title" x="376" y="731">SessionService</text>
+  <text class="box-text" x="376" y="749">persist scores to evaluation_results</text>
+  <rect class="card data" x="636" y="708" width="230" height="46" />
+  <text class="box-title" x="656" y="731">CostTracker</text>
+  <text class="box-text" x="656" y="749">judge-call cost and latency</text>
+  <rect class="card out" x="916" y="708" width="230" height="46" />
+  <text class="box-title" x="936" y="731">API response/status</text>
+  <text class="box-text" x="936" y="749">aggregate score and metric reasons</text>
+  <path class="arrow" d="M1057 390 C1057 626 191 650 191 708" />
+  <path class="arrow" d="M693 584 C666 650 471 670 471 708" />
+  <path class="soft" d="M1057 390 C1084 548 822 662 751 708" />
+  <path class="arrow" d="M866 731 H916" />
+</svg>
