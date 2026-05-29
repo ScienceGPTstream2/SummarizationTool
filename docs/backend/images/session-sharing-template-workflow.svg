@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="850" viewBox="0 0 1280 850" role="img" aria-labelledby="title desc">
+  <title id="title">Session sharing and template workflow</title>
+  <desc id="desc">Workflow diagram for session persistence, restore-view construction, group-based sharing, and prompt template/folder authorization and versioning.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .section { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .api { fill: #e0f2fe; }
+      .session { fill: #dcfce7; }
+      .group { fill: #ede9fe; }
+      .template { fill: #fae8ff; }
+      .data { fill: #fef3c7; }
+      .out { fill: #e2e8f0; }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.7; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="850" />
+  <text class="title" x="44" y="48">Sessions, Sharing, and Templates</text>
+  <text class="subtitle" x="44" y="74">Workflow state, collaborative visibility, and reusable prompts are separate service boundaries that meet through user and group authorization.</text>
+
+  <rect class="lane" x="32" y="108" width="1216" height="162" />
+  <text class="section" x="52" y="136">SESSION LIFECYCLE AND RESTORE</text>
+  <rect class="card api" x="70" y="158" width="190" height="58" />
+  <text class="box-title" x="90" y="181">Session API</text>
+  <text class="box-text" x="90" y="200">create, list, update, delete</text>
+  <rect class="card session" x="316" y="158" width="210" height="58" />
+  <text class="box-title" x="336" y="181">SessionService</text>
+  <text class="box-text" x="336" y="200">DB-to-Pydantic aggregate</text>
+  <rect class="card data" x="582" y="158" width="210" height="58" />
+  <text class="box-title" x="602" y="181">Workflow rows</text>
+  <text class="box-text" x="602" y="200">session, docs, extractions, evals</text>
+  <rect class="card session" x="848" y="158" width="210" height="58" />
+  <text class="box-title" x="868" y="181">Restore view</text>
+  <text class="box-text" x="868" y="200">build_document_view per file</text>
+  <path class="arrow" d="M260 187 H316" />
+  <path class="arrow" d="M526 187 H582" />
+  <path class="arrow" d="M792 187 H848" />
+
+  <rect class="lane" x="32" y="296" width="1216" height="174" />
+  <text class="section" x="52" y="324">GROUP SHARING</text>
+  <rect class="card group" x="70" y="352" width="210" height="72" />
+  <text class="box-title" x="90" y="375">GroupService</text>
+  <text class="box-text" x="90" y="395">create group</text>
+  <text class="box-text" x="90" y="414">add/update/remove members</text>
+  <rect class="card group" x="336" y="352" width="210" height="72" />
+  <text class="box-title" x="356" y="375">Role checks</text>
+  <text class="box-text" x="356" y="395">owner, admin, member, viewer</text>
+  <text class="box-text" x="356" y="414">system admin bypass</text>
+  <rect class="card session" x="602" y="352" width="210" height="72" />
+  <text class="box-title" x="622" y="375">Share session</text>
+  <text class="box-text" x="622" y="395">set shared_with_group_id</text>
+  <text class="box-text" x="622" y="414">shared_by and shared_at</text>
+  <rect class="card out" x="868" y="352" width="210" height="72" />
+  <text class="box-title" x="888" y="375">Shared read</text>
+  <text class="box-text" x="888" y="395">membership is enough to view</text>
+  <text class="box-text" x="888" y="414">ownership still controls edits</text>
+  <path class="arrow" d="M280 388 H336" />
+  <path class="arrow" d="M546 388 H602" />
+  <path class="arrow" d="M812 388 H868" />
+  <path class="soft" d="M687 216 C687 286 707 320 707 352" />
+
+  <rect class="lane" x="32" y="496" width="1216" height="220" />
+  <text class="section" x="52" y="524">TEMPLATE AND FOLDER WORKSPACE</text>
+  <rect class="card template" x="70" y="558" width="205" height="76" />
+  <text class="box-title" x="90" y="581">Template API</text>
+  <text class="box-text" x="90" y="601">CRUD, fork, scope change</text>
+  <text class="box-text" x="90" y="620">permissions, versions</text>
+  <rect class="card template" x="320" y="558" width="205" height="76" />
+  <text class="box-title" x="340" y="581">TemplateService</text>
+  <text class="box-text" x="340" y="601">read/edit/owner checks</text>
+  <text class="box-text" x="340" y="620">immutability guard</text>
+  <rect class="card template" x="570" y="558" width="205" height="76" />
+  <text class="box-title" x="590" y="581">Versioning</text>
+  <text class="box-text" x="590" y="601">snapshot before mutation</text>
+  <text class="box-text" x="590" y="620">revert creates new current version</text>
+  <rect class="card template" x="820" y="558" width="205" height="76" />
+  <text class="box-title" x="840" y="581">FolderService</text>
+  <text class="box-text" x="840" y="601">scope-compatible hierarchy</text>
+  <text class="box-text" x="840" y="620">no delete while non-empty</text>
+  <rect class="card data" x="320" y="660" width="705" height="34" />
+  <text class="box-text" x="342" y="682">Tables: prompt_templates, template_versions, template_permissions, template_folders</text>
+  <path class="arrow" d="M275 596 H320" />
+  <path class="arrow" d="M525 596 H570" />
+  <path class="arrow" d="M775 596 H820" />
+  <path class="soft" d="M423 634 V660" />
+  <path class="soft" d="M672 634 V660" />
+  <path class="soft" d="M922 634 V660" />
+  <path class="soft" d="M441 424 C441 480 423 520 423 558" />
+
+  <rect class="lane" x="32" y="742" width="1216" height="72" />
+  <text class="section" x="52" y="770">SHARED AUTHORIZATION PRINCIPLE</text>
+  <text class="small" x="74" y="798">Sessions are owned by users and optionally shared to groups. Templates are scoped to user, group, or global workspaces; explicit permissions can override reads/writes, but immutability always blocks edits.</text>
+</svg>
