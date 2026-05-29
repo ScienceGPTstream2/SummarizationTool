@@ -22,10 +22,23 @@ import { Pool } from "pg";
 
 // ---------- Shared DB Pool ----------
 
-const useSSL = process.env.DATABASE_URL?.includes("azure.com") || process.env.DATABASE_URL?.includes("sslmode=require");
+function databaseRequiresSSL(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "azure.com" || host.endsWith(".azure.com")) return true;
+    if (parsed.searchParams.get("sslmode") === "require") return true;
+  } catch {
+    // Non-standard connection string — fall back to explicit sslmode check only
+    if (/[?&]sslmode=require(&|$)/.test(url)) return true;
+  }
+  return false;
+}
+
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: useSSL ? { rejectUnauthorized: false } : false,
+  ssl: databaseRequiresSSL(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : false,
 });
 
 function getAllowedEmails(): Set<string> {
