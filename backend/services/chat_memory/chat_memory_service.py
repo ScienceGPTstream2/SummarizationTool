@@ -251,7 +251,9 @@ class ChatMemoryService:
                     as_node="generate",
                 )
                 persisted_state = await graph.aget_state(persisted_config)
-                response = self._extract_ai_response(persisted_state.values.get("messages", []))
+                response = self._extract_ai_response(
+                    persisted_state.values.get("messages", [])
+                )
                 return {
                     "success": True,
                     "response": response,
