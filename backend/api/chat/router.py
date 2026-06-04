@@ -58,6 +58,7 @@ async def chat_query(
     try:
         result = await get_chat_memory_service().invoke(
             ChatMemoryRequest(
+                user_id=current_user["id"],
                 chat_session_id=request.chat_session_id,
                 query=request.query,
                 model_type=request.model_type,

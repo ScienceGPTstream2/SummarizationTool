@@ -59,6 +59,7 @@ except ImportError:
 
 @dataclass
 class ChatMemoryRequest:
+    user_id: str
     chat_session_id: str
     query: str
     model_type: str
@@ -206,10 +207,14 @@ class ChatMemoryService:
             self._session_locks[chat_session_id] = lock
         return lock
 
+    def _build_thread_id(self, user_id: str, chat_session_id: str) -> str:
+        return f"user:{user_id}:chat:{chat_session_id}"
+
     async def invoke(self, request: ChatMemoryRequest) -> Dict[str, Any]:
+        thread_id = self._build_thread_id(request.user_id, request.chat_session_id)
         config = {
             "configurable": {
-                "thread_id": request.chat_session_id,
+                "thread_id": thread_id,
                 "model_type": request.model_type,
                 "model_id": request.model_id,
                 "deployment": request.deployment,
@@ -218,7 +223,7 @@ class ChatMemoryService:
             }
         }
         attachment = self._build_attachment(request.attached_session_id)
-        lock = self._get_session_lock(request.chat_session_id)
+        lock = self._get_session_lock(thread_id)
         graph = await self._ensure_graph()
 
         try:
