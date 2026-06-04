@@ -49,9 +49,7 @@ async def chat_query(
         )
         if attached_context is None:
             attached_session_id = None
-            attached_session_warning = (
-                "Attached session not found or has no processed document content. Continuing without attachment."
-            )
+            attached_session_warning = "Attached session not found or has no processed document content. Continuing without attachment."
         else:
             document_context = attached_context
 

@@ -19,6 +19,7 @@ GENERIC_MODEL_ERROR_MESSAGE = "The model call failed. Please try again."
 class ModelProviderError(Exception):
     pass
 
+
 try:
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
     from langchain_core.runnables import RunnableConfig
@@ -87,16 +88,22 @@ class ChatMemoryService:
         self._async_checkpointer_context = None
         self._did_register_atexit_close = False
         self._initialization_lock = asyncio.Lock()
-        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         self._ensure_langgraph_dependencies(require_in_memory=use_memory_checkpointer)
         self.checkpointer = checkpointer
-        self.graph = self._build_graph(checkpointer) if checkpointer is not None else None
+        self.graph = (
+            self._build_graph(checkpointer) if checkpointer is not None else None
+        )
 
     def _ensure_langgraph_dependencies(self, require_in_memory: bool = False) -> None:
         import_errors: List[str] = []
 
         if LANGCHAIN_MESSAGES_IMPORT_ERROR is not None:
-            import_errors.append(f"langchain_core.messages: {LANGCHAIN_MESSAGES_IMPORT_ERROR}")
+            import_errors.append(
+                f"langchain_core.messages: {LANGCHAIN_MESSAGES_IMPORT_ERROR}"
+            )
         if LANGGRAPH_GRAPH_IMPORT_ERROR is not None:
             import_errors.append(f"langgraph.graph: {LANGGRAPH_GRAPH_IMPORT_ERROR}")
         if require_in_memory and LANGGRAPH_MEMORY_IMPORT_ERROR is not None:
@@ -249,13 +256,17 @@ class ChatMemoryService:
                     as_node="generate",
                 )
                 persisted_state = await graph.aget_state(persisted_config)
-                response = self._extract_ai_response(persisted_state.values.get("messages", []))
+                response = self._extract_ai_response(
+                    persisted_state.values.get("messages", [])
+                )
                 persisted_attachment = persisted_state.values.get("attachment") or {}
                 return {
                     "success": True,
                     "response": response,
                     "chat_session_id": request.chat_session_id,
-                    "attached_session_id": persisted_attachment.get("attached_session_id"),
+                    "attached_session_id": persisted_attachment.get(
+                        "attached_session_id"
+                    ),
                 }
         except ModelProviderError:
             return {
@@ -294,7 +305,9 @@ class ChatMemoryService:
         except Exception as exc:
             raise ModelProviderError(GENERIC_MODEL_ERROR_MESSAGE) from exc
         if not result.get("success"):
-            raise ModelProviderError(str(result.get("error", GENERIC_MODEL_ERROR_MESSAGE)))
+            raise ModelProviderError(
+                str(result.get("error", GENERIC_MODEL_ERROR_MESSAGE))
+            )
 
         return {"messages": [AIMessage(content=str(result.get("content", "")))]}
 
@@ -340,7 +353,9 @@ class ChatMemoryService:
             "Answer questions clearly and concisely using remembered conversation when relevant."
         )
 
-    def _build_attachment(self, attached_session_id: Optional[str]) -> Optional[Dict[str, Optional[str]]]:
+    def _build_attachment(
+        self, attached_session_id: Optional[str]
+    ) -> Optional[Dict[str, Optional[str]]]:
         if attached_session_id is None:
             return None
         return {"attached_session_id": attached_session_id}

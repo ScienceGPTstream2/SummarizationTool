@@ -44,7 +44,9 @@ async def build_attached_session_context(
 
         block = _build_document_block(document.filename, document.file_hash, markdown)
         separator_length = len(separator) if document_blocks else 0
-        remaining_budget = MAX_ATTACHED_SESSION_CONTEXT_CHARS - current_length - separator_length
+        remaining_budget = (
+            MAX_ATTACHED_SESSION_CONTEXT_CHARS - current_length - separator_length
+        )
         if remaining_budget <= 0:
             break
 
@@ -65,7 +67,9 @@ async def build_attached_session_context(
             if len(block) > remaining_budget:
                 block = block[:remaining_budget]
                 if not block.endswith(closing_tag):
-                    content_budget = max(0, remaining_budget - len(opening_tag) - len(closing_tag))
+                    content_budget = max(
+                        0, remaining_budget - len(opening_tag) - len(closing_tag)
+                    )
                     block = opening_tag + markdown[:content_budget] + closing_tag
 
         document_blocks.append(block)
