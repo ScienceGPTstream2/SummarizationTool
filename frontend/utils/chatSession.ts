@@ -7,21 +7,6 @@ function getCryptoApi(): Crypto | undefined {
   return globalThis.crypto;
 }
 
-function createFallbackSessionId(): string {
-  const cryptoApi = getCryptoApi();
-
-  if (cryptoApi?.getRandomValues) {
-    const bytes = new Uint8Array(16);
-    cryptoApi.getRandomValues(bytes);
-    const randomHex = Array.from(bytes, (byte) =>
-      byte.toString(16).padStart(2, "0")
-    ).join("");
-    return `chat-${randomHex}`;
-  }
-
-  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function getSessionStorage(): Storage | null {
   if (typeof globalThis === "undefined" || !("sessionStorage" in globalThis)) {
     return null;
@@ -58,7 +43,20 @@ function writeStoredChatSessionId(sessionId: string): void {
 
 export function createChatSessionId(): string {
   const cryptoApi = getCryptoApi();
-  return cryptoApi?.randomUUID?.() ?? createFallbackSessionId();
+  if (cryptoApi?.randomUUID) {
+    return cryptoApi.randomUUID();
+  }
+
+  if (cryptoApi?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    const randomHex = Array.from(bytes, (byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("");
+    return `chat-${randomHex}`;
+  }
+
+  throw new Error("Secure random ID generation is unavailable.");
 }
 
 export function getOrCreateChatSessionId(): string {

@@ -30,13 +30,12 @@ import {
   pickBestFromList,
   ModelConfig,
 } from "../utils/modelSelection";
-import { authenticatedFetch, getValidToken } from "../utils/authUtils";
+import { getValidToken } from "../utils/authUtils";
 import {
   createChatSessionId,
   getOrCreateChatSessionId,
   resetChatSessionId,
 } from "../utils/chatSession";
-import { SessionSummary } from "../types/session";
 import { toast } from "./ui/sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -48,10 +47,6 @@ interface Message {
 }
 
 const MAX_DOCS = 5;
-const HISTORY_DISABLED_WITH_DOCS_TITLE =
-  "Start a new chat or remove uploaded documents before attaching history.";
-const DOC_UPLOAD_DISABLED_WITH_HISTORY_TITLE =
-  "History sessions use saved context only. Start a new chat to upload documents.";
 const REGENERATE_DISABLED_WITH_MEMORY_TITLE =
   "Regenerate is unavailable for chat memory sessions until turn replacement is supported.";
 
@@ -81,16 +76,6 @@ interface MarkdownCodeProps {
 interface ChatModelConfig extends ModelConfig {
   model_type?: string;
 }
-
-const getHistorySessionLabel = (session: SessionSummary): string => {
-  const trimmedName = session.name?.trim();
-  if (trimmedName) return trimmedName;
-
-  const firstDocumentName = session.document_names[0]?.trim();
-  if (firstDocumentName) return firstDocumentName;
-
-  return "Untitled Session";
-};
 
 // ─── Small sub-components ─────────────────────────────────────────────────────
 
@@ -349,9 +334,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const [modelsLoading, setModelsLoading] = useState(true);
 
   const [docs, setDocs] = useState<Map<string, DocEntry>>(new Map());
-  const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [attachedSessionId, setAttachedSessionId] = useState<string | null>(null);
   const [contextError, setContextError] = useState(false);
 
   const removeDoc = useCallback((tempId: string) => {
@@ -366,8 +348,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     (d) => d.status !== "error"
   ).length;
   const atDocLimit = activeDocCount >= MAX_DOCS;
-  const hasUploadedDocs = activeDocCount > 0;
-  const canAttachHistory = !hasUploadedDocs;
 
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
@@ -387,29 +367,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       })
       .catch(() => {})
       .finally(() => setModelsLoading(false));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchSessions() {
-      try {
-        setSessionsLoading(true);
-        const response = await authenticatedFetch("/api/sessions");
-        if (!response.ok) throw new Error("Failed to fetch sessions");
-        const data = await response.json();
-        if (!cancelled) setHistorySessions(data.sessions ?? []);
-      } catch {
-        if (!cancelled) setHistorySessions([]);
-      } finally {
-        if (!cancelled) setSessionsLoading(false);
-      }
-    }
-
-    fetchSessions();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────────
@@ -505,11 +462,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       const files = Array.from(e.target.files ?? []);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
-      if (attachedSessionId) {
-        toast.error(DOC_UPLOAD_DISABLED_WITH_HISTORY_TITLE);
-        return;
-      }
-
       const available =
         MAX_DOCS -
         Array.from(docs.values()).filter((d) => d.status !== "error").length;
@@ -521,7 +473,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         );
       toProcess.forEach((f) => processFile(f));
     },
-    [attachedSessionId, docs, processFile]
+    [docs, processFile]
   );
 
   // ── Drag and drop ───────────────────────────────────────────────────────────
@@ -547,11 +499,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       dragCounter.current = 0;
       setIsDragOver(false);
 
-      if (attachedSessionId) {
-        toast.error(DOC_UPLOAD_DISABLED_WITH_HISTORY_TITLE);
-        return;
-      }
-
       const files = Array.from(e.dataTransfer.files);
       const available =
         MAX_DOCS -
@@ -567,7 +514,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         );
       toProcess.forEach((f) => processFile(f));
     },
-    [attachedSessionId, docs, processFile]
+    [docs, processFile]
   );
 
   // ── Model config ─────────────────────────────────────────────────────────────
@@ -643,7 +590,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           },
           body: JSON.stringify({
             chat_session_id: requestChatSessionId,
-            attached_session_id: attachedSessionId,
             query,
             document_markdown: documentMarkdown,
             model_type: modelConfig.modelType,
@@ -659,10 +605,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
         if (activeRequestSessionIdRef.current !== requestChatSessionId) {
           return;
-        }
-
-        if (typeof data.attached_session_warning === "string") {
-          toast.warning(data.attached_session_warning);
         }
 
         setMessages((prev) => [
@@ -698,7 +640,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         }
       }
     },
-    [attachedSessionId, chatSessionId, docs, getModelConfig]
+    [chatSessionId, docs, getModelConfig]
   );
 
   const handleSend = useCallback(async () => {
@@ -728,7 +670,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     setMessages([]);
     setRatings({});
     setContextError(false);
-    setAttachedSessionId(null);
     setDocs(new Map());
   }, []);
 
@@ -796,38 +737,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                   No models configured
                 </div>
               )}
-            </SelectContent>
-          </Select>
-          <Select
-            value={attachedSessionId ?? "none"}
-            onValueChange={(value) =>
-              setAttachedSessionId(value === "none" ? null : value)
-            }
-            disabled={sessionsLoading || !canAttachHistory}
-          >
-            <SelectTrigger
-              className="h-8 text-xs w-[190px] gap-1.5 pl-3 pr-3 focus-visible:ring-0 focus-visible:border-border"
-              title={
-                canAttachHistory ? undefined : HISTORY_DISABLED_WITH_DOCS_TITLE
-              }
-            >
-              <SelectValue
-                placeholder={sessionsLoading ? "Loading sessions" : "Attach history"}
-              />
-            </SelectTrigger>
-            <SelectContent align="start" className="max-h-64">
-              <SelectItem value="none" className="text-xs">
-                No history attached
-              </SelectItem>
-              {historySessions.map((session) => (
-                <SelectItem
-                  key={session.session_id}
-                  value={session.session_id}
-                  className="text-xs"
-                >
-                  {getHistorySessionLabel(session)}
-                </SelectItem>
-              ))}
             </SelectContent>
           </Select>
         </div>
@@ -1000,12 +909,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                 Up to 5 docs supported — recommend uploading one at a time per
                 chat.
               </p>
-              {attachedSessionId && (
-                <p className="text-[11px] text-muted-foreground/60 px-0.5">
-                  Uploaded documents are disabled while a history session is
-                  attached.
-                </p>
-              )}
             </div>
           )}
 
@@ -1058,12 +961,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={atDocLimit || !!attachedSessionId}
-                  title={
-                    attachedSessionId
-                      ? DOC_UPLOAD_DISABLED_WITH_HISTORY_TITLE
-                      : "Attach document (or drag & drop)"
-                  }
+                  disabled={atDocLimit}
+                  title="Attach document (or drag & drop)"
                   className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Paperclip className="h-[18px] w-[18px]" />

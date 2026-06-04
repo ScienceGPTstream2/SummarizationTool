@@ -67,12 +67,10 @@ class ChatMemoryRequest:
     deployment: Optional[str] = None
     api_version: Optional[str] = None
     document_context: Optional[str] = None
-    attached_session_id: Optional[str] = None
 
 
 class ChatState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
-    attachment: Optional[Dict[str, Optional[str]]]
 
 
 class ChatMemoryService:
@@ -222,7 +220,6 @@ class ChatMemoryService:
                 "document_context": request.document_context,
             }
         }
-        attachment = self._build_attachment(request.attached_session_id)
         lock = self._get_session_lock(thread_id)
         graph = await self._ensure_graph()
 
@@ -235,7 +232,6 @@ class ChatMemoryService:
                 result = await self._generate_response(
                     {
                         "messages": next_messages,
-                        "attachment": attachment,
                     },
                     config=config,
                 )
@@ -244,25 +240,21 @@ class ChatMemoryService:
                     state_config,
                     {
                         "messages": [*next_messages, *ai_messages],
-                        "attachment": attachment,
                     },
                     as_node="generate",
                 )
                 persisted_state = await graph.aget_state(persisted_config)
                 response = self._extract_ai_response(persisted_state.values.get("messages", []))
-                persisted_attachment = persisted_state.values.get("attachment") or {}
                 return {
                     "success": True,
                     "response": response,
                     "chat_session_id": request.chat_session_id,
-                    "attached_session_id": persisted_attachment.get("attached_session_id"),
                 }
         except ModelProviderError:
             return {
                 "success": False,
                 "response": "",
                 "chat_session_id": request.chat_session_id,
-                "attached_session_id": request.attached_session_id,
                 "error": GENERIC_MODEL_ERROR_MESSAGE,
             }
 
@@ -339,11 +331,6 @@ class ChatMemoryService:
             "You are a helpful assistant for Health Canada support staff. "
             "Answer questions clearly and concisely using remembered conversation when relevant."
         )
-
-    def _build_attachment(self, attached_session_id: Optional[str]) -> Optional[Dict[str, Optional[str]]]:
-        if attached_session_id is None:
-            return None
-        return {"attached_session_id": attached_session_id}
 
     def _extract_ai_response(self, messages: List[BaseMessage]) -> str:
         for message in reversed(messages):
