@@ -77,6 +77,17 @@ interface ChatModelConfig extends ModelConfig {
   model_type?: string;
 }
 
+interface ContextUsage {
+  estimated_tokens: number;
+  max_context_tokens: number;
+  percentage: number | null;
+  omitted_history_message_count: number;
+  document_context_tokens: number;
+  reserved_response_tokens?: number;
+  hard_limit_percentage?: number;
+  method: string;
+}
+
 // ─── Small sub-components ─────────────────────────────────────────────────────
 
 function AvatarAI() {
@@ -335,6 +346,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
   const [docs, setDocs] = useState<Map<string, DocEntry>>(new Map());
   const [contextError, setContextError] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
 
   const removeDoc = useCallback((tempId: string) => {
     setDocs((prev) => {
@@ -600,11 +612,25 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         });
 
         const data = await res.json();
-        if (!res.ok || !data.success)
-          throw new Error(data.error || "Request failed");
 
         if (activeRequestSessionIdRef.current !== requestChatSessionId) {
           return;
+        }
+
+        if (data.context_usage) {
+          setContextUsage(data.context_usage);
+        }
+
+        if (!res.ok || !data.success) {
+          const msg = data.error || "Request failed";
+          if (
+            data.error_code === "context_window_exceeded" ||
+            isContextWindowError(msg)
+          ) {
+            setContextError(true);
+            return;
+          }
+          throw new Error(msg);
         }
 
         setMessages((prev) => [
@@ -670,6 +696,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     setMessages([]);
     setRatings({});
     setContextError(false);
+    setContextUsage(null);
     setDocs(new Map());
   }, []);
 
@@ -695,6 +722,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   }, []);
 
   const canSend = !!input.trim() && !isLoading && !!selectedModelId;
+  const contextPercentage =
+    typeof contextUsage?.percentage === "number" ? contextUsage.percentage : null;
+  const contextLevel =
+    contextPercentage === null
+      ? "normal"
+      : contextPercentage >= 90
+        ? "critical"
+        : contextPercentage >= 75
+          ? "warning"
+          : "normal";
 
   return (
     <div
@@ -927,6 +964,45 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
               >
                 <X className="h-3 w-3" />
               </button>
+            </div>
+          )}
+
+          {contextUsage && (
+            <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/70">
+              <span
+                className={`h-1.5 w-16 rounded-full overflow-hidden bg-muted ${
+                  contextLevel === "critical"
+                    ? "ring-1 ring-destructive/40"
+                    : contextLevel === "warning"
+                      ? "ring-1 ring-yellow-500/40"
+                      : ""
+                }`}
+                title={`Estimated context usage: ${contextPercentage ?? "unknown"}%`}
+              >
+                <span
+                  className={`block h-full ${
+                    contextLevel === "critical"
+                      ? "bg-destructive"
+                      : contextLevel === "warning"
+                        ? "bg-yellow-500"
+                        : "bg-muted-foreground/50"
+                  }`}
+                  style={{
+                    width: `${Math.min(Math.max(contextPercentage ?? 0, 0), 100)}%`,
+                  }}
+                />
+              </span>
+              <span>
+                Context{" "}
+                {contextPercentage === null
+                  ? "estimated"
+                  : `${contextPercentage}%`}
+              </span>
+              {contextUsage.omitted_history_message_count > 0 && (
+                <span title="Older chat turns were omitted from the model prompt; full document context is still sent.">
+                  · recent turns only
+                </span>
+              )}
             </div>
           )}
 

@@ -14,10 +14,24 @@ LANGGRAPH_INSTALL_MESSAGE = (
     "Install backend requirements and retry."
 )
 GENERIC_MODEL_ERROR_MESSAGE = "The model call failed. Please try again."
+MAX_HISTORY_MESSAGES_IN_PROMPT = 12
+DEFAULT_MAX_CONTEXT_TOKENS = 128_000
+MAX_RESPONSE_TOKENS = 4_096
+CONTEXT_USAGE_HARD_LIMIT_PERCENTAGE = 95.0
+CONTEXT_WINDOW_ERROR_MESSAGE = (
+    "Context window is too large. Remove a document, start a new chat, "
+    "or use a model with a larger context window."
+)
 
 
 class ModelProviderError(Exception):
     pass
+
+
+class ContextWindowExceededError(Exception):
+    def __init__(self, context_usage: Dict[str, Any]):
+        super().__init__(CONTEXT_WINDOW_ERROR_MESSAGE)
+        self.context_usage = context_usage
 
 
 try:
@@ -258,7 +272,17 @@ class ChatMemoryService:
                     "success": True,
                     "response": response,
                     "chat_session_id": request.chat_session_id,
+                    "context_usage": result.get("context_usage"),
                 }
+        except ContextWindowExceededError as exc:
+            return {
+                "success": False,
+                "response": "",
+                "chat_session_id": request.chat_session_id,
+                "error": CONTEXT_WINDOW_ERROR_MESSAGE,
+                "error_code": "context_window_exceeded",
+                "context_usage": exc.context_usage,
+            }
         except ModelProviderError:
             return {
                 "success": False,
@@ -280,6 +304,17 @@ class ChatMemoryService:
         system_message = self._build_system_message(
             has_document_context=bool(configurable.get("document_context"))
         )
+        context_usage = self._build_context_usage(
+            user_prompt=prompt,
+            system_message=system_message,
+            messages=state.get("messages", []),
+            document_context=configurable.get("document_context"),
+            model_type=str(configurable.get("model_type", "")),
+            model_id=configurable.get("model_id"),
+            deployment=configurable.get("deployment"),
+        )
+        if self._is_context_window_too_large(context_usage):
+            raise ContextWindowExceededError(context_usage)
 
         try:
             result = await self.llm_service.generate_paragraph(
@@ -288,7 +323,7 @@ class ChatMemoryService:
                 model_id=configurable.get("model_id"),
                 deployment=configurable.get("deployment"),
                 api_version=configurable.get("api_version"),
-                max_tokens=4096,
+                max_tokens=MAX_RESPONSE_TOKENS,
                 temperature=0.3,
                 system_message=system_message,
             )
@@ -299,7 +334,10 @@ class ChatMemoryService:
                 str(result.get("error", GENERIC_MODEL_ERROR_MESSAGE))
             )
 
-        return {"messages": [AIMessage(content=str(result.get("content", "")))]}
+        return {
+            "messages": [AIMessage(content=str(result.get("content", "")))],
+            "context_usage": context_usage,
+        }
 
     def _build_user_prompt(
         self,
@@ -309,8 +347,10 @@ class ChatMemoryService:
         history_lines: List[str] = []
         current_query = ""
 
-        for index, message in enumerate(messages):
-            is_last = index == len(messages) - 1
+        included_messages = self._select_messages_for_prompt(messages)
+
+        for index, message in enumerate(included_messages):
+            is_last = index == len(included_messages) - 1
             if isinstance(message, HumanMessage):
                 if is_last:
                     current_query = str(message.content)
@@ -320,6 +360,11 @@ class ChatMemoryService:
                 history_lines.append(f"Assistant: {message.content}")
 
         sections: List[str] = []
+        omitted_count = max(0, len(messages) - len(included_messages))
+        if omitted_count:
+            sections.append(
+                f"Earlier conversation omitted from this request: {omitted_count} message(s)."
+            )
         if history_lines:
             sections.append("Conversation so far:\n" + "\n".join(history_lines))
         if document_context:
@@ -330,6 +375,108 @@ class ChatMemoryService:
             )
         sections.append(f"User question: {current_query}")
         return "\n\n".join(sections)
+
+    def _select_messages_for_prompt(
+        self, messages: List[BaseMessage]
+    ) -> List[BaseMessage]:
+        if len(messages) <= MAX_HISTORY_MESSAGES_IN_PROMPT + 1:
+            return messages
+
+        current_message = messages[-1:]
+        recent_history = messages[-(MAX_HISTORY_MESSAGES_IN_PROMPT + 1) : -1]
+        return [*recent_history, *current_message]
+
+    def _build_context_usage(
+        self,
+        user_prompt: str,
+        system_message: str,
+        messages: List[BaseMessage],
+        document_context: Optional[str],
+        model_type: str,
+        model_id: Optional[str],
+        deployment: Optional[str],
+    ) -> Dict[str, Any]:
+        included_messages = self._select_messages_for_prompt(messages)
+        prompt_tokens = self._estimate_tokens(user_prompt)
+        system_tokens = self._estimate_tokens(system_message)
+        document_tokens = self._estimate_tokens(document_context or "")
+        max_context_tokens = self._estimate_max_context_tokens(
+            model_type=model_type,
+            model_id=model_id,
+            deployment=deployment,
+        )
+        estimated_tokens = prompt_tokens + system_tokens
+        percentage = (
+            round((estimated_tokens / max_context_tokens) * 100, 1)
+            if max_context_tokens
+            else None
+        )
+
+        return {
+            "estimated_tokens": estimated_tokens,
+            "max_context_tokens": max_context_tokens,
+            "percentage": percentage,
+            "history_message_count": len(messages),
+            "included_history_message_count": len(included_messages),
+            "omitted_history_message_count": max(
+                0, len(messages) - len(included_messages)
+            ),
+            "document_context_tokens": document_tokens,
+            "reserved_response_tokens": MAX_RESPONSE_TOKENS,
+            "hard_limit_percentage": CONTEXT_USAGE_HARD_LIMIT_PERCENTAGE,
+            "method": "estimated_chars_div_4",
+        }
+
+    def _is_context_window_too_large(self, context_usage: Dict[str, Any]) -> bool:
+        max_context_tokens = context_usage.get("max_context_tokens")
+        estimated_tokens = context_usage.get("estimated_tokens")
+        percentage = context_usage.get("percentage")
+
+        if not max_context_tokens or not estimated_tokens:
+            return False
+        if estimated_tokens + MAX_RESPONSE_TOKENS >= max_context_tokens:
+            return True
+        return (
+            isinstance(percentage, (int, float))
+            and percentage >= CONTEXT_USAGE_HARD_LIMIT_PERCENTAGE
+        )
+
+    def _estimate_tokens(self, text: str) -> int:
+        if not text:
+            return 0
+        return max(1, (len(text) + 3) // 4)
+
+    def _estimate_max_context_tokens(
+        self,
+        model_type: str,
+        model_id: Optional[str],
+        deployment: Optional[str],
+    ) -> int:
+        model_key = f"{model_id or ''} {deployment or ''}".lower()
+        compact_model_key = (
+            model_key.replace("-", "")
+            .replace("_", "")
+            .replace(".", "")
+            .replace(" ", "")
+        )
+
+        if model_type == "gemini":
+            return 1_000_000
+        if model_type == "anthropic":
+            return 200_000
+        if model_type in ("llama", "azure-llama"):
+            return 128_000
+        if model_type in ("macbook", "vllm"):
+            return 32_000
+        if "gpt54mini" in compact_model_key or "gpt54nano" in compact_model_key:
+            return 400_000
+        if "gpt54" in compact_model_key:
+            return 1_050_000
+        if "gpt5" in compact_model_key:
+            return 400_000
+        if "gpt-4o" in model_key or "gpt-5" in model_key or "o3" in model_key:
+            return 128_000
+        return DEFAULT_MAX_CONTEXT_TOKENS
 
     def _build_system_message(self, has_document_context: bool) -> str:
         if has_document_context:
