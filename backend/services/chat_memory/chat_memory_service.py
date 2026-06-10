@@ -241,6 +241,15 @@ class ChatMemoryService:
     def _build_thread_id(self, user_id: str, chat_session_id: str) -> str:
         return f"user:{user_id}:chat:{chat_session_id}"
 
+    def _thread_prefix(self, user_id: str) -> str:
+        return f"user:{user_id}:chat:"
+
+    def _chat_session_id_from_thread_id(self, user_id: str, thread_id: str) -> str:
+        prefix = self._thread_prefix(user_id)
+        if thread_id.startswith(prefix):
+            return thread_id[len(prefix) :]
+        return thread_id
+
     async def invoke(self, request: ChatMemoryRequest) -> Dict[str, Any]:
         thread_id = self._build_thread_id(request.user_id, request.chat_session_id)
         config = {
@@ -337,6 +346,128 @@ class ChatMemoryService:
                 "chat_session_id": request.chat_session_id,
                 "error": GENERIC_MODEL_ERROR_MESSAGE,
             }
+
+    async def list_chat_sessions(self, user_id: str, limit: int = 50) -> Dict[str, Any]:
+        await self._ensure_graph()
+        thread_rows = await self._list_thread_rows_for_user(user_id, limit=limit)
+        chats = []
+        for row in thread_rows:
+            chat_session_id = self._chat_session_id_from_thread_id(
+                user_id, row["thread_id"]
+            )
+            detail = await self.get_chat_session(
+                user_id=user_id,
+                chat_session_id=chat_session_id,
+            )
+            if detail is None:
+                continue
+            messages = detail["messages"]
+            chats.append(
+                {
+                    "chat_session_id": chat_session_id,
+                    "title": self._build_chat_title(messages),
+                    "message_count": len(messages),
+                    "latest_message": self._build_latest_message_preview(messages),
+                    "latest_checkpoint_id": row.get("latest_checkpoint_id"),
+                }
+            )
+        return {"chats": chats, "total": len(chats)}
+
+    async def get_chat_session(
+        self, user_id: str, chat_session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        graph = await self._ensure_graph()
+        thread_id = self._build_thread_id(user_id, chat_session_id)
+        state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+        values = state.values or {}
+        messages = list(values.get("messages", []))
+        if not messages and not values.get("conversation_summary"):
+            return None
+        return {
+            "chat_session_id": chat_session_id,
+            "messages": [
+                self._message_to_response(message, index)
+                for index, message in enumerate(messages)
+            ],
+            "conversation_summary": str(values.get("conversation_summary") or ""),
+            "summarized_message_count": self._coerce_summarized_message_count(
+                values.get("summarized_message_count"),
+                total_messages=len(messages),
+            ),
+        }
+
+    async def delete_chat_session(self, user_id: str, chat_session_id: str) -> bool:
+        graph = await self._ensure_graph()
+        thread_id = self._build_thread_id(user_id, chat_session_id)
+        state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+        values = state.values or {}
+        if not values.get("messages") and not values.get("conversation_summary"):
+            return False
+
+        delete_thread = getattr(self.checkpointer, "adelete_thread", None)
+        if delete_thread is None:
+            raise RuntimeError(
+                "Chat history deletion is unavailable for this checkpointer."
+            )
+        await delete_thread(thread_id)
+        self._session_locks.pop(thread_id, None)
+        return True
+
+    async def _list_thread_rows_for_user(
+        self, user_id: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        checkpointer = self.checkpointer
+        cursor_factory = getattr(checkpointer, "_cursor", None)
+        if cursor_factory is None:
+            return []
+
+        async with cursor_factory() as cur:
+            await cur.execute(
+                """
+                SELECT thread_id, MAX(checkpoint_id) AS latest_checkpoint_id
+                FROM checkpoints
+                WHERE thread_id LIKE %s
+                GROUP BY thread_id
+                ORDER BY latest_checkpoint_id DESC
+                LIMIT %s
+                """,
+                (f"{self._thread_prefix(user_id)}%", int(limit)),
+            )
+            rows = await cur.fetchall()
+
+        return [
+            {
+                "thread_id": row["thread_id"],
+                "latest_checkpoint_id": row["latest_checkpoint_id"],
+            }
+            for row in rows
+        ]
+
+    def _message_to_response(self, message: BaseMessage, index: int) -> Dict[str, str]:
+        role = "assistant" if isinstance(message, AIMessage) else "user"
+        return {
+            "id": f"stored-{index}",
+            "role": role,
+            "content": str(message.content),
+        }
+
+    def _build_chat_title(self, messages: List[Dict[str, str]]) -> str:
+        for message in messages:
+            if message["role"] == "user" and message["content"].strip():
+                return self._truncate_preview(message["content"], max_length=64)
+        return "Untitled chat"
+
+    def _build_latest_message_preview(self, messages: List[Dict[str, str]]) -> str:
+        for message in reversed(messages):
+            if message["content"].strip():
+                return self._truncate_preview(message["content"], max_length=96)
+        return ""
+
+    def _truncate_preview(self, value: str, max_length: int) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) <= max_length:
+            return normalized
+        return normalized[: max_length - 1].rstrip() + "..."
 
     async def _generate_response(
         self,

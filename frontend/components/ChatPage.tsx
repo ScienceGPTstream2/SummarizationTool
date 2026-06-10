@@ -8,6 +8,8 @@ import {
   FileText,
   Loader2,
   AlertCircle,
+  History,
+  Trash2,
   ThumbsUp,
   ThumbsDown,
   Copy,
@@ -18,6 +20,23 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "./ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -35,6 +54,7 @@ import {
   createChatSessionId,
   getOrCreateChatSessionId,
   resetChatSessionId,
+  setChatSessionId as persistChatSessionId,
 } from "../utils/chatSession";
 import { toast } from "./ui/sonner";
 
@@ -44,6 +64,20 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+}
+
+interface ChatHistorySummary {
+  chat_session_id: string;
+  title: string;
+  message_count: number;
+  latest_message: string;
+}
+
+interface ChatHistoryDetail {
+  chat_session_id: string;
+  messages: Message[];
+  conversation_summary?: string;
+  summarized_message_count?: number;
 }
 
 const MAX_DOCS = 5;
@@ -348,6 +382,11 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const [docs, setDocs] = useState<Map<string, DocEntry>>(new Map());
   const [contextError, setContextError] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatHistorySummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyDeleteTarget, setHistoryDeleteTarget] =
+    useState<ChatHistorySummary | null>(null);
 
   const removeDoc = useCallback((tempId: string) => {
     setDocs((prev) => {
@@ -387,6 +426,32 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  const fetchChatHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch("/api/chat/history", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Failed to load chat history");
+      const data = await response.json();
+      setChatHistory(data.chats ?? []);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to load chat history";
+      toast.error(msg);
+      setChatHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (historyOpen) {
+      fetchChatHistory();
+    }
+  }, [fetchChatHistory, historyOpen]);
   // ── Document processing ─────────────────────────────────────────────────────
   const processFile = useCallback(async (file: File) => {
     const tempId = createChatSessionId();
@@ -701,6 +766,68 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     setDocs(new Map());
   }, []);
 
+  const handleOpenHistory = useCallback(() => {
+    setHistoryOpen(true);
+  }, []);
+
+  const handleRestoreChat = useCallback(async (history: ChatHistorySummary) => {
+    try {
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(
+        `/api/chat/history/${encodeURIComponent(history.chat_session_id)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) throw new Error("Failed to restore chat");
+      const data: ChatHistoryDetail = await response.json();
+      activeRequestSessionIdRef.current = null;
+      persistChatSessionId(data.chat_session_id);
+      setChatSessionId(data.chat_session_id);
+      setMessages(data.messages ?? []);
+      setRatings({});
+      setContextError(false);
+      setContextUsage(null);
+      setDocs(new Map());
+      setHistoryOpen(false);
+      toast.success("Chat restored");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to restore chat";
+      toast.error(msg);
+    }
+  }, []);
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!historyDeleteTarget) return;
+    try {
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(
+        `/api/chat/history/${encodeURIComponent(historyDeleteTarget.chat_session_id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) throw new Error("Failed to delete chat");
+      setChatHistory((prev) =>
+        prev.filter(
+          (chat) => chat.chat_session_id !== historyDeleteTarget.chat_session_id
+        )
+      );
+      if (historyDeleteTarget.chat_session_id === chatSessionId) {
+        handleNewChat();
+      }
+      toast.success("Chat history deleted");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete chat";
+      toast.error(msg);
+    } finally {
+      setHistoryDeleteTarget(null);
+    }
+  }, [chatSessionId, handleNewChat, historyDeleteTarget]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -735,6 +862,12 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         : contextPercentage >= 75
           ? "warning"
           : "normal";
+  const contextCircleValue = Math.min(Math.max(contextPercentage ?? 0, 0), 100);
+  const contextCircleRadius = 9;
+  const contextCircleCircumference = 2 * Math.PI * contextCircleRadius;
+  const contextCircleOffset =
+    contextCircleCircumference *
+    (1 - (contextPercentage === null ? 0 : contextCircleValue / 100));
 
   return (
     <div
@@ -793,6 +926,16 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           <Button
             variant="ghost"
             size="sm"
+            className="h-8 w-8 p-0 text-muted-foreground"
+            onClick={handleOpenHistory}
+            disabled={isLoading}
+            title="Chat history"
+          >
+            <History className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             className="h-8 text-xs text-muted-foreground"
             onClick={handleNewChat}
             disabled={isLoading}
@@ -824,6 +967,92 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           )}
         </div>
       </header>
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent
+          side="left"
+          className="w-[360px] sm:max-w-[360px] gap-0 p-0"
+        >
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle className="text-sm">Chat History</SheetTitle>
+            <SheetDescription>
+              Restore or delete previous chat conversations.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-2">
+            {historyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading
+              </div>
+            ) : chatHistory.length === 0 ? (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                No saved chats
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {chatHistory.map((chat) => (
+                  <div
+                    key={chat.chat_session_id}
+                    className={`group flex items-start gap-2 rounded-md px-2 py-2 ${
+                      chat.chat_session_id === chatSessionId
+                        ? "bg-muted"
+                        : "hover:bg-muted/60"
+                    }`}
+                  >
+                    <button
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => handleRestoreChat(chat)}
+                    >
+                      <div className="truncate text-xs font-medium">
+                        {chat.title}
+                      </div>
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                        {chat.latest_message ||
+                          `${chat.message_count} messages`}
+                      </div>
+                    </button>
+                    <button
+                      className="mt-0.5 rounded p-1 text-muted-foreground opacity-70 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      title="Delete chat"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setHistoryDeleteTarget(chat);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog
+        open={historyDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setHistoryDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Chat History</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the selected chat history from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteChat}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Message list ────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
@@ -972,45 +1201,6 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             </div>
           )}
 
-          {contextUsage && (
-            <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/70">
-              <span
-                className={`h-1.5 w-16 rounded-full overflow-hidden bg-muted ${
-                  contextLevel === "critical"
-                    ? "ring-1 ring-destructive/40"
-                    : contextLevel === "warning"
-                      ? "ring-1 ring-yellow-500/40"
-                      : ""
-                }`}
-                title={`Estimated context usage: ${contextPercentage ?? "unknown"}%`}
-              >
-                <span
-                  className={`block h-full ${
-                    contextLevel === "critical"
-                      ? "bg-destructive"
-                      : contextLevel === "warning"
-                        ? "bg-yellow-500"
-                        : "bg-muted-foreground/50"
-                  }`}
-                  style={{
-                    width: `${Math.min(Math.max(contextPercentage ?? 0, 0), 100)}%`,
-                  }}
-                />
-              </span>
-              <span>
-                Context{" "}
-                {contextPercentage === null
-                  ? "estimated"
-                  : `${contextPercentage}%`}
-              </span>
-              {contextUsage.omitted_history_message_count > 0 && (
-                <span title="Older chat turns are represented by a rolling summary; full document context is still sent.">
-                  · summarized history
-                </span>
-              )}
-            </div>
-          )}
-
           {/* Input box — ChatGPT layout: textarea on top, icons on bottom */}
           <div className="rounded-2xl border border-border bg-background shadow-sm focus-within:border-foreground/20 focus-within:shadow-md transition-all duration-150">
             <Textarea
@@ -1071,10 +1261,64 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           </div>
 
           {/* Disclaimer */}
-          <p className="text-center text-[11px] text-muted-foreground/60 leading-relaxed">
-            Science-GPT can make mistakes. Check important information
-            carefully.
-          </p>
+          <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/60 leading-relaxed">
+            <span className="text-center">
+              Science-GPT can make mistakes. Check important information
+              carefully.
+            </span>
+            {contextUsage && (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`Estimated context usage: ${
+                  contextPercentage ?? "unknown"
+                }%. ${
+                  contextUsage.omitted_history_message_count > 0
+                    ? "Older chat turns are represented by a rolling summary."
+                    : ""
+                }`}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5 shrink-0 -rotate-90"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r={contextCircleRadius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    className="text-muted"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r={contextCircleRadius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray={contextCircleCircumference}
+                    strokeDashoffset={contextCircleOffset}
+                    className={
+                      contextLevel === "critical"
+                        ? "text-destructive"
+                        : contextLevel === "warning"
+                          ? "text-yellow-500"
+                          : "text-muted-foreground"
+                    }
+                  />
+                </svg>
+                <span>
+                  Context{" "}
+                  {contextPercentage === null
+                    ? "estimated"
+                    : `${contextPercentage}%`}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

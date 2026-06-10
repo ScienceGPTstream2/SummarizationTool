@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -24,11 +24,92 @@ class ChatQueryRequest(BaseModel):
     api_version: Optional[str] = None
 
 
+class ChatHistoryMessage(BaseModel):
+    id: str
+    role: str
+    content: str
+
+
+class ChatHistorySummary(BaseModel):
+    chat_session_id: str
+    title: str
+    message_count: int
+    latest_message: str
+    latest_checkpoint_id: Optional[str] = None
+
+
+class ChatHistoryListResponse(BaseModel):
+    chats: list[ChatHistorySummary]
+    total: int
+
+
+class ChatHistoryDetailResponse(BaseModel):
+    chat_session_id: str
+    messages: list[ChatHistoryMessage]
+    conversation_summary: str = ""
+    summarized_message_count: int = 0
+
+
 def get_chat_memory_service() -> ChatMemoryService:
     global chat_memory_service
     if chat_memory_service is None:
         chat_memory_service = ChatMemoryService()
     return chat_memory_service
+
+
+@router.get("/history", response_model=ChatHistoryListResponse)
+async def list_chat_history(
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await get_chat_memory_service().list_chat_sessions(current_user["id"])
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing chat history: {str(exc)}",
+        ) from exc
+
+
+@router.get("/history/{chat_session_id}", response_model=ChatHistoryDetailResponse)
+async def get_chat_history(
+    chat_session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        chat = await get_chat_memory_service().get_chat_session(
+            user_id=current_user["id"],
+            chat_session_id=chat_session_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error loading chat history: {str(exc)}",
+        ) from exc
+
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat history not found")
+    return chat
+
+
+@router.delete("/history/{chat_session_id}")
+async def delete_chat_history(
+    chat_session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        deleted = await get_chat_memory_service().delete_chat_session(
+            user_id=current_user["id"],
+            chat_session_id=chat_session_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting chat history: {str(exc)}",
+        ) from exc
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat history not found")
+    return {"message": f"Chat history {chat_session_id} deleted successfully"}
 
 
 @router.post("/query", dependencies=[Depends(get_current_user)])

@@ -75,3 +75,8 @@ export function resetChatSessionId(): string {
   writeStoredChatSessionId(next);
   return next;
 }
+
+export function setChatSessionId(sessionId: string): void {
+  inMemoryChatSessionId = sessionId;
+  writeStoredChatSessionId(sessionId);
+}
