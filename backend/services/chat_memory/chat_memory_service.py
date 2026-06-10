@@ -690,7 +690,7 @@ class ChatMemoryService:
         )
         estimated_tokens = prompt_tokens + system_tokens
         percentage = (
-            round((estimated_tokens / max_context_tokens) * 100, 1)
+            round((estimated_tokens / max_context_tokens) * 100, 3)
             if max_context_tokens
             else None
         )

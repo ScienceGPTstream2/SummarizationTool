@@ -854,6 +854,20 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     typeof contextUsage?.percentage === "number"
       ? contextUsage.percentage
       : null;
+  const hasEstimatedContextTokens = (contextUsage?.estimated_tokens ?? 0) > 0;
+  const contextPercentageLabel =
+    contextPercentage === null
+      ? "estimated"
+      : hasEstimatedContextTokens && contextPercentage < 0.1
+        ? "<0.1%"
+        : `${contextPercentage.toFixed(contextPercentage < 10 ? 1 : 0)}%`;
+  const contextTokenLabel =
+    contextUsage && contextUsage.max_context_tokens
+      ? `${contextUsage.estimated_tokens.toLocaleString()} / ${contextUsage.max_context_tokens.toLocaleString()} tokens`
+      : null;
+  const contextVisibleTokenLabel = contextUsage
+    ? `${contextUsage.estimated_tokens.toLocaleString()} tokens`
+    : null;
   const contextLevel =
     contextPercentage === null
       ? "normal"
@@ -862,7 +876,17 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         : contextPercentage >= 75
           ? "warning"
           : "normal";
-  const contextCircleValue = Math.min(Math.max(contextPercentage ?? 0, 0), 100);
+  const contextCircleValue = Math.min(
+    Math.max(
+      contextPercentage === null
+        ? 0
+        : hasEstimatedContextTokens
+          ? Math.max(contextPercentage, 0.1)
+          : contextPercentage,
+      0
+    ),
+    100
+  );
   const contextCircleRadius = 9;
   const contextCircleCircumference = 2 * Math.PI * contextCircleRadius;
   const contextCircleOffset =
@@ -1270,8 +1294,10 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
               <span
                 className="inline-flex items-center gap-1.5"
                 title={`Estimated context usage: ${
-                  contextPercentage ?? "unknown"
-                }%. ${
+                  contextPercentageLabel
+                }${
+                  contextTokenLabel ? ` (${contextTokenLabel})` : ""
+                }. ${
                   contextUsage.omitted_history_message_count > 0
                     ? "Older chat turns are represented by a rolling summary."
                     : ""
@@ -1311,10 +1337,10 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                   />
                 </svg>
                 <span>
-                  Context{" "}
-                  {contextPercentage === null
-                    ? "estimated"
-                    : `${contextPercentage}%`}
+                  Context {contextPercentageLabel}
+                  {contextVisibleTokenLabel
+                    ? ` · ${contextVisibleTokenLabel}`
+                    : ""}
                 </span>
               </span>
             )}
