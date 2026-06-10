@@ -78,6 +78,7 @@ interface ChatHistoryDetail {
   messages: Message[];
   conversation_summary?: string;
   summarized_message_count?: number;
+  context_usage?: ContextUsage | null;
 }
 
 const MAX_DOCS = 5;
@@ -788,7 +789,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       setMessages(data.messages ?? []);
       setRatings({});
       setContextError(false);
-      setContextUsage(null);
+      setContextUsage(data.context_usage ?? null);
       setDocs(new Map());
       setHistoryOpen(false);
       toast.success("Chat restored");

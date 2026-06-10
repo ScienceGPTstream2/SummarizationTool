@@ -1,6 +1,6 @@
 """Chat API endpoint for support staff chatbot"""
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -48,6 +48,7 @@ class ChatHistoryDetailResponse(BaseModel):
     messages: list[ChatHistoryMessage]
     conversation_summary: str = ""
     summarized_message_count: int = 0
+    context_usage: Optional[dict[str, Any]] = None
 
 
 def get_chat_memory_service() -> ChatMemoryService:

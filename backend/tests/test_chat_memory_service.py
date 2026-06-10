@@ -104,6 +104,37 @@ async def test_old_messages_are_summarized_and_included_in_prompt():
 
 
 @pytest.mark.asyncio
+async def test_chat_history_detail_includes_context_usage_and_question_metadata():
+    fake_llm = FakeLLMService()
+    service = ChatMemoryService(
+        llm_service=fake_llm,
+        use_memory_checkpointer=True,
+    )
+
+    await service.invoke(
+        ChatMemoryRequest(
+            user_id="user-1",
+            chat_session_id="chat-1",
+            query="What is PMRA?",
+            model_type="azure",
+        )
+    )
+
+    detail = await service.get_chat_session(
+        user_id="user-1",
+        chat_session_id="chat-1",
+    )
+    assert detail is not None
+    assert detail["context_usage"]["estimated_tokens"] > 0
+
+    assert service._build_chat_title(detail["messages"]) == "What is PMRA?"
+    assert service._build_chat_history_metadata(detail["messages"]) == "1 question"
+    assert "Assistant response" not in service._build_chat_history_metadata(
+        detail["messages"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_summary_failure_does_not_mark_messages_as_summarized():
     class FailingSummaryLLM(FakeLLMService):
         async def generate_paragraph(self, **kwargs):

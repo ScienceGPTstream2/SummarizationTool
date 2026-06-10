@@ -317,7 +317,7 @@ class ChatMemoryService:
                     "chat_session_id": chat_session_id,
                     "title": self._build_chat_title(messages),
                     "message_count": len(messages),
-                    "latest_message": self._build_latest_message_preview(messages),
+                    "latest_message": self._build_chat_history_metadata(messages),
                     "latest_checkpoint_id": row.get("latest_checkpoint_id"),
                 }
             )
@@ -344,6 +344,7 @@ class ChatMemoryService:
                 values.get("summarized_message_count"),
                 total_messages=len(messages),
             ),
+            "context_usage": values.get("context_usage"),
         }
 
     async def delete_chat_session(self, user_id: str, chat_session_id: str) -> bool:
@@ -407,11 +408,11 @@ class ChatMemoryService:
                 return self._truncate_preview(message["content"], max_length=64)
         return "Untitled chat"
 
-    def _build_latest_message_preview(self, messages: List[Dict[str, str]]) -> str:
-        for message in reversed(messages):
-            if message["content"].strip():
-                return self._truncate_preview(message["content"], max_length=96)
-        return ""
+    def _build_chat_history_metadata(self, messages: List[Dict[str, str]]) -> str:
+        user_message_count = sum(1 for message in messages if message["role"] == "user")
+        if user_message_count == 1:
+            return "1 question"
+        return f"{user_message_count} questions"
 
     def _truncate_preview(self, value: str, max_length: int) -> str:
         normalized = " ".join(value.split())
