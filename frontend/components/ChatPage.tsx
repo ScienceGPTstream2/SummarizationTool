@@ -723,7 +723,9 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
   const canSend = !!input.trim() && !isLoading && !!selectedModelId;
   const contextPercentage =
-    typeof contextUsage?.percentage === "number" ? contextUsage.percentage : null;
+    typeof contextUsage?.percentage === "number"
+      ? contextUsage.percentage
+      : null;
   const contextLevel =
     contextPercentage === null
       ? "normal"
@@ -793,7 +795,9 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             className="h-8 text-xs text-muted-foreground"
             onClick={handleNewChat}
             disabled={isLoading}
-            title={isLoading ? "Wait for the current response to finish." : undefined}
+            title={
+              isLoading ? "Wait for the current response to finish." : undefined
+            }
           >
             New Chat
           </Button>
