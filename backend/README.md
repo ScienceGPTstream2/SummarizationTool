@@ -143,6 +143,7 @@ cd Summarization_tool/backend && uvicorn main:app --reload --port 8000 --host 0.
 ### Chat Memory
 - Chat requests require `chat_session_id` so each browser chat has independent memory.
 - Backend memory is persisted with LangGraph checkpoints in PostgreSQL through the existing `DATABASE_URL`.
+- Older turns that fall outside the recent-message prompt window are retained through a rolling conversation summary.
 - Uploaded document markdown is sent as request-time context and is not stored as permanent chat memory.
 - See [Chat Memory](../docs/chat-memory.md) for the API contract and operational notes.
 

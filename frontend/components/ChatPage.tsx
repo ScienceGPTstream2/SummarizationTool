@@ -82,6 +82,7 @@ interface ContextUsage {
   max_context_tokens: number;
   percentage: number | null;
   omitted_history_message_count: number;
+  summary_tokens?: number;
   document_context_tokens: number;
   reserved_response_tokens?: number;
   hard_limit_percentage?: number;
@@ -1003,8 +1004,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                   : `${contextPercentage}%`}
               </span>
               {contextUsage.omitted_history_message_count > 0 && (
-                <span title="Older chat turns were omitted from the model prompt; full document context is still sent.">
-                  · recent turns only
+                <span title="Older chat turns are represented by a rolling summary; full document context is still sent.">
+                  · summarized history
                 </span>
               )}
             </div>

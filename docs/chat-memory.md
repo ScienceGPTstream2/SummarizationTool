@@ -39,9 +39,27 @@ Chat memory is persisted with LangGraph checkpoints in PostgreSQL using the exis
 
 For unit tests or isolated service use, `ChatMemoryService(use_memory_checkpointer=True)` uses LangGraph's in-memory checkpointer instead of PostgreSQL.
 
-## Prompt And Context Limits
+## Prompt, Summary, And Context Limits
 
-The service persists the full message history for the chat session, but only the most recent turns are included in each model prompt. The current limit is controlled by `MAX_HISTORY_MESSAGES_IN_PROMPT` in `backend/services/chat_memory/chat_memory_service.py`.
+The service persists the full message history for the chat session, but only the most recent raw turns are included in each model prompt. The current recent-message limit is controlled by `MAX_HISTORY_MESSAGES_IN_PROMPT` in `backend/services/chat_memory/chat_memory_service.py`.
+
+Older messages that fall outside the recent-message window are folded into a rolling `conversation_summary`. Future prompts include that summary before the recent turns:
+
+```text
+Summary of earlier conversation:
+...
+
+Conversation so far:
+...
+
+Current document context for this request:
+...
+
+User question:
+...
+```
+
+The summary is stored in the same LangGraph checkpoint state as the raw messages. `summarized_message_count` tracks how many leading messages are represented by the summary so each message is summarized once. If summary generation fails, the service leaves `summarized_message_count` unchanged so messages are not silently hidden without being represented in the summary.
 
 Document markdown is included only in the request where it is supplied. It contributes to the context-window estimate but is not persisted as a chat message.
 
@@ -55,6 +73,7 @@ The API response may include `context_usage`:
   "history_message_count": 6,
   "included_history_message_count": 6,
   "omitted_history_message_count": 0,
+  "summary_tokens": 200,
   "document_context_tokens": 1200,
   "reserved_response_tokens": 4096,
   "hard_limit_percentage": 95.0,
