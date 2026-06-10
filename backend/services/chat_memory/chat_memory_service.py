@@ -413,8 +413,7 @@ class ChatMemoryService:
         omitted_count = max(0, len(messages) - len(included_messages))
         if conversation_summary.strip():
             sections.append(
-                "Summary of earlier conversation:\n"
-                f"{conversation_summary.strip()}"
+                "Summary of earlier conversation:\n" f"{conversation_summary.strip()}"
             )
         elif omitted_count:
             sections.append(
@@ -445,9 +444,7 @@ class ChatMemoryService:
         included_messages = self._select_messages_for_prompt(messages)
         return max(0, len(messages) - len(included_messages))
 
-    def _coerce_summarized_message_count(
-        self, value: Any, total_messages: int
-    ) -> int:
+    def _coerce_summarized_message_count(self, value: Any, total_messages: int) -> int:
         try:
             count = int(value or 0)
         except (TypeError, ValueError):
