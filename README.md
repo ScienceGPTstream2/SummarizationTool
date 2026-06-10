@@ -26,6 +26,7 @@ It supports:
 - **Improved authentication** through Better Auth with GitHub OAuth and Microsoft Entra support
 - **In-app evaluation workflows** powered by **DeepEval**, including custom evaluation steps and LLM-as-a-judge patterns
 - **Batch and interactive workflows** for extraction, review, and evaluation
+- **Short-term chatbot memory** for follow-up questions within an independent chat conversation
 - **Production-oriented deployment paths** for Azure infrastructure and other containerized environments
 
 ---
@@ -245,6 +246,7 @@ SummarizationTool-dev/
 ## 📚 Additional documentation
 
 - [Backend README](backend/README.md) — backend setup and processing details
+- [Chat memory](docs/chat-memory.md) - chatbot memory behavior, API contract, and operational notes
 - [Migration guide](docs/migration-guide.md) — architecture migration and platform transition notes
 - [GitHub auth setup](docs/setup-github-auth.md) — Better Auth GitHub OAuth configuration
 - [Dockerize & deploy to Azure](docs/superpowers/plans/dockerize-and-deploy.md) — deployment architecture and implementation notes
