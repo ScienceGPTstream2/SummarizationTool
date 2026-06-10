@@ -1293,9 +1293,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             {contextUsage && (
               <span
                 className="inline-flex items-center gap-1.5"
-                title={`Estimated context usage: ${
-                  contextPercentageLabel
-                }${
+                title={`Estimated context usage: ${contextPercentageLabel}${
                   contextTokenLabel ? ` (${contextTokenLabel})` : ""
                 }. ${
                   contextUsage.omitted_history_message_count > 0
