@@ -68,6 +68,9 @@ backend/uploads/
 /backend/core/hcsx-scigpt2-innocentrhino-acm-f87f8026be3d.json
 /backend/.deepeval/.deepeval_telemetry.txt
 /backend/tests/
+!/backend/tests/
+/backend/tests/*
+!/backend/tests/test_chat_memory_service.py
 /files/
 
 /backend/files/

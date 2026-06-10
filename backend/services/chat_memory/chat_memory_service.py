@@ -89,6 +89,7 @@ class ChatState(TypedDict, total=False):
     messages: Annotated[List[BaseMessage], add_messages]
     conversation_summary: str
     summarized_message_count: int
+    context_usage: Dict[str, Any]
 
 
 class ChatMemoryService:
@@ -260,6 +261,7 @@ class ChatMemoryService:
                 "deployment": request.deployment,
                 "api_version": request.api_version,
                 "document_context": request.document_context,
+                "query": request.query,
             }
         }
         lock = self._get_session_lock(thread_id)
@@ -267,63 +269,11 @@ class ChatMemoryService:
 
         try:
             async with lock:
-                starting_state = await graph.aget_state(config)
-                state_config = getattr(starting_state, "config", None) or config
-                starting_values = starting_state.values or {}
-                prior_messages = list(starting_values.get("messages", []))
-                conversation_summary = str(
-                    starting_values.get("conversation_summary") or ""
-                )
-                summarized_message_count = self._coerce_summarized_message_count(
-                    starting_values.get("summarized_message_count"),
-                    total_messages=len(prior_messages),
-                )
-                next_messages = [*prior_messages, HumanMessage(content=request.query)]
-                conversation_summary, summarized_message_count = (
-                    await self._ensure_summary_for_messages(
-                        messages=next_messages,
-                        conversation_summary=conversation_summary,
-                        summarized_message_count=summarized_message_count,
-                        target_message_count=self._messages_omitted_from_prompt(
-                            next_messages
-                        ),
-                        config=config,
-                    )
-                )
-                result = await self._generate_response(
-                    {
-                        "messages": next_messages,
-                        "conversation_summary": conversation_summary,
-                        "summarized_message_count": summarized_message_count,
-                    },
+                result = await graph.ainvoke(
+                    {},
                     config=config,
                 )
-                ai_messages = result.get("messages", [])
-                updated_messages = [*next_messages, *ai_messages]
-                conversation_summary, summarized_message_count = (
-                    await self._ensure_summary_for_messages(
-                        messages=updated_messages,
-                        conversation_summary=conversation_summary,
-                        summarized_message_count=summarized_message_count,
-                        target_message_count=max(
-                            0, len(updated_messages) - MAX_HISTORY_MESSAGES_IN_PROMPT
-                        ),
-                        config=config,
-                    )
-                )
-                persisted_config = await graph.aupdate_state(
-                    state_config,
-                    {
-                        "messages": updated_messages,
-                        "conversation_summary": conversation_summary,
-                        "summarized_message_count": summarized_message_count,
-                    },
-                    as_node="generate",
-                )
-                persisted_state = await graph.aget_state(persisted_config)
-                response = self._extract_ai_response(
-                    persisted_state.values.get("messages", [])
-                )
+                response = self._extract_ai_response(result.get("messages", []))
                 return {
                     "success": True,
                     "response": response,
@@ -475,9 +425,29 @@ class ChatMemoryService:
         config: Optional[RunnableConfig] = None,
     ) -> Dict[str, Any]:
         configurable = (config or {}).get("configurable", {})
+        prior_messages = list(state.get("messages", []))
+        query = str(configurable.get("query") or "").strip()
+        if not query:
+            raise ModelProviderError("Missing chat query.")
+        current_user_message = HumanMessage(content=query)
+        messages = [*prior_messages, current_user_message]
+        conversation_summary = str(state.get("conversation_summary", "") or "")
+        summarized_message_count = self._coerce_summarized_message_count(
+            state.get("summarized_message_count"),
+            total_messages=len(messages),
+        )
+        conversation_summary, summarized_message_count = (
+            await self._ensure_summary_for_messages(
+                messages=messages,
+                conversation_summary=conversation_summary,
+                summarized_message_count=summarized_message_count,
+                target_message_count=self._messages_omitted_from_prompt(messages),
+                config=config,
+            )
+        )
         prompt = self._build_user_prompt(
-            messages=state.get("messages", []),
-            conversation_summary=state.get("conversation_summary", ""),
+            messages=messages,
+            conversation_summary=conversation_summary,
             document_context=configurable.get("document_context"),
         )
         system_message = self._build_system_message(
@@ -486,8 +456,8 @@ class ChatMemoryService:
         context_usage = self._build_context_usage(
             user_prompt=prompt,
             system_message=system_message,
-            messages=state.get("messages", []),
-            conversation_summary=state.get("conversation_summary", ""),
+            messages=messages,
+            conversation_summary=conversation_summary,
             document_context=configurable.get("document_context"),
             model_type=str(configurable.get("model_type", "")),
             model_id=configurable.get("model_id"),
@@ -514,8 +484,24 @@ class ChatMemoryService:
                 str(result.get("error", GENERIC_MODEL_ERROR_MESSAGE))
             )
 
+        ai_message = AIMessage(content=str(result.get("content", "")))
+        updated_messages = [*messages, ai_message]
+        conversation_summary, summarized_message_count = (
+            await self._ensure_summary_for_messages(
+                messages=updated_messages,
+                conversation_summary=conversation_summary,
+                summarized_message_count=summarized_message_count,
+                target_message_count=max(
+                    0, len(updated_messages) - MAX_HISTORY_MESSAGES_IN_PROMPT
+                ),
+                config=config,
+            )
+        )
+
         return {
-            "messages": [AIMessage(content=str(result.get("content", "")))],
+            "messages": [current_user_message, ai_message],
+            "conversation_summary": conversation_summary,
+            "summarized_message_count": summarized_message_count,
             "context_usage": context_usage,
         }
 
