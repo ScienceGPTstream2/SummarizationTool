@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import parse from "html-react-parser";
 import DOMPurify from "dompurify";
 import {
@@ -31,8 +31,28 @@ function TablePreview({
   const [tableHtml, setTableHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Fire once when the card scrolls within 200px of the viewport
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
+    if (!shouldLoad) return;
     let mounted = true;
 
     const fetchTable = async () => {
@@ -69,11 +89,11 @@ function TablePreview({
     return () => {
       mounted = false;
     };
-  }, [tableNumber, conversionId]);
+  }, [shouldLoad, tableNumber, conversionId]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-32">
+      <div ref={containerRef} className="flex items-center justify-center h-32">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -81,7 +101,7 @@ function TablePreview({
 
   if (error || !tableHtml) {
     return (
-      <div className="flex items-center justify-center h-32 text-muted-foreground">
+      <div ref={containerRef} className="flex items-center justify-center h-32 text-muted-foreground">
         <TableIcon className="h-8 w-8" />
       </div>
     );
@@ -92,6 +112,7 @@ function TablePreview({
 
   return (
     <div
+      ref={containerRef}
       className={`relative overflow-hidden border rounded-md ${className}`}
       onClick={onTableClick}
       style={{
@@ -306,13 +327,23 @@ export function TablesGallery({
   const handleDownloadAll = async () => {
     setIsDownloadingAll(true);
     try {
-      const parts: string[] = [];
-      for (let i = 1; i <= tablesCount; i++) {
-        const html = await fetchTableHtml(i);
-        if (html) parts.push(`<h2>Table ${i}</h2>\n${html}`);
-      }
-      const combined = `<!DOCTYPE html>\n<html>\n<head><meta charset="utf-8"><title>Extracted Tables</title></head>\n<body>\n${parts.join("\n\n")}\n</body>\n</html>`;
-      downloadFile(combined, "all-tables.html", "text/html");
+      const token = await getValidToken();
+      const response = await fetch(
+        `/api/documents/${conversionId}/tables/download`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) throw new Error(`ZIP download failed: ${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `tables-${conversionId.slice(0, 8)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error downloading all tables:", err);
     } finally {
       setIsDownloadingAll(false);
     }
