@@ -101,7 +101,10 @@ function TablePreview({
 
   if (error || !tableHtml) {
     return (
-      <div ref={containerRef} className="flex items-center justify-center h-32 text-muted-foreground">
+      <div
+        ref={containerRef}
+        className="flex items-center justify-center h-32 text-muted-foreground"
+      >
         <TableIcon className="h-8 w-8" />
       </div>
     );
@@ -332,7 +335,8 @@ export function TablesGallery({
         `/api/documents/${conversionId}/tables/download`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (!response.ok) throw new Error(`ZIP download failed: ${response.status}`);
+      if (!response.ok)
+        throw new Error(`ZIP download failed: ${response.status}`);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
