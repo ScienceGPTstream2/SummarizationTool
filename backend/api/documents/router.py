@@ -1351,9 +1351,7 @@ async def extract_figure_content(
     return await generate_figure_summary(document_id, figure_id, request, http_request)
 
 
-@router.get(
-    "/{document_id}/tables/download", dependencies=[Depends(get_current_user)]
-)
+@router.get("/{document_id}/tables/download", dependencies=[Depends(get_current_user)])
 async def download_all_tables_zip(document_id: str):
     """
     Download all extracted tables as a single ZIP archive.
@@ -1375,7 +1373,9 @@ async def download_all_tables_zip(document_id: str):
         if not resolved_processor:
             raise HTTPException(status_code=404, detail="Processed document not found")
 
-        metadata = await file_service.get_processed_metadata(document_id, resolved_processor)
+        metadata = await file_service.get_processed_metadata(
+            document_id, resolved_processor
+        )
         tables_count = (metadata or {}).get("tables_found", 0)
 
         if not tables_count:
@@ -1386,7 +1386,9 @@ async def download_all_tables_zip(document_id: str):
             tables_count = len([b for b in blobs if b.lower().endswith(".html")])
 
         if not tables_count:
-            raise HTTPException(status_code=404, detail="No tables found for this document")
+            raise HTTPException(
+                status_code=404, detail="No tables found for this document"
+            )
 
         print(f"[TABLE-ZIP] Building ZIP for {document_id}: {tables_count} tables")
 
@@ -1395,7 +1397,9 @@ async def download_all_tables_zip(document_id: str):
                 document_id, resolved_processor, f"tables/table-{i}.html"
             )
 
-        results = await asyncio.gather(*[fetch_one(i) for i in range(1, tables_count + 1)])
+        results = await asyncio.gather(
+            *[fetch_one(i) for i in range(1, tables_count + 1)]
+        )
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -1417,7 +1421,9 @@ async def download_all_tables_zip(document_id: str):
         raise
     except Exception as e:
         print(f"[TABLE-ZIP] Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating tables ZIP: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error creating tables ZIP: {str(e)}"
+        )
 
 
 @router.get(
