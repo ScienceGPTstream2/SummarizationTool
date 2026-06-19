@@ -39,12 +39,18 @@ class CohereLLMClient:
     def __init__(self):
         raw_endpoint = os.environ.get("COHERE_AZURE_ENDPOINT", "")
         self.api_key = os.environ.get("COHERE_AZURE_KEY", "")
-        self.api_version = os.environ.get("COHERE_AZURE_API_VERSION", "2024-05-01-preview")
+        self.api_version = os.environ.get(
+            "COHERE_AZURE_API_VERSION", "2024-05-01-preview"
+        )
         self.model_name = os.environ.get("COHERE_MODEL_NAME", "cohere-command-a")
 
         # Strip path components — always work from the bare host
         parsed = urlparse(raw_endpoint)
-        self.endpoint = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else raw_endpoint.rstrip("/")
+        self.endpoint = (
+            f"{parsed.scheme}://{parsed.netloc}"
+            if parsed.netloc
+            else raw_endpoint.rstrip("/")
+        )
 
         self.disabled = not bool(self.endpoint and self.api_key)
 
@@ -52,10 +58,16 @@ class CohereLLMClient:
         self._is_serverless = ".models.ai.azure.com" in self.endpoint
 
         if not self.disabled:
-            kind = "hub" if self._is_hub else ("serverless" if self._is_serverless else "unknown")
+            kind = (
+                "hub"
+                if self._is_hub
+                else ("serverless" if self._is_serverless else "unknown")
+            )
             print(f"[CohereLLMClient] Initialised → {self.endpoint} ({kind})")
         else:
-            print("[CohereLLMClient] Disabled (COHERE_AZURE_ENDPOINT or COHERE_AZURE_KEY not set)")
+            print(
+                "[CohereLLMClient] Disabled (COHERE_AZURE_ENDPOINT or COHERE_AZURE_KEY not set)"
+            )
 
     def _build_url(self) -> str:
         if self._is_hub:
@@ -99,7 +111,9 @@ class CohereLLMClient:
             try:
                 t0 = time.perf_counter()
                 resp = await asyncio.to_thread(
-                    lambda: requests.post(url, json=payload, headers=headers, timeout=120)
+                    lambda: requests.post(
+                        url, json=payload, headers=headers, timeout=120
+                    )
                 )
                 duration = time.perf_counter() - t0
 
@@ -107,7 +121,10 @@ class CohereLLMClient:
                     data = resp.json()
                     choices = data.get("choices", [])
                     if not choices:
-                        return {"success": False, "error": "No choices in Cohere response"}
+                        return {
+                            "success": False,
+                            "error": "No choices in Cohere response",
+                        }
                     content = choices[0].get("message", {}).get("content", "")
                     usage = data.get("usage", {})
                     return {
@@ -125,8 +142,13 @@ class CohereLLMClient:
 
                 if resp.status_code in retryable and attempt < max_retries - 1:
                     import random
-                    delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
-                    print(f"[CohereLLMClient] HTTP {resp.status_code} on attempt {attempt + 1}, retrying in {delay:.1f}s")
+
+                    delay = min(
+                        base_delay * (2**attempt) + random.uniform(0, 1), max_delay
+                    )
+                    print(
+                        f"[CohereLLMClient] HTTP {resp.status_code} on attempt {attempt + 1}, retrying in {delay:.1f}s"
+                    )
                     time.sleep(delay)
                     continue
 
@@ -146,7 +168,7 @@ class CohereLLMClient:
             except requests.exceptions.Timeout:
                 last_error = f"Cohere request timed out (attempt {attempt + 1})"
                 if attempt < max_retries - 1:
-                    time.sleep(base_delay * (2 ** attempt))
+                    time.sleep(base_delay * (2**attempt))
                     continue
                 break
             except Exception as exc:
@@ -169,9 +191,14 @@ class CohereLLMClient:
                 references = parsed.get("references", [])
                 if isinstance(references, list):
                     references = [
-                        r if isinstance(r, dict) else {"text": str(r)} for r in references
+                        r if isinstance(r, dict) else {"text": str(r)}
+                        for r in references
                     ]
-                return {"success": True, "extracted_text": answer, "references": references}
+                return {
+                    "success": True,
+                    "extracted_text": answer,
+                    "references": references,
+                }
             # json.loads returned a scalar or list — treat as plain text
         except json.JSONDecodeError:
             pass
@@ -192,7 +219,7 @@ class CohereLLMClient:
         effective_system = system_message or _DEFAULT_EXTRACTION_SYSTEM
         user_content = (
             f"{extraction_prompt}\n\n"
-            'IMPORTANT: Respond ONLY with a valid JSON object: '
+            "IMPORTANT: Respond ONLY with a valid JSON object: "
             '{"answer": "...", "references": [{"text": "exact verbatim quote"}]}\n\n'
             f"---\n\n{markdown}"
         )
@@ -201,7 +228,9 @@ class CohereLLMClient:
             {"role": "user", "content": user_content},
         ]
 
-        result = await self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
+        result = await self._call_api(
+            messages, max_tokens=max_tokens, temperature=temperature
+        )
         if not result["success"]:
             return result
 
@@ -243,7 +272,9 @@ class CohereLLMClient:
             {"role": "user", "content": user_prompt},
         ]
 
-        result = await self._call_api(messages, max_tokens=max_tokens, temperature=temperature)
+        result = await self._call_api(
+            messages, max_tokens=max_tokens, temperature=temperature
+        )
         if not result["success"]:
             return result
 
