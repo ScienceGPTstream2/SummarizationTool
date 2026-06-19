@@ -54,8 +54,9 @@ class CohereLLMClient:
 
         self.disabled = not bool(self.endpoint and self.api_key)
 
-        self._is_hub = ".services.ai.azure.com" in self.endpoint
-        self._is_serverless = ".models.ai.azure.com" in self.endpoint
+        _host = urlparse(self.endpoint).hostname or ""
+        self._is_hub = _host.endswith(".services.ai.azure.com")
+        self._is_serverless = _host.endswith(".models.ai.azure.com")
 
         if not self.disabled:
             kind = (
@@ -201,6 +202,7 @@ class CohereLLMClient:
                 }
             # json.loads returned a scalar or list — treat as plain text
         except json.JSONDecodeError:
+            # Non-JSON response is expected when the model returns plain text; fall through to raw return below
             pass
 
         return {"success": True, "extracted_text": content, "references": []}
