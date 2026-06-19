@@ -602,6 +602,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     if (!model) return null;
     const isGemini = model.provider === "Google Gemini";
     const isAnthropic = model.provider === "Anthropic";
+    const isCohere = model.provider === "Cohere";
     const chatModel = model as ChatModelConfig;
     const isLlama =
       model.provider === "Meta Llama" || chatModel.model_type === "azure-llama";
@@ -612,7 +613,9 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           ? "anthropic"
           : isLlama
             ? "llama"
-            : "azure",
+            : isCohere
+              ? "cohere"
+              : "azure",
       modelId: model.id,
       deployment: model.deployment,
       apiVersion: model.api_version,

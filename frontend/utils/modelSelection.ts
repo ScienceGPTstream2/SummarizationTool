@@ -79,6 +79,11 @@ const MODEL_PRIORITY: Array<{
     match: (m) => m.id?.includes("llama-4-maverick"),
     modelType: "llama",
   },
+  // Tier 6 — Cohere
+  {
+    match: (m) => m.provider === "Cohere",
+    modelType: "cohere",
+  },
   // Catch-all
   {
     match: (m) => m.provider === "Google Gemini",

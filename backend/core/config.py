@@ -130,6 +130,17 @@ def load_config():
                 if anthropic_location:
                     os.environ.setdefault("ANTHROPIC_LOCATION", anthropic_location)
 
+                # Cohere configuration (Azure AI Foundry)
+                cohere_cfg = cfg.get("cohere", {}) or {}
+                if cohere_cfg.get("endpoint"):
+                    os.environ.setdefault("COHERE_AZURE_ENDPOINT", cohere_cfg["endpoint"])
+                    print(f"✅ Cohere endpoint loaded from secrets.toml: {cohere_cfg['endpoint']}")
+                if cohere_cfg.get("api_key"):
+                    os.environ.setdefault("COHERE_AZURE_KEY", cohere_cfg["api_key"])
+                os.environ.setdefault("COHERE_AZURE_API_VERSION", cohere_cfg.get("api_version", "2024-05-01-preview"))
+                os.environ.setdefault("COHERE_MODEL_NAME", cohere_cfg.get("model_name", "cohere-command-a"))
+                os.environ.setdefault("COHERE_DISPLAY_NAME", cohere_cfg.get("display_name", "Cohere Command A"))
+
                 # Set up Google Cloud credentials for Vertex AI (shared by Gemini and Anthropic)
                 # Look for service account key in backend/core/ directory
                 service_account_path = (

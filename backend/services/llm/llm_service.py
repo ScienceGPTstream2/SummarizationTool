@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 from .azure import AzureLLMClient
+from .cohere import CohereLLMClient
 from .gemini import GeminiLLMClient
 from .anthropic import AnthropicLLMClient
 from .llama import LlamaLLMClient
@@ -37,6 +38,7 @@ class LLMService:
 
     def __init__(self):
         self.azure_client = AzureLLMClient()
+        self.cohere_client = CohereLLMClient()
         self.gemini_client = GeminiLLMClient()
         self.anthropic_client = AnthropicLLMClient()
         self.llama_client = LlamaLLMClient()
@@ -284,6 +286,21 @@ class LLMService:
                 )
                 self._record_session_metrics(session_id, "vllm", result)
                 return result
+            elif model_type == "cohere":
+                if self.cohere_client.disabled:
+                    return {"success": False, "error": "Cohere is not configured."}
+                result = await self._call_with_timeout_logging(
+                    operation_name,
+                    self.cohere_client.extract_entities_with_cohere(
+                        markdown,
+                        extraction_prompt,
+                        max_tokens,
+                        temperature,
+                        system_message,
+                    ),
+                )
+                self._record_session_metrics(session_id, "cohere", result)
+                return result
             else:
                 return {
                     "success": False,
@@ -472,6 +489,20 @@ class LLMService:
                 timeout_seconds=600,
             )
             self._record_session_metrics(session_id, "vllm", result)
+            return result
+        elif model_type == "cohere":
+            if self.cohere_client.disabled:
+                return {"success": False, "error": "Cohere is not configured."}
+            result = await self._call_with_timeout_logging(
+                "paragraph_cohere",
+                self.cohere_client.generate_paragraph_with_cohere(
+                    user_prompt,
+                    max_tokens,
+                    temperature,
+                    system_message,
+                ),
+            )
+            self._record_session_metrics(session_id, "cohere", result)
             return result
         else:
             return {"success": False, "error": f"Unsupported model type: {model_type}"}

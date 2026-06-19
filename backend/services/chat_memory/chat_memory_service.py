@@ -739,6 +739,8 @@ class ChatMemoryService:
             return 128_000
         if model_type in ("macbook", "vllm"):
             return 32_000
+        if model_type == "cohere":
+            return 256_000  # Command A context window
         if "gpt54mini" in compact_model_key or "gpt54nano" in compact_model_key:
             return 400_000
         if "gpt54" in compact_model_key:
