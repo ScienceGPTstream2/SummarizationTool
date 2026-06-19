@@ -580,7 +580,7 @@ async def get_available_models():
     if os.getenv("COHERE_AZURE_ENDPOINT") and os.getenv("COHERE_AZURE_KEY"):
         models.append(
             {
-                "id": "cohere-command-a",
+                "id": os.getenv("COHERE_MODEL_NAME", "cohere-command-a"),
                 "name": os.getenv("COHERE_DISPLAY_NAME", "Cohere Command A"),
                 "provider": "Cohere",
                 "model_type": "cohere",

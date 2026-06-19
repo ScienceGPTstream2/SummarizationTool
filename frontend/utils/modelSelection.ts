@@ -162,13 +162,16 @@ export function modelConfigToSelection(
   const isLlama =
     model.provider === "Meta Llama" ||
     (model as any).model_type === "azure-llama";
+  const isCohere = model.provider === "Cohere";
   const modelType = isGemini
     ? "gemini"
     : isAnthropic
       ? "anthropic"
       : isLlama
         ? "azure-llama"
-        : "azure";
+        : isCohere
+          ? "cohere"
+          : "azure";
   return {
     model,
     modelType,

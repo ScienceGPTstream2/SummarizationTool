@@ -150,7 +150,7 @@ class CohereLLMClient:
                     print(
                         f"[CohereLLMClient] HTTP {resp.status_code} on attempt {attempt + 1}, retrying in {delay:.1f}s"
                     )
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
                     continue
 
                 # Non-retryable or last attempt
@@ -169,7 +169,7 @@ class CohereLLMClient:
             except requests.exceptions.Timeout:
                 last_error = f"Cohere request timed out (attempt {attempt + 1})"
                 if attempt < max_retries - 1:
-                    time.sleep(base_delay * (2**attempt))
+                    await asyncio.sleep(base_delay * (2**attempt))
                     continue
                 break
             except Exception as exc:

@@ -186,3 +186,20 @@ def test_context_usage_reports_small_nonzero_percentages():
 
     assert context_usage["estimated_tokens"] > 0
     assert 0 < context_usage["percentage"] < 0.1
+
+
+def test_context_window_cohere():
+    service = ChatMemoryService(use_memory_checkpointer=True)
+
+    context_usage = service._build_context_usage(
+        user_prompt="test",
+        system_message="",
+        messages=[],
+        conversation_summary="",
+        document_context=None,
+        model_type="cohere",
+        model_id=None,
+        deployment=None,
+    )
+
+    assert context_usage["max_tokens"] == 256_000
