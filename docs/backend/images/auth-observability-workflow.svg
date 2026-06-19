@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="850" viewBox="0 0 1280 850" role="img" aria-labelledby="title desc">
+  <title id="title">Auth, security, and observability workflow</title>
+  <desc id="desc">Cross-cutting workflow for Better Auth session validation, auth proxying, service-level authorization, structured logging, request IDs, metrics, tracing, and cost tracking.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .section { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .edge { fill: #dbeafe; }
+      .auth { fill: #ede9fe; }
+      .security { fill: #fef3c7; }
+      .obs { fill: #dcfce7; }
+      .data { fill: #fae8ff; }
+      .external { fill: #fee2e2; }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.7; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="850" />
+  <text class="title" x="44" y="48">Auth, Security, and Observability</text>
+  <text class="subtitle" x="44" y="74">Authentication is DB-backed Better Auth session lookup; observability is attached at request middleware and provider-call boundaries.</text>
+
+  <rect class="lane" x="32" y="108" width="1216" height="150" />
+  <text class="section" x="52" y="136">AUTHENTICATED API REQUEST</text>
+  <rect class="card edge" x="70" y="160" width="190" height="58" />
+  <text class="box-title" x="90" y="183">Frontend request</text>
+  <text class="box-text" x="90" y="202">Bearer token preferred</text>
+  <rect class="card auth" x="320" y="160" width="210" height="58" />
+  <text class="box-title" x="340" y="183">get_current_user()</text>
+  <text class="box-text" x="340" y="202">session token dependency</text>
+  <rect class="card data" x="590" y="160" width="210" height="58" />
+  <text class="box-title" x="610" y="183">PostgreSQL lookup</text>
+  <text class="box-text" x="610" y="202">AuthSession joined to User</text>
+  <rect class="card security" x="860" y="160" width="230" height="58" />
+  <text class="box-title" x="880" y="183">Access checks</text>
+  <text class="box-text" x="880" y="202">expiry and ALLOWED_EMAILS</text>
+  <path class="arrow" d="M260 189 H320" />
+  <path class="arrow" d="M530 189 H590" />
+  <path class="arrow" d="M800 189 H860" />
+
+  <rect class="lane" x="32" y="284" width="1216" height="120" />
+  <text class="section" x="52" y="312">AUTH PROXY AND SERVICE AUTHORIZATION</text>
+  <rect class="card edge" x="74" y="336" width="232" height="46" />
+  <text class="box-title" x="94" y="359">/api/auth/{path}</text>
+  <text class="box-text" x="94" y="377">registered before generic auth routes</text>
+  <rect class="card external" x="362" y="336" width="232" height="46" />
+  <text class="box-title" x="382" y="359">Better Auth sidecar</text>
+  <text class="box-text" x="382" y="377">Set-Cookie, redirects, JSON</text>
+  <rect class="card security" x="650" y="336" width="232" height="46" />
+  <text class="box-title" x="670" y="359">Service-level authorization</text>
+  <text class="box-text" x="670" y="377">sessions, groups, templates</text>
+  <rect class="card security" x="938" y="336" width="232" height="46" />
+  <text class="box-title" x="958" y="359">Path safety</text>
+  <text class="box-text" x="958" y="377">hash paths and filename validation</text>
+  <path class="arrow" d="M306 359 H362" />
+  <path class="soft" d="M594 359 H650" />
+  <path class="soft" d="M882 359 H938" />
+
+  <rect class="lane" x="32" y="430" width="1216" height="162" />
+  <text class="section" x="52" y="458">REQUEST OBSERVABILITY</text>
+  <rect class="card obs" x="70" y="490" width="210" height="58" />
+  <text class="box-title" x="90" y="513">HTTP middleware</text>
+  <text class="box-text" x="90" y="532">bind 12-char request id</text>
+  <rect class="card obs" x="336" y="490" width="210" height="58" />
+  <text class="box-title" x="356" y="513">Structured logs</text>
+  <text class="box-text" x="356" y="532">status, method, path, duration</text>
+  <rect class="card obs" x="602" y="490" width="210" height="58" />
+  <text class="box-title" x="622" y="513">Prometheus</text>
+  <text class="box-text" x="622" y="532">/metrics and provider metrics</text>
+  <rect class="card obs" x="868" y="490" width="210" height="58" />
+  <text class="box-title" x="888" y="513">OpenTelemetry</text>
+  <text class="box-text" x="888" y="532">optional OTLP traces</text>
+  <path class="arrow" d="M175 218 C175 330 175 420 175 490" />
+  <path class="arrow" d="M280 519 H336" />
+  <path class="soft" d="M546 519 H602" />
+  <path class="soft" d="M812 519 H868" />
+
+  <rect class="lane" x="32" y="618" width="1216" height="150" />
+  <text class="section" x="52" y="646">COST AND SESSION TELEMETRY</text>
+  <rect class="card external" x="72" y="674" width="210" height="58" />
+  <text class="box-title" x="92" y="697">Provider call succeeds</text>
+  <text class="box-text" x="92" y="716">LLM or parser metadata</text>
+  <rect class="card obs" x="338" y="674" width="210" height="58" />
+  <text class="box-title" x="358" y="697">CostTracker</text>
+  <text class="box-text" x="358" y="716">model pricing and duration</text>
+  <rect class="card data" x="604" y="674" width="210" height="58" />
+  <text class="box-title" x="624" y="697">Session totals</text>
+  <text class="box-text" x="624" y="716">total_cost, latency, calls</text>
+  <rect class="card edge" x="870" y="674" width="210" height="58" />
+  <text class="box-title" x="890" y="697">Server endpoints</text>
+  <text class="box-text" x="890" y="716">metrics, logs, model catalog</text>
+  <path class="arrow" d="M282 703 H338" />
+  <path class="arrow" d="M548 703 H604" />
+  <path class="arrow" d="M814 703 H870" />
+
+  <text class="small" x="72" y="804">Non-fatal integrations: Prometheus instrumentation, Loki handler, and OTLP tracing log warnings if unavailable so the API can still serve traffic.</text>
+</svg>

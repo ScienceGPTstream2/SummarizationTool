@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import parse from "html-react-parser";
 import DOMPurify from "dompurify";
 import {
@@ -11,8 +11,10 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 // import { ScrollArea } from "./ui/scroll-area"; // Removed to fix layout issues
 import { Badge } from "./ui/badge";
-import { Table as TableIcon, ZoomIn, Loader2 } from "lucide-react";
+import { Button } from "./ui/button";
+import { Table as TableIcon, ZoomIn, Loader2, Download } from "lucide-react";
 import { getValidToken } from "../utils/authUtils";
+import { downloadFile } from "./ExportUtils";
 
 // Component to lazy load and display table HTML
 function TablePreview({
@@ -29,8 +31,28 @@ function TablePreview({
   const [tableHtml, setTableHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Fire once when the card scrolls within 200px of the viewport
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
+    if (!shouldLoad) return;
     let mounted = true;
 
     const fetchTable = async () => {
@@ -67,11 +89,11 @@ function TablePreview({
     return () => {
       mounted = false;
     };
-  }, [tableNumber, conversionId]);
+  }, [shouldLoad, tableNumber, conversionId]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-32">
+      <div ref={containerRef} className="flex items-center justify-center h-32">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -79,7 +101,10 @@ function TablePreview({
 
   if (error || !tableHtml) {
     return (
-      <div className="flex items-center justify-center h-32 text-muted-foreground">
+      <div
+        ref={containerRef}
+        className="flex items-center justify-center h-32 text-muted-foreground"
+      >
         <TableIcon className="h-8 w-8" />
       </div>
     );
@@ -90,6 +115,7 @@ function TablePreview({
 
   return (
     <div
+      ref={containerRef}
       className={`relative overflow-hidden border rounded-md ${className}`}
       onClick={onTableClick}
       style={{
@@ -269,6 +295,8 @@ export function TablesGallery({
   tablesCount,
 }: TablesGalleryProps) {
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [isDownloadingSingle, setIsDownloadingSingle] = useState(false);
 
   if (!tablesCount || tablesCount === 0) {
     return null;
@@ -277,14 +305,77 @@ export function TablesGallery({
   // Generate array of table numbers [1, 2, 3, ..., tablesCount]
   const tableNumbers = Array.from({ length: tablesCount }, (_, i) => i + 1);
 
+  const fetchTableHtml = async (
+    tableNumber: number
+  ): Promise<string | null> => {
+    const token = await getValidToken();
+    const url = `/api/documents/${conversionId}/tables/table-${tableNumber}.html`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return null;
+    return response.text();
+  };
+
+  const handleDownloadSingle = async (tableNumber: number) => {
+    setIsDownloadingSingle(true);
+    try {
+      const html = await fetchTableHtml(tableNumber);
+      if (html) downloadFile(html, `table-${tableNumber}.html`, "text/html");
+    } finally {
+      setIsDownloadingSingle(false);
+    }
+  };
+
+  const handleDownloadAll = async () => {
+    setIsDownloadingAll(true);
+    try {
+      const token = await getValidToken();
+      const response = await fetch(
+        `/api/documents/${conversionId}/tables/download`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok)
+        throw new Error(`ZIP download failed: ${response.status}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `tables-${conversionId.slice(0, 8)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error downloading all tables:", err);
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
   return (
     <>
       <Card className="border-gray-200">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TableIcon className="h-5 w-5" />
-            Extracted Tables ({tablesCount})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TableIcon className="h-5 w-5" />
+              Extracted Tables ({tablesCount})
+            </CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadAll}
+              disabled={isDownloadingAll}
+            >
+              {isDownloadingAll ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              Download All Tables
+            </Button>
+          </div>
           <CardDescription>
             Tables detected and extracted from the document in HTML format
           </CardDescription>
@@ -354,17 +445,32 @@ export function TablesGallery({
               </div>
 
               {/* Metadata */}
-              <div className="flex items-center gap-6 text-sm text-muted-foreground border-t pt-3">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Table:</span>
-                  <code className="bg-muted px-2 py-1 rounded">
-                    table-{selectedTable}.html
-                  </code>
+              <div className="flex items-center justify-between border-t pt-3">
+                <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Table:</span>
+                    <code className="bg-muted px-2 py-1 rounded">
+                      table-{selectedTable}.html
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Format:</span>
+                    <span>HTML</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Format:</span>
-                  <span>HTML</span>
-                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownloadSingle(selectedTable)}
+                  disabled={isDownloadingSingle}
+                >
+                  {isDownloadingSingle ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download Table
+                </Button>
               </div>
             </div>
           )}

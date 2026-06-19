@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">Backend data model relationships</title>
+  <desc id="desc">Entity relationship style overview showing Better Auth tables, workflow session tables, evaluation jobs, groups, and template tables in the backend database.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 15px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .section { font: 700 13px Segoe UI, Arial, sans-serif; fill: #334155; letter-spacing: .04em; }
+      .box-title { font: 700 15px Segoe UI, Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 12px Segoe UI, Arial, sans-serif; fill: #374151; }
+      .small { font: 400 11px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .card { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; rx: 12; }
+      .auth { fill: #dbeafe; }
+      .workflow { fill: #dcfce7; }
+      .eval { fill: #fef3c7; }
+      .group { fill: #ede9fe; }
+      .template { fill: #fae8ff; }
+      .support { fill: #e2e8f0; }
+      .line { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.6; fill: none; marker-end: url(#arrow-soft); stroke-dasharray: 5 5; }
+      .cluster { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 18; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <marker id="arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="860" />
+  <text class="title" x="44" y="48">Backend Data Model Relationships</text>
+  <text class="subtitle" x="44" y="74">The database separates login/auth tables from application workflow state, collaboration, template assets, and background job status.</text>
+
+  <rect class="cluster" x="36" y="110" width="258" height="264" />
+  <text class="section" x="58" y="138">BETTER AUTH</text>
+  <rect class="card auth" x="72" y="164" width="185" height="56" />
+  <text class="box-title" x="92" y="186">user</text>
+  <text class="box-text" x="92" y="205">profile and admin flag</text>
+  <rect class="card auth" x="72" y="240" width="185" height="56" />
+  <text class="box-title" x="92" y="262">session</text>
+  <text class="box-text" x="92" y="281">token and expiry</text>
+  <rect class="card auth" x="72" y="316" width="86" height="38" />
+  <text class="box-text" x="93" y="339">account</text>
+  <rect class="card auth" x="172" y="316" width="86" height="38" />
+  <text class="box-text" x="185" y="339">verification</text>
+  <path class="line" d="M164 220 V240" />
+
+  <rect class="cluster" x="330" y="110" width="392" height="340" />
+  <text class="section" x="352" y="138">WORKFLOW SESSION STATE</text>
+  <rect class="card workflow" x="432" y="164" width="190" height="58" />
+  <text class="box-title" x="452" y="187">app_sessions</text>
+  <text class="box-text" x="452" y="206">workflow owner, config, metrics</text>
+  <rect class="card workflow" x="432" y="256" width="190" height="58" />
+  <text class="box-title" x="452" y="279">documents</text>
+  <text class="box-text" x="452" y="298">file hash and parser metadata</text>
+  <rect class="card workflow" x="432" y="348" width="190" height="58" />
+  <text class="box-title" x="452" y="371">extraction_results</text>
+  <text class="box-text" x="452" y="390">entity, model, answer, refs</text>
+  <path class="line" d="M527 222 V256" />
+  <path class="line" d="M527 314 V348" />
+
+  <rect class="cluster" x="758" y="110" width="246" height="340" />
+  <text class="section" x="780" y="138">EVALUATION</text>
+  <rect class="card eval" x="788" y="196" width="185" height="58" />
+  <text class="box-title" x="808" y="219">evaluation_results</text>
+  <text class="box-text" x="808" y="238">metric scores per extraction</text>
+  <rect class="card eval" x="788" y="312" width="185" height="58" />
+  <text class="box-title" x="808" y="335">eval_jobs</text>
+  <text class="box-text" x="808" y="354">background job status</text>
+  <path class="line" d="M622 377 C678 377 720 226 788 226" />
+  <path class="soft" d="M622 193 C700 193 728 342 788 342" />
+
+  <rect class="cluster" x="1038" y="110" width="206" height="340" />
+  <text class="section" x="1060" y="138">COLLABORATION</text>
+  <rect class="card group" x="1062" y="190" width="150" height="54" />
+  <text class="box-title" x="1082" y="213">groups</text>
+  <text class="box-text" x="1082" y="231">team workspace</text>
+  <rect class="card group" x="1062" y="274" width="150" height="54" />
+  <text class="box-title" x="1082" y="297">user_groups</text>
+  <text class="box-text" x="1082" y="315">viewer/member/admin/owner</text>
+  <path class="line" d="M1137 244 V274" />
+  <path class="soft" d="M622 193 C786 120 1010 144 1062 207" />
+  <path class="soft" d="M294 192 C534 58 1000 94 1137 190" />
+
+  <rect class="cluster" x="330" y="486" width="914" height="270" />
+  <text class="section" x="352" y="514">TEMPLATE WORKSPACE</text>
+  <rect class="card template" x="378" y="552" width="180" height="58" />
+  <text class="box-title" x="398" y="575">template_folders</text>
+  <text class="box-text" x="398" y="594">scope and hierarchy</text>
+  <rect class="card template" x="620" y="552" width="180" height="58" />
+  <text class="box-title" x="640" y="575">prompt_templates</text>
+  <text class="box-text" x="640" y="594">entities, prompts, scope</text>
+  <rect class="card template" x="862" y="526" width="180" height="58" />
+  <text class="box-title" x="882" y="549">template_versions</text>
+  <text class="box-text" x="882" y="568">snapshots before update</text>
+  <rect class="card template" x="862" y="626" width="180" height="58" />
+  <text class="box-title" x="882" y="649">template_permissions</text>
+  <text class="box-text" x="882" y="668">per-user overrides</text>
+  <path class="line" d="M558 581 H620" />
+  <path class="line" d="M800 572 H862" />
+  <path class="line" d="M800 590 C822 616 838 645 862 654" />
+  <path class="soft" d="M1137 328 C1137 516 1028 600 1042 654" />
+
+  <rect class="cluster" x="36" y="486" width="258" height="270" />
+  <text class="section" x="58" y="514">USER SUPPORT TABLES</text>
+  <rect class="card support" x="72" y="552" width="185" height="48" />
+  <text class="box-title" x="92" y="575">user_preferences</text>
+  <text class="box-text" x="92" y="592">default model settings</text>
+  <rect class="card support" x="72" y="626" width="185" height="48" />
+  <text class="box-title" x="92" y="649">login_history</text>
+  <text class="box-text" x="92" y="666">audit trail</text>
+  <rect class="card support" x="72" y="700" width="185" height="38" />
+  <text class="box-text" x="92" y="724">legacy user_prompt_templates</text>
+  <path class="soft" d="M164 354 V552" />
+
+  <path class="line" d="M257 192 H432" />
+  <path class="soft" d="M257 192 C304 304 374 365 432 377" />
+  <path class="soft" d="M257 192 C312 500 542 566 620 581" />
+
+  <rect x="44" y="794" width="14" height="14" rx="4" fill="#dbeafe" stroke="#cbd5e1" />
+  <text class="small" x="66" y="805">auth identity</text>
+  <rect x="164" y="794" width="14" height="14" rx="4" fill="#dcfce7" stroke="#cbd5e1" />
+  <text class="small" x="186" y="805">workflow records</text>
+  <rect x="314" y="794" width="14" height="14" rx="4" fill="#fef3c7" stroke="#cbd5e1" />
+  <text class="small" x="336" y="805">evaluation records</text>
+  <rect x="474" y="794" width="14" height="14" rx="4" fill="#ede9fe" stroke="#cbd5e1" />
+  <text class="small" x="496" y="805">group access</text>
+  <rect x="604" y="794" width="14" height="14" rx="4" fill="#fae8ff" stroke="#cbd5e1" />
+  <text class="small" x="626" y="805">template assets</text>
+</svg>

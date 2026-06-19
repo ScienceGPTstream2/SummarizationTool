@@ -13,6 +13,7 @@ Requires AZURE_STORAGE_CONNECTION_STRING to be set.
 path, and as a read cache to avoid redundant blob downloads within one container lifetime.
 """
 
+import asyncio
 import json
 import os
 import hashlib
@@ -187,14 +188,14 @@ class OrganizedFileService:
             / proc_str
             / Path(norm_path)
         )
-        if tmp_file.exists():
-            return tmp_file.read_bytes()
+        if await asyncio.to_thread(tmp_file.exists):
+            return await asyncio.to_thread(tmp_file.read_bytes)
 
         blob_path = f"global/{file_hash}/processed/{proc_str}/{norm_path}"
         data = await self._blob.download_bytes(blob_path)
         if data:
-            tmp_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp_file.write_bytes(data)
+            await asyncio.to_thread(tmp_file.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(tmp_file.write_bytes, data)
         return data
 
     async def processing_file_exists(
