@@ -1792,6 +1792,8 @@ export function EntityExtractionPage({
       modelType = "gemini";
     } else if (provider.includes("anthropic")) {
       modelType = "anthropic";
+    } else if (provider.includes("cohere")) {
+      modelType = "cohere";
     } else if (provider.includes("azure")) {
       modelType = "azure";
     } else if (provider.includes("meta") || provider.includes("llama")) {
@@ -1871,7 +1873,7 @@ export function EntityExtractionPage({
         return { modelId, result: null };
       }
 
-      // Map provider to backend model_type ("azure", "gemini", "anthropic", "llama")
+      // Map provider to backend model_type ("azure", "gemini", "anthropic", "cohere", "llama")
       let modelType = "azure";
       const provider = modelObj.provider?.toLowerCase() || "";
 
@@ -1879,6 +1881,8 @@ export function EntityExtractionPage({
         modelType = "gemini";
       } else if (provider.includes("anthropic")) {
         modelType = "anthropic";
+      } else if (provider.includes("cohere")) {
+        modelType = "cohere";
       } else if (provider.includes("azure")) {
         modelType = "azure";
       } else if (provider.includes("meta") || provider.includes("llama")) {
@@ -2380,6 +2384,7 @@ export function EntityExtractionPage({
     const p = providerStr.toLowerCase();
     if (p.includes("google") || p.includes("gemini")) return "gemini";
     if (p.includes("anthropic")) return "anthropic";
+    if (p.includes("cohere")) return "cohere";
     if (p.includes("meta") || p.includes("llama"))
       return modelId?.startsWith("azure-") ? "azure-llama" : "llama";
     if (p.includes("macbook")) return "macbook";
