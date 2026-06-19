@@ -419,6 +419,7 @@ class LLMService:
                 model_id,
                 max_tokens,
                 temperature,
+                system_message=system_message,
             )
             self._record_session_metrics(session_id, "gcp", result)
             return result

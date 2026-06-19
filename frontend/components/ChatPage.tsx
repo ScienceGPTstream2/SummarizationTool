@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -8,6 +8,8 @@ import {
   FileText,
   Loader2,
   AlertCircle,
+  History,
+  Trash2,
   ThumbsUp,
   ThumbsDown,
   Copy,
@@ -18,6 +20,23 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "./ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -31,6 +50,12 @@ import {
   ModelConfig,
 } from "../utils/modelSelection";
 import { getValidToken } from "../utils/authUtils";
+import {
+  createChatSessionId,
+  getOrCreateChatSessionId,
+  resetChatSessionId,
+  setChatSessionId as persistChatSessionId,
+} from "../utils/chatSession";
 import { toast } from "./ui/sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,7 +66,24 @@ interface Message {
   content: string;
 }
 
+interface ChatHistorySummary {
+  chat_session_id: string;
+  title: string;
+  message_count: number;
+  latest_message: string;
+}
+
+interface ChatHistoryDetail {
+  chat_session_id: string;
+  messages: Message[];
+  conversation_summary?: string;
+  summarized_message_count?: number;
+  context_usage?: ContextUsage | null;
+}
+
 const MAX_DOCS = 5;
+const REGENERATE_DISABLED_WITH_MEMORY_TITLE =
+  "Regenerate is unavailable for chat memory sessions until turn replacement is supported.";
 
 type DocEntry =
   | { status: "loading"; file: File; tempId: string }
@@ -61,6 +103,27 @@ interface ChatPageProps {
   onSignOut?: () => void;
 }
 
+interface MarkdownCodeProps {
+  inline?: boolean;
+  children?: ReactNode;
+}
+
+interface ChatModelConfig extends ModelConfig {
+  model_type?: string;
+}
+
+interface ContextUsage {
+  estimated_tokens: number;
+  max_context_tokens: number;
+  percentage: number | null;
+  omitted_history_message_count: number;
+  summary_tokens?: number;
+  document_context_tokens: number;
+  reserved_response_tokens?: number;
+  hard_limit_percentage?: number;
+  method: string;
+}
+
 // ─── Small sub-components ─────────────────────────────────────────────────────
 
 function AvatarAI() {
@@ -78,6 +141,8 @@ interface MessageRowProps {
   rating: "up" | "down" | null;
   onRate: (id: string, rating: "up" | "down") => void;
   onCopy: (content: string) => void;
+  canRegenerate: boolean;
+  regenerateTitle: string;
   onRegenerate: (id: string) => void;
   isRegenerating: boolean;
 }
@@ -87,6 +152,8 @@ function MessageRow({
   rating,
   onRate,
   onCopy,
+  canRegenerate,
+  regenerateTitle,
   onRegenerate,
   isRegenerating,
 }: MessageRowProps) {
@@ -158,7 +225,7 @@ function MessageRow({
               li: ({ children }) => (
                 <li className="leading-relaxed">{children}</li>
               ),
-              code: ({ inline, children }: any) =>
+              code: ({ inline, children }: MarkdownCodeProps) =>
                 inline ? (
                   <code className="bg-muted text-foreground font-mono text-[0.8em] px-1.5 py-0.5 rounded">
                     {children}
@@ -240,9 +307,9 @@ function MessageRow({
               />
             </ActionBtn>
             <ActionBtn
-              title="Regenerate"
+              title={regenerateTitle}
               onClick={() => onRegenerate(message.id)}
-              disabled={isRegenerating}
+              disabled={!canRegenerate || isRegenerating}
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${isRegenerating ? "animate-spin" : ""}`}
@@ -305,6 +372,9 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [ratings, setRatings] = useState<Record<string, "up" | "down">>({});
+  const [chatSessionId, setChatSessionId] = useState(() =>
+    getOrCreateChatSessionId()
+  );
 
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string>("");
@@ -312,6 +382,12 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
   const [docs, setDocs] = useState<Map<string, DocEntry>>(new Map());
   const [contextError, setContextError] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatHistorySummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyDeleteTarget, setHistoryDeleteTarget] =
+    useState<ChatHistorySummary | null>(null);
 
   const removeDoc = useCallback((tempId: string) => {
     setDocs((prev) => {
@@ -332,6 +408,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeRequestSessionIdRef = useRef<string | null>(null);
 
   // ── Models ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -350,9 +427,35 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  const fetchChatHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch("/api/chat/history", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Failed to load chat history");
+      const data = await response.json();
+      setChatHistory(data.chats ?? []);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to load chat history";
+      toast.error(msg);
+      setChatHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (historyOpen) {
+      fetchChatHistory();
+    }
+  }, [fetchChatHistory, historyOpen]);
   // ── Document processing ─────────────────────────────────────────────────────
   const processFile = useCallback(async (file: File) => {
-    const tempId = crypto.randomUUID();
+    const tempId = createChatSessionId();
 
     setDocs((prev) => {
       const active = Array.from(prev.values()).filter(
@@ -437,6 +540,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       if (fileInputRef.current) fileInputRef.current.value = "";
+
       const available =
         MAX_DOCS -
         Array.from(docs.values()).filter((d) => d.status !== "error").length;
@@ -473,6 +577,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
       e.preventDefault();
       dragCounter.current = 0;
       setIsDragOver(false);
+
       const files = Array.from(e.dataTransfer.files);
       const available =
         MAX_DOCS -
@@ -497,9 +602,9 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     if (!model) return null;
     const isGemini = model.provider === "Google Gemini";
     const isAnthropic = model.provider === "Anthropic";
+    const chatModel = model as ChatModelConfig;
     const isLlama =
-      model.provider === "Meta Llama" ||
-      (model as any).model_type === "azure-llama";
+      model.provider === "Meta Llama" || chatModel.model_type === "azure-llama";
     return {
       modelType: isGemini
         ? "gemini"
@@ -533,6 +638,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         return;
       }
 
+      const requestChatSessionId = chatSessionId;
+      activeRequestSessionIdRef.current = requestChatSessionId;
       setContextError(false);
       setIsLoading(true);
 
@@ -561,6 +668,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
+            chat_session_id: requestChatSessionId,
             query,
             document_markdown: documentMarkdown,
             model_type: modelConfig.modelType,
@@ -571,18 +679,40 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
         });
 
         const data = await res.json();
-        if (!res.ok || !data.success)
-          throw new Error(data.error || "Request failed");
+
+        if (activeRequestSessionIdRef.current !== requestChatSessionId) {
+          return;
+        }
+
+        if (data.context_usage) {
+          setContextUsage(data.context_usage);
+        }
+
+        if (!res.ok || !data.success) {
+          const msg = data.error || "Request failed";
+          if (
+            data.error_code === "context_window_exceeded" ||
+            isContextWindowError(msg)
+          ) {
+            setContextError(true);
+            return;
+          }
+          throw new Error(msg);
+        }
 
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: createChatSessionId(),
             role: "assistant",
             content: data.response,
           },
         ]);
       } catch (err: unknown) {
+        if (activeRequestSessionIdRef.current !== requestChatSessionId) {
+          return;
+        }
+
         const msg = err instanceof Error ? err.message : "Something went wrong";
         if (isContextWindowError(msg)) {
           setContextError(true);
@@ -590,17 +720,20 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           setMessages((prev) => [
             ...prev,
             {
-              id: crypto.randomUUID(),
+              id: createChatSessionId(),
               role: "assistant",
               content: `Error: ${msg}`,
             },
           ]);
         }
       } finally {
-        setIsLoading(false);
+        if (activeRequestSessionIdRef.current === requestChatSessionId) {
+          activeRequestSessionIdRef.current = null;
+          setIsLoading(false);
+        }
       }
     },
-    [docs, getModelConfig]
+    [chatSessionId, docs, getModelConfig]
   );
 
   const handleSend = useCallback(async () => {
@@ -608,7 +741,7 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     if (!trimmed || isLoading) return;
     setMessages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), role: "user", content: trimmed },
+      { id: createChatSessionId(), role: "user", content: trimmed },
     ]);
     setInput("");
     // Reset textarea height
@@ -618,20 +751,83 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
     await sendQuery(trimmed);
   }, [input, isLoading, sendQuery]);
 
-  const handleRegenerate = useCallback(
-    async (assistantMsgId: string) => {
-      // Find the user message that preceded this assistant message
-      const idx = messages.findIndex((m) => m.id === assistantMsgId);
-      if (idx < 1) return;
-      const preceding = messages[idx - 1];
-      if (preceding.role !== "user") return;
+  const handleRegenerate = useCallback(async (_assistantMsgId: string) => {
+    toast.info(REGENERATE_DISABLED_WITH_MEMORY_TITLE);
+  }, []);
 
-      // Remove the assistant message and resend
-      setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
-      await sendQuery(preceding.content);
-    },
-    [messages, sendQuery]
-  );
+  const handleNewChat = useCallback(() => {
+    const nextSessionId = resetChatSessionId();
+    activeRequestSessionIdRef.current = nextSessionId;
+    setIsLoading(false);
+    setChatSessionId(nextSessionId);
+    setMessages([]);
+    setRatings({});
+    setContextError(false);
+    setContextUsage(null);
+    setDocs(new Map());
+  }, []);
+
+  const handleOpenHistory = useCallback(() => {
+    setHistoryOpen(true);
+  }, []);
+
+  const handleRestoreChat = useCallback(async (history: ChatHistorySummary) => {
+    try {
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(
+        `/api/chat/history/${encodeURIComponent(history.chat_session_id)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) throw new Error("Failed to restore chat");
+      const data: ChatHistoryDetail = await response.json();
+      activeRequestSessionIdRef.current = null;
+      persistChatSessionId(data.chat_session_id);
+      setChatSessionId(data.chat_session_id);
+      setMessages(data.messages ?? []);
+      setRatings({});
+      setContextError(false);
+      setContextUsage(data.context_usage ?? null);
+      setDocs(new Map());
+      setHistoryOpen(false);
+      toast.success("Chat restored");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to restore chat";
+      toast.error(msg);
+    }
+  }, []);
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!historyDeleteTarget) return;
+    try {
+      const token = await getValidToken();
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(
+        `/api/chat/history/${encodeURIComponent(historyDeleteTarget.chat_session_id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) throw new Error("Failed to delete chat");
+      setChatHistory((prev) =>
+        prev.filter(
+          (chat) => chat.chat_session_id !== historyDeleteTarget.chat_session_id
+        )
+      );
+      if (historyDeleteTarget.chat_session_id === chatSessionId) {
+        handleNewChat();
+      }
+      toast.success("Chat history deleted");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete chat";
+      toast.error(msg);
+    } finally {
+      setHistoryDeleteTarget(null);
+    }
+  }, [chatSessionId, handleNewChat, historyDeleteTarget]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -655,6 +851,48 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
   }, []);
 
   const canSend = !!input.trim() && !isLoading && !!selectedModelId;
+  const contextPercentage =
+    typeof contextUsage?.percentage === "number"
+      ? contextUsage.percentage
+      : null;
+  const hasEstimatedContextTokens = (contextUsage?.estimated_tokens ?? 0) > 0;
+  const contextPercentageLabel =
+    contextPercentage === null
+      ? "estimated"
+      : hasEstimatedContextTokens && contextPercentage < 0.1
+        ? "<0.1%"
+        : `${contextPercentage.toFixed(contextPercentage < 10 ? 1 : 0)}%`;
+  const contextTokenLabel =
+    contextUsage && contextUsage.max_context_tokens
+      ? `${contextUsage.estimated_tokens.toLocaleString()} / ${contextUsage.max_context_tokens.toLocaleString()} tokens`
+      : null;
+  const contextVisibleTokenLabel = contextUsage
+    ? `${contextUsage.estimated_tokens.toLocaleString()} tokens`
+    : null;
+  const contextLevel =
+    contextPercentage === null
+      ? "normal"
+      : contextPercentage >= 90
+        ? "critical"
+        : contextPercentage >= 75
+          ? "warning"
+          : "normal";
+  const contextCircleValue = Math.min(
+    Math.max(
+      contextPercentage === null
+        ? 0
+        : hasEstimatedContextTokens
+          ? Math.max(contextPercentage, 0.1)
+          : contextPercentage,
+      0
+    ),
+    100
+  );
+  const contextCircleRadius = 9;
+  const contextCircleCircumference = 2 * Math.PI * contextCircleRadius;
+  const contextCircleOffset =
+    contextCircleCircumference *
+    (1 - (contextPercentage === null ? 0 : contextCircleValue / 100));
 
   return (
     <div
@@ -710,6 +948,28 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
 
         {/* Right: actions */}
         <div className="ml-auto flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-muted-foreground"
+            onClick={handleOpenHistory}
+            disabled={isLoading}
+            title="Chat history"
+          >
+            <History className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground"
+            onClick={handleNewChat}
+            disabled={isLoading}
+            title={
+              isLoading ? "Wait for the current response to finish." : undefined
+            }
+          >
+            New Chat
+          </Button>
           {onSwitchToWorkflow && (
             <Button
               variant="ghost"
@@ -732,6 +992,92 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           )}
         </div>
       </header>
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent
+          side="left"
+          className="w-[360px] sm:max-w-[360px] gap-0 p-0"
+        >
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle className="text-sm">Chat History</SheetTitle>
+            <SheetDescription>
+              Restore or delete previous chat conversations.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-2">
+            {historyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading
+              </div>
+            ) : chatHistory.length === 0 ? (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                No saved chats
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {chatHistory.map((chat) => (
+                  <div
+                    key={chat.chat_session_id}
+                    className={`group flex items-start gap-2 rounded-md px-2 py-2 ${
+                      chat.chat_session_id === chatSessionId
+                        ? "bg-muted"
+                        : "hover:bg-muted/60"
+                    }`}
+                  >
+                    <button
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => handleRestoreChat(chat)}
+                    >
+                      <div className="truncate text-xs font-medium">
+                        {chat.title}
+                      </div>
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                        {chat.latest_message ||
+                          `${chat.message_count} messages`}
+                      </div>
+                    </button>
+                    <button
+                      className="mt-0.5 rounded p-1 text-muted-foreground opacity-70 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      title="Delete chat"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setHistoryDeleteTarget(chat);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog
+        open={historyDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setHistoryDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Chat History</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the selected chat history from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteChat}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Message list ────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
@@ -759,6 +1105,8 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
                 rating={ratings[msg.id] ?? null}
                 onRate={handleRate}
                 onCopy={handleCopy}
+                canRegenerate={false}
+                regenerateTitle={REGENERATE_DISABLED_WITH_MEMORY_TITLE}
                 onRegenerate={handleRegenerate}
                 isRegenerating={isLoading}
               />
@@ -938,10 +1286,64 @@ export function ChatPage({ onSwitchToWorkflow, onSignOut }: ChatPageProps) {
           </div>
 
           {/* Disclaimer */}
-          <p className="text-center text-[11px] text-muted-foreground/60 leading-relaxed">
-            Science-GPT can make mistakes. Check important information
-            carefully.
-          </p>
+          <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground/60 leading-relaxed">
+            <span className="text-center">
+              Science-GPT can make mistakes. Check important information
+              carefully.
+            </span>
+            {contextUsage && (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`Estimated context usage: ${contextPercentageLabel}${
+                  contextTokenLabel ? ` (${contextTokenLabel})` : ""
+                }. ${
+                  contextUsage.omitted_history_message_count > 0
+                    ? "Older chat turns are represented by a rolling summary."
+                    : ""
+                }`}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5 shrink-0 -rotate-90"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r={contextCircleRadius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    className="text-muted"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r={contextCircleRadius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray={contextCircleCircumference}
+                    strokeDashoffset={contextCircleOffset}
+                    className={
+                      contextLevel === "critical"
+                        ? "text-destructive"
+                        : contextLevel === "warning"
+                          ? "text-yellow-500"
+                          : "text-muted-foreground"
+                    }
+                  />
+                </svg>
+                <span>
+                  Context {contextPercentageLabel}
+                  {contextVisibleTokenLabel
+                    ? ` · ${contextVisibleTokenLabel}`
+                    : ""}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

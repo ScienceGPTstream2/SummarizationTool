@@ -394,6 +394,7 @@ Prompt:
         model_id: Optional[str] = None,
         max_tokens: int = 2048,
         temperature: float = 0.0,
+        system_message: Optional[str] = None,
         project_id_override: Optional[str] = None,
         location_override: Optional[str] = None,
         service_account_path_override: Optional[Path] = None,
@@ -402,7 +403,9 @@ Prompt:
         used_model_id = model_id or "claude-sonnet-4-5@20250929"
 
         # System message for paragraph generation
-        system = "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        system = system_message or (
+            "You are a scientific writing assistant. Your task is to synthesize extracted information into a cohesive, well-structured paragraph while maintaining complete accuracy. Follow the instructions exactly and preserve all factual details from the provided entities."
+        )
 
         messages = [{"role": "user", "content": user_prompt}]
 

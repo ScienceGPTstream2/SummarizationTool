@@ -26,6 +26,7 @@ It supports:
 - **Improved authentication** through Better Auth with GitHub OAuth and Microsoft Entra support
 - **In-app evaluation workflows** powered by **DeepEval**, including custom evaluation steps and LLM-as-a-judge patterns
 - **Batch and interactive workflows** for extraction, review, and evaluation
+- **Short-term chatbot memory** for follow-up questions within an independent chat conversation
 - **Production-oriented deployment paths** for Azure infrastructure and other containerized environments
 
 ---
@@ -256,6 +257,7 @@ SummarizationTool-dev/
 - [Frontend technical design docs](docs/frontend/README.md) — frontend architecture, page-by-page docs, component index, hooks, and TypeScript interfaces
 - [Glossary](docs/glossary.md) — definitions for all Azure services, tools, and project-specific terms
 - [Backend README](backend/README.md) — backend setup and processing details
+- [Chat memory](docs/chat-memory.md) - chatbot memory behavior, API contract, and operational notes
 - [Backend technical design docs](docs/backend/README.md) — backend architecture, workflows, diagrams, data models, schemas, and appendices
 - [Backend class reference](docs/backend/appendices/class-reference.md) — field-level reference for backend ORM models, schemas, dataclasses, service attributes, and provider classes
 - [Migration guide](docs/superpowers/migration-guide.md) — architecture migration and platform transition notes
