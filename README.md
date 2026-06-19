@@ -33,6 +33,14 @@ It supports:
 
 ## 🏗 Architecture overview
 
+### Global system architecture
+
+![Global system architecture](docs/images/summarization-tool-global-architecture.png)
+
+*Architecture overview. The platform connects document ingestion, the React user interface, FastAPI orchestration, parser outputs, LLM workflows, evaluation, collaboration, persistence, authentication, and observability.*
+
+Detailed backend diagrams: [Backend visual workflow map](docs/backend/README.md).
+
 The application is organized around a small set of core services:
 
 | Service | Port | Purpose |
@@ -245,10 +253,15 @@ SummarizationTool-dev/
 
 ## 📚 Additional documentation
 
+- [Documentation index](docs/INDEX.md) — **start here** — full navigation map for all backend, frontend, and deployment docs
+- [Frontend technical design docs](docs/frontend/README.md) — frontend architecture, page-by-page docs, component index, hooks, and TypeScript interfaces
+- [Glossary](docs/glossary.md) — definitions for all Azure services, tools, and project-specific terms
 - [Backend README](backend/README.md) — backend setup and processing details
 - [Chat memory](docs/chat-memory.md) - chatbot memory behavior, API contract, and operational notes
-- [Migration guide](docs/migration-guide.md) — architecture migration and platform transition notes
-- [GitHub auth setup](docs/setup-github-auth.md) — Better Auth GitHub OAuth configuration
+- [Backend technical design docs](docs/backend/README.md) — backend architecture, workflows, diagrams, data models, schemas, and appendices
+- [Backend class reference](docs/backend/appendices/class-reference.md) — field-level reference for backend ORM models, schemas, dataclasses, service attributes, and provider classes
+- [Migration guide](docs/superpowers/migration-guide.md) — architecture migration and platform transition notes
+- [GitHub auth setup](docs/superpowers/setup-github-auth.md) — Better Auth GitHub OAuth configuration
 - [Dockerize & deploy to Azure](docs/superpowers/plans/dockerize-and-deploy.md) — deployment architecture and implementation notes
 
 ---

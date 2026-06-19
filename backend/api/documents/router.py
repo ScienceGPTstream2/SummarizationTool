@@ -1351,6 +1351,81 @@ async def extract_figure_content(
     return await generate_figure_summary(document_id, figure_id, request, http_request)
 
 
+@router.get("/{document_id}/tables/download", dependencies=[Depends(get_current_user)])
+async def download_all_tables_zip(document_id: str):
+    """
+    Download all extracted tables as a single ZIP archive.
+
+    Resolves the processor once, fetches all table HTML files concurrently via
+    asyncio.gather(), packages them into an in-memory ZIP, and returns it as
+    application/zip.
+
+    IMPORTANT: must be registered before /{document_id}/tables/{table_filename}
+    so FastAPI does not route the literal segment "download" to get_table_html.
+    """
+    import asyncio
+    import io
+    import zipfile
+    from fastapi.responses import Response as _Response
+
+    try:
+        resolved_processor = await file_service.resolve_processed_processor(document_id)
+        if not resolved_processor:
+            raise HTTPException(status_code=404, detail="Processed document not found")
+
+        metadata = await file_service.get_processed_metadata(
+            document_id, resolved_processor
+        )
+        tables_count = (metadata or {}).get("tables_found", 0)
+
+        if not tables_count:
+            blobs = await file_service._blob.list_blobs_with_prefix(
+                f"global/{document_id}/processed/{resolved_processor}/tables/",
+                limit=500,
+            )
+            tables_count = len([b for b in blobs if b.lower().endswith(".html")])
+
+        if not tables_count:
+            raise HTTPException(
+                status_code=404, detail="No tables found for this document"
+            )
+
+        print(f"[TABLE-ZIP] Building ZIP for {document_id}: {tables_count} tables")
+
+        async def fetch_one(i: int):
+            return i, await file_service.get_processing_file_bytes(
+                document_id, resolved_processor, f"tables/table-{i}.html"
+            )
+
+        results = await asyncio.gather(
+            *[fetch_one(i) for i in range(1, tables_count + 1)]
+        )
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for i, data in results:
+                if data:
+                    zf.writestr(f"table-{i}.html", data)
+        buf.seek(0)
+
+        print(f"[TABLE-ZIP] ✅ ZIP ready for {document_id}")
+        return _Response(
+            content=buf.read(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="tables-{document_id[:8]}.zip"'
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[TABLE-ZIP] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error creating tables ZIP: {str(e)}"
+        )
+
+
 @router.get(
     "/{document_id}/tables/{table_filename}", dependencies=[Depends(get_current_user)]
 )
