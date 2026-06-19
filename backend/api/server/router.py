@@ -577,6 +577,21 @@ async def get_available_models():
         except Exception as e:
             print(f"[VLLM] Failed to fetch models: {e}")
 
+    if os.getenv("COHERE_AZURE_ENDPOINT") and os.getenv("COHERE_AZURE_KEY"):
+        models.append(
+            {
+                "id": os.getenv("COHERE_MODEL_NAME", "cohere-command-a"),
+                "name": os.getenv("COHERE_DISPLAY_NAME", "Cohere Command A"),
+                "provider": "Cohere",
+                "model_type": "cohere",
+                "description": "Azure AI Foundry",
+                "supports_temperature": True,
+                "default_temperature": 0.5,
+                "vision_capable": False,
+            }
+        )
+        print("✅ Cohere Command A added to model list")
+
     return JSONResponse(status_code=200, content=models)
 
 

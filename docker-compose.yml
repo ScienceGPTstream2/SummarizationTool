@@ -18,7 +18,7 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     # Blob-only mode; --loose relaxes strict account validation for dev
-    command: azurite-blob --blobHost 0.0.0.0 --loose
+    command: azurite-blob --blobHost 0.0.0.0 --loose --skipApiVersionCheck
     ports:
       - "10000:10000"
     volumes:
@@ -54,8 +54,22 @@ services:
       WORKERS: "1"
       # Azurite local dev account — this is a publicly documented development key, not a real secret.
       # See: https://learn.microsoft.com/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key
-      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=<AZURITE_DEV_KEY>;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=<AZURITE_WELL_KNOWN_DEV_KEY>;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       AZURE_STORAGE_CONTAINER_NAME: summarization-uploads
+      # Azure OpenAI — sourced from .env
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_MODEL_NAME: ${AZURE_OPENAI_MODEL_NAME:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-04-01-preview}
+      # Cohere — sourced from .env
+      COHERE_AZURE_ENDPOINT: ${COHERE_AZURE_ENDPOINT:-}
+      COHERE_AZURE_KEY: ${COHERE_AZURE_KEY:-}
+      COHERE_AZURE_API_VERSION: ${COHERE_AZURE_API_VERSION:-2024-05-01-preview}
+      COHERE_MODEL_NAME: ${COHERE_MODEL_NAME:-cohere-command-a}
+      # Azure Document Intelligence — sourced from .env
+      AZURE_DOC_INTELLIGENCE_ENDPOINT: ${AZURE_DOC_INTELLIGENCE_ENDPOINT:-}
+      AZURE_DOC_INTELLIGENCE_KEY: ${AZURE_DOC_INTELLIGENCE_KEY:-}
     ports:
       - "8001:8001"
     depends_on:

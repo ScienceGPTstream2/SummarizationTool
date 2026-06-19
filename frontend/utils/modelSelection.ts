@@ -79,6 +79,11 @@ const MODEL_PRIORITY: Array<{
     match: (m) => m.id?.includes("llama-4-maverick"),
     modelType: "llama",
   },
+  // Tier 6 — Cohere
+  {
+    match: (m) => m.provider === "Cohere",
+    modelType: "cohere",
+  },
   // Catch-all
   {
     match: (m) => m.provider === "Google Gemini",
@@ -157,13 +162,16 @@ export function modelConfigToSelection(
   const isLlama =
     model.provider === "Meta Llama" ||
     (model as any).model_type === "azure-llama";
+  const isCohere = model.provider === "Cohere";
   const modelType = isGemini
     ? "gemini"
     : isAnthropic
       ? "anthropic"
       : isLlama
         ? "azure-llama"
-        : "azure";
+        : isCohere
+          ? "cohere"
+          : "azure";
   return {
     model,
     modelType,

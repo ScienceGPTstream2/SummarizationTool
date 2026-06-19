@@ -39,6 +39,7 @@ _EXTRACTION_PROVIDER_MAP = {
     "azure-llama": "azure",
     "macbook": "macbook",
     "vllm": "vllm",
+    "cohere": "cohere",
 }
 
 # Timeout logging setup
